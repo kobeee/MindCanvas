@@ -27,26 +27,29 @@ struct AssetLibraryView: View {
     private var headerSection: some View {
         HStack {
             Text("资源库")
-                .font(.headline)
+                .font(Theme.Fonts.headline)
+                .foregroundStyle(Theme.Colors.primaryText)
             
             Spacer()
             
             Menu {
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Label("从相册导入", systemImage: "photo.on.rectangle")
+                    Label("从相册导入", systemImage: Theme.Icons.photo)
                 }
                 
                 Button {
                     print("拍照功能")
                 } label: {
-                    Label("拍照", systemImage: "camera")
+                    Label("拍照", systemImage: Theme.Icons.camera)
                 }
             } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title2)
+                Image(systemName: Theme.Icons.add)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.brandBlue)
             }
         }
-        .padding()
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Colors.cardBackground)
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
             
@@ -61,7 +64,7 @@ struct AssetLibraryView: View {
     
     private var assetListSection: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: Theme.Spacing.lg) {
                 ForEach(viewModel.assets) { asset in
                     AssetCard(
                         asset: asset,
@@ -86,13 +89,14 @@ struct AssetLibraryView: View {
                     )
                 }
             }
-            .padding()
+            .padding(Theme.Spacing.lg)
         }
+        .background(Theme.Colors.appBackground)
     }
     
     private var publishSheet: some View {
         NavigationStack {
-            VStack(spacing: 20) {
+            VStack(spacing: Theme.Spacing.xl) {
                 if let asset = assetToPublish {
                     AsyncImage(url: URL(string: asset.url)) { image in
                         image
@@ -102,11 +106,13 @@ struct AssetLibraryView: View {
                         ProgressView()
                     }
                     .frame(height: 200)
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Shapes.cardCornerRadius)
                 }
                 
                 TextField("添加标题", text: $publishTitle)
-                    .textFieldStyle(.roundedBorder)
+                    .padding(Theme.Spacing.lg)
+                    .background(Theme.Colors.appBackground)
+                    .cornerRadius(Theme.Shapes.buttonCornerRadius)
                 
                 Button("发布到 MindStream") {
                     if let asset = assetToPublish {
@@ -116,12 +122,13 @@ struct AssetLibraryView: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .primaryButtonStyle()
                 .disabled(publishTitle.isEmpty)
+                .opacity(publishTitle.isEmpty ? 0.5 : 1.0)
                 
                 Spacer()
             }
-            .padding()
+            .padding(Theme.Spacing.xxl)
             .navigationTitle("发布作品")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -148,22 +155,27 @@ struct AssetCard: View {
     @State private var showingMenu = false
     
     var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 0) {
+        VStack(spacing: Theme.Spacing.sm) {
+            Button(action: onTap) {
                 imageSection
-                
-                if showingMenu {
-                    menuSection
-                }
+            }
+            .buttonStyle(.plain)
+            .scaleEffect(isSelected ? 0.95 : 1.0)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                    .stroke(isSelected ? Theme.Colors.brandBlue : Color.clear, lineWidth: 3)
+            )
+            .animation(.spring(response: 0.3), value: isSelected)
+            
+            if isSelected {
+                floatingToolbar
+                    .transition(.scale.combined(with: .opacity))
             }
         }
-        .buttonStyle(.plain)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
-        )
         .onChange(of: isSelected) { _, newValue in
-            showingMenu = newValue
+            withAnimation(.spring(response: 0.3)) {
+                showingMenu = newValue
+            }
         }
     }
     
@@ -171,22 +183,35 @@ struct AssetCard: View {
         ZStack {
             if asset.isLoading {
                 Rectangle()
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(Theme.Colors.secondaryText.opacity(0.1))
                     .aspectRatio(4/3, contentMode: .fit)
                     .overlay {
                         ProgressView()
                     }
             } else {
-                AsyncImage(url: URL(string: asset.url)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay {
-                            ProgressView()
-                        }
+                AsyncImage(url: URL(string: asset.url)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure:
+                        Rectangle()
+                            .fill(Theme.Colors.secondaryText.opacity(0.1))
+                            .overlay {
+                                Image(systemName: Theme.Icons.photo)
+                                    .font(.largeTitle)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                    case .empty:
+                        Rectangle()
+                            .fill(Theme.Colors.secondaryText.opacity(0.1))
+                            .overlay {
+                                ProgressView()
+                            }
+                    @unknown default:
+                        EmptyView()
+                    }
                 }
                 .aspectRatio(4/3, contentMode: .fit)
                 .clipped()
@@ -197,45 +222,69 @@ struct AssetCard: View {
                     HStack {
                         Spacer()
                         Image(systemName: "wand.and.stars")
-                            .font(.caption)
-                            .padding(6)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.brandBlue)
+                            .padding(Theme.Spacing.sm)
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
-                            .padding(8)
+                            .padding(Theme.Spacing.sm)
                     }
                     Spacer()
                 }
             }
         }
-        .cornerRadius(12)
+        .cornerRadius(Theme.Shapes.buttonCornerRadius)
     }
     
-    private var menuSection: some View {
-        HStack(spacing: 12) {
-            menuButton(icon: "plus.circle.fill", label: "添加", action: onAddToCanvas)
+    private var floatingToolbar: some View {
+        HStack(spacing: Theme.Spacing.xl) {
+            toolbarButton(
+                icon: Theme.Icons.add,
+                color: Theme.Colors.brandBlue,
+                action: onAddToCanvas
+            )
             
             if asset.type == .generated {
-                menuButton(icon: "arrow.down.circle.fill", label: "下载", action: onDownload)
-                menuButton(icon: "globe", label: "发布", action: onPublish)
+                toolbarButton(
+                    icon: Theme.Icons.download,
+                    color: Theme.Colors.brandBlue,
+                    action: onDownload
+                )
+                
+                toolbarButton(
+                    icon: Theme.Icons.publish,
+                    color: Theme.Colors.brandBlue,
+                    action: onPublish
+                )
             }
             
-            menuButton(icon: "trash.fill", label: "删除", color: .red, action: onDelete)
+            toolbarButton(
+                icon: Theme.Icons.delete,
+                color: Theme.Colors.destructive,
+                action: onDelete
+            )
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
     
-    private func menuButton(icon: String, label: String, color: Color = .blue, action: @escaping () -> Void) -> some View {
+    private func toolbarButton(
+        icon: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(label)
-                    .font(.caption2)
-            }
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity)
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 32, height: 32)
         }
         .buttonStyle(.plain)
+        .contentShape(Circle())
+        .hoverEffect(.lift)
     }
 }
 

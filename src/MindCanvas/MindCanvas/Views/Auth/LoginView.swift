@@ -9,7 +9,9 @@ struct LoginView: View {
     @State private var countdown = 0
     
     var body: some View {
-        VStack(spacing: 40) {
+        VStack(spacing: Theme.Spacing.xxxl) {
+            Spacer()
+            
             logoSection
             
             if authManager.isLoading {
@@ -21,28 +23,31 @@ struct LoginView: View {
             if let errorMessage = authManager.errorMessage {
                 errorSection(errorMessage)
             }
+            
+            Spacer()
         }
-        .padding(60)
-        .frame(maxWidth: 600)
+        .padding(.horizontal, 60)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.Colors.appBackground)
     }
     
     private var logoSection: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "paintbrush.pointed.fill")
+        VStack(spacing: Theme.Spacing.lg) {
+            Image(systemName: Theme.Icons.creationsFill)
                 .font(.system(size: 80))
-                .foregroundStyle(.blue.gradient)
+                .foregroundStyle(Theme.Colors.goldGradient)
             
             Text("MindCanvas")
-                .font(.system(size: 48, weight: .bold))
+                .font(Theme.Fonts.largeTitle)
             
             Text("用 AI 绘制你的创意")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+                .font(Theme.Fonts.title3)
+                .foregroundStyle(Theme.Colors.secondaryText)
         }
     }
     
     private var loginOptionsSection: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: Theme.Spacing.md) {
             SignInWithAppleButton(.signIn) { request in
                 request.requestedScopes = [.email, .fullName]
             } onCompletion: { result in
@@ -55,101 +60,173 @@ struct LoginView: View {
                     print("Apple登录失败: \(error.localizedDescription)")
                 }
             }
-            .frame(height: 50)
-            .cornerRadius(8)
+            .frame(height: Theme.Sizes.buttonHeight)
+            .cornerRadius(Theme.Shapes.buttonCornerRadius)
             
-            socialLoginButton(
+            modernSocialButton(
                 title: "使用 Google 登录",
                 icon: "g.circle.fill",
-                color: .red
+                iconColor: Color(hex: "#DB4437")
             ) {
                 Task {
                     await authManager.loginWithGoogle()
                 }
             }
             
-            socialLoginButton(
+            modernSocialButton(
                 title: "使用 GitHub 登录",
                 icon: "chevron.left.forwardslash.chevron.right",
-                color: .gray
+                iconColor: Color(hex: "#333333")
             ) {
                 Task {
                     await authManager.loginWithGithub()
                 }
             }
             
-            Divider()
-                .padding(.vertical, 8)
+            orDivider
             
             emailLoginSection
         }
+        .frame(maxWidth: Theme.Sizes.maxContentWidth)
+    }
+    
+    private var orDivider: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Rectangle()
+                .fill(Theme.Colors.secondaryText.opacity(0.3))
+                .frame(height: 1)
+            
+            Text("OR")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+            
+            Rectangle()
+                .fill(Theme.Colors.secondaryText.opacity(0.3))
+                .frame(height: 1)
+        }
+        .padding(.vertical, Theme.Spacing.sm)
     }
     
     private var emailLoginSection: some View {
-        VStack(spacing: 16) {
-            TextField("邮箱地址", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.emailAddress)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
+        VStack(spacing: Theme.Spacing.md) {
+            emailInputField
             
             if isCodeSent {
-                HStack {
-                    TextField("验证码", text: $verificationCode)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.numberPad)
-                    
-                    Button(countdown > 0 ? "\(countdown)秒" : "重新发送") {
-                        sendCode()
-                    }
-                    .disabled(countdown > 0)
-                    .buttonStyle(.bordered)
-                }
-                
-                Button("登录") {
-                    Task {
-                        await authManager.loginWithEmail(email, code: verificationCode)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(verificationCode.isEmpty)
+                verificationCodeSection
             } else {
-                Button("发送验证码") {
-                    sendCode()
-                }
-                .buttonStyle(.bordered)
-                .disabled(email.isEmpty)
+                sendCodeButton
             }
         }
     }
     
+    private var emailInputField: some View {
+        TextField("邮箱地址", text: $email)
+            .textContentType(.emailAddress)
+            .keyboardType(.emailAddress)
+            .autocapitalization(.none)
+            .padding()
+            .frame(height: Theme.Sizes.buttonHeight)
+            .background(Theme.Colors.cardBackground)
+            .cornerRadius(Theme.Shapes.buttonCornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                    .stroke(email.isEmpty ? Color.clear : Theme.Colors.brandBlue.opacity(0.3), lineWidth: 2)
+            )
+    }
+    
+    private var verificationCodeSection: some View {
+        VStack(spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.md) {
+                TextField("验证码", text: $verificationCode)
+                    .keyboardType(.numberPad)
+                    .padding()
+                    .frame(height: Theme.Sizes.buttonHeight)
+                    .background(Theme.Colors.cardBackground)
+                    .cornerRadius(Theme.Shapes.buttonCornerRadius)
+                
+                Button {
+                    sendCode()
+                } label: {
+                    Text(countdown > 0 ? "\(countdown)秒" : "重新发送")
+                        .font(Theme.Fonts.bodyBold)
+                }
+                .frame(width: 100, height: Theme.Sizes.buttonHeight)
+                .background(countdown > 0 ? Theme.Colors.secondaryText.opacity(0.2) : Theme.Colors.brandBlue)
+                .foregroundColor(countdown > 0 ? Theme.Colors.secondaryText : .white)
+                .cornerRadius(Theme.Shapes.buttonCornerRadius)
+                .disabled(countdown > 0)
+            }
+            
+            Button {
+                Task {
+                    await authManager.loginWithEmail(email, code: verificationCode)
+                }
+            } label: {
+                Text("登录")
+                    .frame(maxWidth: .infinity)
+            }
+            .primaryButtonStyle()
+            .disabled(verificationCode.isEmpty)
+            .opacity(verificationCode.isEmpty ? 0.5 : 1.0)
+        }
+    }
+    
+    private var sendCodeButton: some View {
+        Button {
+            sendCode()
+        } label: {
+            Text("发送验证码")
+                .frame(maxWidth: .infinity)
+        }
+        .primaryButtonStyle()
+        .disabled(email.isEmpty)
+        .opacity(email.isEmpty ? 0.5 : 1.0)
+    }
+    
     private var loadingSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Theme.Spacing.lg) {
             ProgressView()
+                .scaleEffect(1.5)
             Text("登录中...")
-                .foregroundStyle(.secondary)
+                .font(Theme.Fonts.body)
+                .foregroundStyle(Theme.Colors.secondaryText)
         }
     }
     
     private func errorSection(_ message: String) -> some View {
         Text(message)
-            .foregroundStyle(.red)
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .cornerRadius(8)
+            .font(Theme.Fonts.callout)
+            .foregroundStyle(Theme.Colors.destructive)
+            .padding(Theme.Spacing.lg)
+            .frame(maxWidth: .infinity)
+            .background(Theme.Colors.destructive.opacity(0.1))
+            .cornerRadius(Theme.Shapes.buttonCornerRadius)
     }
     
-    private func socialLoginButton(title: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func modernSocialButton(
+        title: String,
+        icon: String,
+        iconColor: Color,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            HStack {
+            HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(iconColor)
                 Text(title)
+                    .font(Theme.Fonts.bodyBold)
+                    .foregroundStyle(Theme.Colors.primaryText)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 50)
+            .frame(height: Theme.Sizes.buttonHeight)
+            .background(Theme.Colors.cardBackground)
+            .cornerRadius(Theme.Shapes.buttonCornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                    .stroke(Theme.Colors.secondaryText.opacity(0.2), lineWidth: 1)
+            )
         }
-        .buttonStyle(.bordered)
-        .tint(color)
     }
     
     private func sendCode() {

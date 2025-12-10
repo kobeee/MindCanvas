@@ -6,7 +6,7 @@ struct FeedView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 20) {
+                LazyVStack(spacing: Theme.Spacing.lg) {
                     ForEach(viewModel.items) { item in
                         FeedCard(item: item) {
                             Task {
@@ -22,8 +22,9 @@ struct FeedView: View {
                             .padding()
                     }
                 }
-                .padding()
+                .padding(Theme.Spacing.lg)
             }
+            .background(Theme.Colors.appBackground)
             .navigationTitle("MindStream")
             .task {
                 await viewModel.loadFeed()
@@ -41,7 +42,7 @@ struct FeedCard: View {
     let onRemix: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             authorSection
             
             imageSection
@@ -52,38 +53,44 @@ struct FeedCard: View {
             
             actionsSection
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Colors.cardBackground)
+        .cornerRadius(Theme.Shapes.cardCornerRadius)
+        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
     }
     
     private var authorSection: some View {
-        HStack {
-            Circle()
-                .fill(Color.blue.gradient)
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Text(item.author.username.prefix(1))
-                        .foregroundStyle(.white)
-                        .font(.headline)
+        HStack(spacing: Theme.Spacing.md) {
+            if let avatarUrl = item.author.avatarUrl, let url = URL(string: avatarUrl) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    avatarPlaceholder
                 }
+                .frame(width: Theme.Sizes.avatarSmall, height: Theme.Sizes.avatarSmall)
+                .clipShape(Circle())
+            } else {
+                avatarPlaceholder
+            }
             
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: Theme.Spacing.xs) {
                     Text(item.author.username)
-                        .font(.headline)
+                        .font(Theme.Fonts.bodyBold)
+                        .foregroundStyle(Theme.Colors.primaryText)
                     
                     if item.author.isPro {
-                        Image(systemName: "crown.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
+                        Image(systemName: Theme.Icons.subscriptionFill)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.Colors.goldGradient)
                     }
                 }
                 
                 Text(item.createdAt, style: .relative)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
             }
             
             Spacer()
@@ -102,64 +109,100 @@ struct FeedCard: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .frame(width: 32, height: 32)
             }
         }
     }
     
+    private var avatarPlaceholder: some View {
+        Circle()
+            .fill(Theme.Colors.brandBlue.gradient)
+            .frame(width: Theme.Sizes.avatarSmall, height: Theme.Sizes.avatarSmall)
+            .overlay {
+                Text(String(item.author.username.prefix(1)))
+                    .font(Theme.Fonts.headline)
+                    .foregroundStyle(.white)
+            }
+    }
+    
     private var imageSection: some View {
-        AsyncImage(url: URL(string: item.imageUrl)) { image in
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-        } placeholder: {
-            Rectangle()
-                .fill(Color.gray.opacity(0.2))
-                .aspectRatio(4/3, contentMode: .fit)
-                .overlay {
-                    ProgressView()
-                }
+        AsyncImage(url: URL(string: item.imageUrl)) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipped()
+            case .failure:
+                Rectangle()
+                    .fill(Theme.Colors.secondaryText.opacity(0.1))
+                    .aspectRatio(4/3, contentMode: .fit)
+                    .overlay {
+                        Image(systemName: Theme.Icons.photo)
+                            .font(.system(size: 32))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+            case .empty:
+                Rectangle()
+                    .fill(Theme.Colors.secondaryText.opacity(0.1))
+                    .aspectRatio(4/3, contentMode: .fit)
+                    .overlay {
+                        ProgressView()
+                    }
+            @unknown default:
+                EmptyView()
+            }
         }
-        .cornerRadius(12)
+        .cornerRadius(Theme.Shapes.buttonCornerRadius)
     }
     
     private func promptSection(_ prompt: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("提示词")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text("Prompt")
+                .font(Theme.Fonts.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .textCase(.uppercase)
             
             Text(prompt)
-                .font(.body)
-                .padding(12)
+                .font(Theme.Fonts.monospacedSmall)
+                .foregroundStyle(Theme.Colors.primaryText)
+                .padding(Theme.Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(8)
+                .background(Theme.Colors.secondaryText.opacity(0.05))
+                .cornerRadius(Theme.Shapes.buttonCornerRadius)
         }
     }
     
     private var actionsSection: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: Theme.Spacing.xl) {
+            Spacer()
+            
             Button(action: onLike) {
-                HStack(spacing: 6) {
-                    Image(systemName: item.isLiked ? "heart.fill" : "heart")
-                        .foregroundStyle(item.isLiked ? .red : .primary)
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: item.isLiked ? Theme.Icons.likeFill : Theme.Icons.like)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(item.isLiked ? Theme.Colors.destructive : Theme.Colors.secondaryText)
                     Text("\(item.likesCount)")
-                        .font(.body)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
             .buttonStyle(.plain)
+            .scaleEffect(item.isLiked ? 1.1 : 1.0)
+            .animation(.spring(response: 0.3), value: item.isLiked)
             
             Button(action: onRemix) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: Theme.Icons.remix)
+                        .font(.system(size: 18, weight: .medium))
                     Text("Remix")
-                        .font(.body)
+                        .font(Theme.Fonts.caption)
                 }
+                .foregroundStyle(Theme.Colors.secondaryText)
             }
             .buttonStyle(.plain)
-            
-            Spacer()
         }
     }
 }

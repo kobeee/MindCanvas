@@ -2,64 +2,71 @@ import SwiftUI
 
 struct SubscriptionView: View {
     @Environment(AuthManager.self) private var authManager
-    @State private var selectedPlan: SubscriptionPlan = .monthly
+    @State private var selectedPlan: SubscriptionPlan = .yearly
     
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 30) {
+                VStack(spacing: Theme.Spacing.xxxl) {
                     headerSection
                     featuresSection
                     planSelector
                     subscribeButton
                     faqSection
                 }
-                .padding()
+                .padding(Theme.Spacing.xxl)
             }
+            .background(Theme.Colors.appBackground)
             .navigationTitle("订阅 Pro")
         }
     }
     
     private var headerSection: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "crown.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.yellow.gradient)
+        VStack(spacing: Theme.Spacing.lg) {
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.goldGradient)
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: Theme.Icons.subscriptionFill)
+                    .font(.system(size: 50, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
             
             Text("升级到 Pro")
-                .font(.largeTitle.bold())
+                .font(Theme.Fonts.largeTitle)
             
             Text("解锁所有功能，释放无限创意")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+                .font(Theme.Fonts.title3)
+                .foregroundStyle(Theme.Colors.secondaryText)
                 .multilineTextAlignment(.center)
         }
-        .padding(.vertical)
+        .padding(.vertical, Theme.Spacing.lg)
     }
     
     private var featuresSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            FeatureRow(icon: "sparkles", title: "无限生成", description: "不受限制地使用 AI 生成图像")
-            FeatureRow(icon: "cloud.fill", title: "云端存储", description: "10GB 云端项目存储空间")
-            FeatureRow(icon: "wand.and.stars", title: "高级模型", description: "访问最新的 AI 模型和功能")
-            FeatureRow(icon: "person.2.fill", title: "优先支持", description: "享受优先客户支持服务")
-            FeatureRow(icon: "arrow.down.circle.fill", title: "高清下载", description: "无水印高清图片导出")
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: Theme.Spacing.md),
+            GridItem(.flexible(), spacing: Theme.Spacing.md)
+        ], spacing: Theme.Spacing.lg) {
+            FeatureCard(icon: "sparkles", title: "无限生成", description: "AI 图像生成")
+            FeatureCard(icon: "cloud.fill", title: "云端存储", description: "10GB 空间")
+            FeatureCard(icon: "wand.and.stars", title: "高级模型", description: "最新功能")
+            FeatureCard(icon: "person.2.fill", title: "优先支持", description: "客服优先")
+            FeatureCard(icon: "arrow.down.circle.fill", title: "高清下载", description: "无水印导出")
+            FeatureCard(icon: "star.fill", title: "专属徽章", description: "Pro 标识")
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
     }
     
     private var planSelector: some View {
-        VStack(spacing: 12) {
-            PlanCard(
+        HStack(spacing: Theme.Spacing.lg) {
+            ModernPlanCard(
                 plan: .monthly,
                 isSelected: selectedPlan == .monthly,
                 onSelect: { selectedPlan = .monthly }
             )
             
-            PlanCard(
+            ModernPlanCard(
                 plan: .yearly,
                 isSelected: selectedPlan == .yearly,
                 onSelect: { selectedPlan = .yearly }
@@ -71,39 +78,53 @@ struct SubscriptionView: View {
         Button {
             print("订阅: \(selectedPlan)")
         } label: {
-            Text("立即订阅")
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(Color.blue.gradient)
-                .cornerRadius(12)
+            VStack(spacing: Theme.Spacing.xs) {
+                Text("立即订阅")
+                    .font(Theme.Fonts.headline)
+                
+                Text("\(selectedPlan.price) / \(selectedPlan.period)")
+                    .font(Theme.Fonts.caption)
+                    .opacity(0.9)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: Theme.Sizes.buttonHeight + 10)
+            .background(Theme.Colors.goldGradient)
+            .cornerRadius(Theme.Shapes.buttonCornerRadius)
+            .shadow(color: Color.orange.opacity(0.3), radius: 8, x: 0, y: 4)
         }
     }
     
     private var faqSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             Text("常见问题")
-                .font(.headline)
+                .font(Theme.Fonts.headline)
+                .padding(.horizontal, Theme.Spacing.sm)
             
-            FAQItem(
-                question: "如何取消订阅？",
-                answer: "您可以随时在 App Store 设置中取消订阅"
-            )
-            
-            FAQItem(
-                question: "是否支持家庭共享？",
-                answer: "Pro 订阅支持最多 6 位家庭成员共享"
-            )
-            
-            FAQItem(
-                question: "能否退款？",
-                answer: "根据 Apple 政策，订阅可在购买后 14 天内申请退款"
-            )
+            VStack(spacing: Theme.Spacing.sm) {
+                FAQItem(
+                    question: "如何取消订阅？",
+                    answer: "您可以随时在 App Store 设置中取消订阅"
+                )
+                
+                Divider()
+                
+                FAQItem(
+                    question: "是否支持家庭共享？",
+                    answer: "Pro 订阅支持最多 6 位家庭成员共享"
+                )
+                
+                Divider()
+                
+                FAQItem(
+                    question: "能否退款？",
+                    answer: "根据 Apple 政策，订阅可在购买后 14 天内申请退款"
+                )
+            }
+            .padding(Theme.Spacing.lg)
+            .background(Theme.Colors.cardBackground)
+            .cornerRadius(Theme.Shapes.cardCornerRadius)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
     }
 }
 
@@ -133,72 +154,93 @@ enum SubscriptionPlan: String {
     }
 }
 
-struct FeatureRow: View {
+struct FeatureCard: View {
     let icon: String
     let title: String
     let description: String
     
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(.blue)
-                .frame(width: 40)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: Theme.Spacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.brandBlue.opacity(0.1))
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                    .foregroundStyle(Theme.Colors.brandBlue)
             }
             
-            Spacer()
+            VStack(spacing: Theme.Spacing.xs) {
+                Text(title)
+                    .font(Theme.Fonts.bodyBold)
+                    .foregroundStyle(Theme.Colors.primaryText)
+                
+                Text(description)
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Colors.cardBackground)
+        .cornerRadius(Theme.Shapes.cardCornerRadius)
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
 }
 
-struct PlanCard: View {
+struct ModernPlanCard: View {
     let plan: SubscriptionPlan
     let isSelected: Bool
     let onSelect: () -> Void
     
     var body: some View {
         Button(action: onSelect) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(plan.rawValue)
-                            .font(.headline)
-                        
-                        if let savings = plan.savings {
-                            Text(savings)
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.green.opacity(0.1))
-                                .cornerRadius(6)
-                        }
-                    }
+            VStack(spacing: Theme.Spacing.lg) {
+                VStack(spacing: Theme.Spacing.xs) {
+                    Text(plan.rawValue)
+                        .font(Theme.Fonts.headline)
+                        .foregroundStyle(Theme.Colors.primaryText)
                     
-                    Text("\(plan.price) / \(plan.period)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if let savings = plan.savings {
+                        Text(savings)
+                            .font(Theme.Fonts.caption)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.xs)
+                            .background(Capsule().fill(Theme.Colors.success))
+                    } else {
+                        Spacer()
+                            .frame(height: Theme.Spacing.lg)
+                    }
                 }
                 
-                Spacer()
+                VStack(spacing: 0) {
+                    Text(plan.price)
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundStyle(isSelected ? Theme.Colors.brandBlue : Theme.Colors.primaryText)
+                    
+                    Text(plan.period)
+                        .font(Theme.Fonts.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
                 
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? .blue : .secondary)
+                Image(systemName: isSelected ? Theme.Icons.checkmark : "")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.Colors.brandBlue)
+                    .frame(height: 20)
             }
-            .padding()
-            .background(Color(.systemBackground))
+            .frame(maxWidth: .infinity)
+            .padding(Theme.Spacing.xl)
+            .background(Theme.Colors.cardBackground)
+            .cornerRadius(Theme.Shapes.cardCornerRadius)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.blue : Color.gray.opacity(0.3), lineWidth: 2)
+                RoundedRectangle(cornerRadius: Theme.Shapes.cardCornerRadius)
+                    .stroke(isSelected ? Theme.Colors.brandBlue : Color.clear, lineWidth: 3)
             )
+            .shadow(color: Color.black.opacity(isSelected ? 0.1 : 0.05), radius: 8, x: 0, y: 4)
+            .scaleEffect(isSelected ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3), value: isSelected)
         }
         .buttonStyle(.plain)
     }

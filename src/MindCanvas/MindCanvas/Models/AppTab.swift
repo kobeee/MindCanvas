@@ -19,10 +19,19 @@ enum AppTab: String, CaseIterable, Identifiable {
     
     var icon: String {
         switch self {
-        case .creations: "paintbrush.fill"
-        case .mindStream: "water.waves"
-        case .subscription: "crown.fill"
-        case .settings: "gearshape.fill"
+        case .creations: Theme.Icons.creations
+        case .mindStream: Theme.Icons.mindStream
+        case .subscription: Theme.Icons.subscription
+        case .settings: Theme.Icons.settings
+        }
+    }
+    
+    var iconFill: String {
+        switch self {
+        case .creations: Theme.Icons.creationsFill
+        case .mindStream: Theme.Icons.mindStreamFill
+        case .subscription: Theme.Icons.subscriptionFill
+        case .settings: Theme.Icons.settingsFill
         }
     }
 }
