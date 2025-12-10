@@ -10,9 +10,12 @@ import SwiftData
 
 @main
 struct MindCanvasApp: App {
+    @State private var authManager = AuthManager.shared
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Project.self,
+            Asset.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -25,7 +28,8 @@ struct MindCanvasApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environment(authManager)
         }
         .modelContainer(sharedModelContainer)
     }
