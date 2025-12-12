@@ -46,6 +46,11 @@ class CanvasStateManager {
         origin: CGPoint(x: 200, y: 200),
         size: CGSize(width: 400, height: 300)
     )
+
+    // MARK: - 视口缩放（用于 HUD 展示）
+
+    /// 当前画布缩放比例（由 NativeCanvasView 回传）
+    var zoomScale: CGFloat = 1.0
     
     /// 显示 Magic Frame
     func showMagicFrame() {
@@ -102,5 +107,6 @@ class CanvasStateManager {
         selectedNodeID = nil
         isMagicFrameVisible = false
         isUsingPen = true
+        zoomScale = 1.0
     }
 }

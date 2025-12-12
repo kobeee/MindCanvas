@@ -190,8 +190,8 @@ final class NativeEditorViewModel {
         try? context.save()
         loadAssets()
         
-        // Step 2: 捕获 Magic Frame 区域的快照
-        guard let snapshot = canvasView.captureSnapshot(rect: stateManager.magicFrame) else {
+        // Step 2: 捕获 Magic Frame（屏幕坐标）对应的画布内容快照
+        guard let snapshot = canvasView.captureViewportSnapshot(rect: stateManager.magicFrame) else {
             isGenerating = false
             context.delete(loadingAsset)
             return

@@ -5,9 +5,18 @@ import SwiftUI
 struct MagicFrameView: View {
     @Binding var frame: CGRect
     @Binding var isVisible: Bool
+
+    /// 视口尺寸（屏幕坐标系），用于边界约束
+    let viewportSize: CGSize
+
+    /// 选框在视口内的最小边距（避免贴边难以操作）
+    private let viewportInset: CGFloat = 8
     
     @State private var isDragging = false
     @State private var isResizing = false
+
+    @State private var dragStartFrame: CGRect?
+    @State private var resizeStartFrame: CGRect?
     
     /// 最小尺寸
     private let minSize: CGFloat = 100
@@ -48,7 +57,7 @@ struct MagicFrameView: View {
                 .padding(.vertical, 4)
                 .background(.ultraThinMaterial)
                 .cornerRadius(8)
-                .position(x: frame.midX, y: frame.minY - 20)
+                .position(x: frame.midX, y: max(12, frame.minY - 20))
                 
                 // 尺寸标签
                 Text("\(Int(frame.width)) × \(Int(frame.height))")
@@ -57,7 +66,7 @@ struct MagicFrameView: View {
                     .padding(4)
                     .background(.ultraThinMaterial)
                     .cornerRadius(4)
-                    .position(x: frame.midX, y: frame.maxY + 15)
+                    .position(x: frame.midX, y: min(viewportSize.height - 12, frame.maxY + 15))
             }
         }
     }
@@ -68,14 +77,21 @@ struct MagicFrameView: View {
         DragGesture()
             .onChanged { value in
                 isDragging = true
-                
-                let newX = frame.origin.x + value.translation.width
-                let newY = frame.origin.y + value.translation.height
-                
-                frame.origin = CGPoint(x: newX, y: newY)
+
+                if dragStartFrame == nil {
+                    dragStartFrame = frame
+                }
+                guard let start = dragStartFrame else { return }
+
+                var newFrame = start
+                newFrame.origin.x = start.origin.x + value.translation.width
+                newFrame.origin.y = start.origin.y + value.translation.height
+
+                frame = clampToViewport(newFrame)
             }
             .onEnded { _ in
                 isDragging = false
+                dragStartFrame = nil
             }
     }
     
@@ -100,42 +116,53 @@ struct MagicFrameView: View {
         DragGesture()
             .onChanged { value in
                 isResizing = true
-                
-                var newFrame = frame
+
+                if resizeStartFrame == nil {
+                    resizeStartFrame = frame
+                }
+                guard let start = resizeStartFrame else { return }
+
+                var newFrame = start
                 
                 switch corner {
                 case .topLeading:
                     // 左上角：调整 x, y, width, height
-                    newFrame.origin.x += value.translation.width
-                    newFrame.origin.y += value.translation.height
-                    newFrame.size.width -= value.translation.width
-                    newFrame.size.height -= value.translation.height
+                    newFrame.origin.x = start.origin.x + value.translation.width
+                    newFrame.origin.y = start.origin.y + value.translation.height
+                    newFrame.size.width = start.size.width - value.translation.width
+                    newFrame.size.height = start.size.height - value.translation.height
                     
                 case .topTrailing:
                     // 右上角：调整 y, width, height
-                    newFrame.origin.y += value.translation.height
-                    newFrame.size.width += value.translation.width
-                    newFrame.size.height -= value.translation.height
+                    newFrame.origin.y = start.origin.y + value.translation.height
+                    newFrame.size.width = start.size.width + value.translation.width
+                    newFrame.size.height = start.size.height - value.translation.height
                     
                 case .bottomLeading:
                     // 左下角：调整 x, width, height
-                    newFrame.origin.x += value.translation.width
-                    newFrame.size.width -= value.translation.width
-                    newFrame.size.height += value.translation.height
+                    newFrame.origin.x = start.origin.x + value.translation.width
+                    newFrame.size.width = start.size.width - value.translation.width
+                    newFrame.size.height = start.size.height + value.translation.height
                     
                 case .bottomTrailing:
                     // 右下角：调整 width, height
-                    newFrame.size.width += value.translation.width
-                    newFrame.size.height += value.translation.height
+                    newFrame.size.width = start.size.width + value.translation.width
+                    newFrame.size.height = start.size.height + value.translation.height
                 }
                 
                 // 限制最小尺寸
-                if newFrame.width >= minSize && newFrame.height >= minSize {
-                    frame = newFrame
-                }
+                newFrame.size.width = max(minSize, newFrame.size.width)
+                newFrame.size.height = max(minSize, newFrame.size.height)
+
+                // 限制最大尺寸（不超过视口）
+                newFrame.size.width = min(newFrame.size.width, max(1, viewportSize.width - 2 * viewportInset))
+                newFrame.size.height = min(newFrame.size.height, max(1, viewportSize.height - 2 * viewportInset))
+
+                frame = clampToViewport(newFrame)
             }
             .onEnded { _ in
                 isResizing = false
+                resizeStartFrame = nil
             }
     }
     
@@ -160,6 +187,24 @@ struct MagicFrameView: View {
         case bottomLeading
         case bottomTrailing
     }
+
+    // MARK: - Viewport Clamp
+
+    private func clampToViewport(_ input: CGRect) -> CGRect {
+        var rect = input
+
+        // 宽高兜底
+        rect.size.width = max(minSize, rect.size.width)
+        rect.size.height = max(minSize, rect.size.height)
+
+        let maxX = max(viewportInset, viewportSize.width - viewportInset - rect.size.width)
+        let maxY = max(viewportInset, viewportSize.height - viewportInset - rect.size.height)
+
+        rect.origin.x = min(max(rect.origin.x, viewportInset), maxX)
+        rect.origin.y = min(max(rect.origin.y, viewportInset), maxY)
+
+        return rect
+    }
 }
 
 // MARK: - 预览
@@ -170,7 +215,8 @@ struct MagicFrameView: View {
         
         MagicFrameView(
             frame: .constant(CGRect(x: 100, y: 100, width: 300, height: 200)),
-            isVisible: .constant(true)
+            isVisible: .constant(true),
+            viewportSize: CGSize(width: 500, height: 400)
         )
     }
     .frame(width: 500, height: 400)

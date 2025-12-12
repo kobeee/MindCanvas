@@ -78,8 +78,12 @@ struct NativeEditorView: View {
 
 private struct NativeCanvasContainer: View {
     @Bindable var viewModel: NativeEditorViewModel
+
+    @State private var zoomText: String = "100"
+    @State private var isEditingZoom: Bool = false
     
     var body: some View {
+        GeometryReader { proxy in
         ZStack {
             Color.gray.opacity(0.05)
             
@@ -92,21 +96,100 @@ private struct NativeCanvasContainer: View {
                 onViewCreated: { view in
                     // 绑定画布视图引用
                     viewModel.canvasView = view
+                    // 初始化绘图工具
+                    view.setDrawingTool(isPen: viewModel.stateManager.isUsingPen)
+                },
+                onZoomChanged: { scale in
+                    viewModel.stateManager.zoomScale = scale
                 }
             )
             
             // Magic Frame 叠加层
             MagicFrameView(
                 frame: $viewModel.stateManager.magicFrame,
-                isVisible: $viewModel.stateManager.isMagicFrameVisible
+                isVisible: $viewModel.stateManager.isMagicFrameVisible,
+                viewportSize: proxy.size
             )
             
+            // 左下角缩放 HUD
+            VStack {
+                Spacer()
+                HStack {
+                    zoomHUD
+                    Spacer()
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 16)
+            }
+
             // 顶部工具栏
             VStack {
                 canvasToolbar
                 Spacer()
             }
+        }}
+        .onChange(of: viewModel.stateManager.isUsingPen) { _, newValue in
+            viewModel.canvasView?.setDrawingTool(isPen: newValue)
         }
+        .onChange(of: viewModel.stateManager.zoomScale) { _, newValue in
+            // 避免正在编辑时被实时缩放刷新打断
+            guard !isEditingZoom else { return }
+            zoomText = "\(Int((newValue * 100).rounded()))"
+        }
+    }
+
+    private var zoomHUD: some View {
+        HStack(spacing: 8) {
+            Button {
+                let next = viewModel.stateManager.zoomScale - 0.1
+                viewModel.canvasView?.setZoomScale(next, animated: true)
+            } label: {
+                Image(systemName: "minus")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+
+            TextField("", text: $zoomText)
+                .frame(width: 72)
+                .multilineTextAlignment(.center)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+                .onTapGesture {
+                    isEditingZoom = true
+                }
+                .onSubmit {
+                    applyZoomText()
+                }
+                .onChange(of: zoomText) { _, _ in
+                    // 仅标记编辑状态即可，避免被 onChange(zoomScale) 覆盖
+                    isEditingZoom = true
+                }
+
+            Text("%")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Button {
+                let next = viewModel.stateManager.zoomScale + 0.1
+                viewModel.canvasView?.setZoomScale(next, animated: true)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(12)
+    }
+
+    private func applyZoomText() {
+        defer { isEditingZoom = false }
+        let trimmed = zoomText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let percent = Double(trimmed) else { return }
+        let scale = percent / 100.0
+        viewModel.canvasView?.setZoomScale(scale, animated: true)
     }
     
     private var canvasToolbar: some View {

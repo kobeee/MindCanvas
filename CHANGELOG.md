@@ -1,5 +1,78 @@
 # 开发记录
 
+## 2025-12-12 - 原生编辑器 v4 交互与画布体验优化 ✨
+
+### 背景
+在 v3.0 原生化重构之后，实际体验暴露出几处明显问题：
+- Magic Frame 拖动和缩放手感发飘，选框很容易“飞出屏幕”
+- 画布缩放/漫游缺乏显式控制入口，难以找回飞出去的内容
+- 绘图模式对鼠标/触控板支持不足，模拟器调试体验较差
+
+基于《editor_optimization_v4.md》设计方案，对编辑器交互进行了一轮针对性的 v4 优化。
+
+### 主要改动
+- **Magic Frame 行为重构**
+  - 将拖拽/缩放实现改为“起始快照 + translation 增量计算”，彻底消除越拖越快、失控飞走的问题
+  - 新增视口边界约束，选框始终限制在当前画布视口范围内（允许小范围外溢给手柄），不会再完全飞出屏幕
+  - 顶部/底部标签位置在接近边缘时自动收敛，避免被裁掉
+  - 相关文件：`Views/Editor/Canvas/MagicFrameView.swift`
+
+- **屏幕选框 → 画布内容截图链路打通**
+  - 在 `NativeCanvasView` 中新增内容坐标快照与坐标映射：
+    - `func contentRect(forViewportRect:)`：将 SwiftUI 视图坐标（HUD 选框）转换为画布内容坐标
+    - `func captureContentSnapshot(rect:)`：在内容坐标系中裁剪并渲染 objectLayer + PencilKit
+    - `func captureViewportSnapshot(rect:)`：从屏幕选框一路走到内容截图的统一入口
+  - `NativeEditorViewModel.generate()` 改为通过 `captureViewportSnapshot(rect: stateManager.magicFrame)` 获取生成区域，保证“你看到哪里就截哪里”
+  - 相关文件：
+    - `Views/Editor/Canvas/NativeCanvasView.swift`
+    - `ViewModels/NativeEditorViewModel.swift`
+
+- **缩放 HUD 与 zoom 状态回传**
+  - 在 `NativeCanvasView` 中增加：
+    - `var zoomScale: CGFloat` 只读属性
+    - `func setZoomScale(_:animated:)` 封装并 clamp 至 `[minZoomScale, maxZoomScale]`
+    - `var onZoomChanged: ((CGFloat) -> Void)?` 回调，`scrollViewDidZoom` 中实时回传当前缩放
+  - 在 `CanvasStateManager` 中新增 `zoomScale` 字段，保存当前缩放比例供 UI 展示
+  - 在 `NativeEditorView` 中实现左下角 Zoom HUD：
+    - `[-] [ xx% ] [+]` 布局
+    - `+/-` 按钮以 10% 为步进调整缩放
+    - 百分比文本可编辑，回车后换算成缩放比例并调用 `setZoomScale`
+    - 和 pinch 缩放保持双向同步，防止 HUD 与实际缩放状态脱节
+  - 相关文件：
+    - `Views/Editor/Canvas/NativeCanvasView.swift`
+    - `Views/Editor/NativeEditorView.swift`
+    - `ViewModels/CanvasStateManager.swift`
+
+- **绘图模式 any-input + 双指漫游策略**
+  - 在 `NativeCanvasView.updateGestureHandling()` 中重新定义模式行为：
+    - 对象模式：禁用 PencilKit，启用对象层手势，scrollView 单指即可平移画布
+    - 绘图模式：
+      - `pencilCanvas.isUserInteractionEnabled = true`
+      - `pencilCanvas.drawingPolicy = .anyInput`，支持鼠标/手指/Apple Pencil 绘制（方便在模拟器中调试）
+      - 禁用对象层交互，避免绘图时误拖图片
+      - `scrollView.panGestureRecognizer.minimumNumberOfTouches = 2`，将画布平移交给双指/触控板滚动
+  - 在 `NativeCanvasViewWrapper` 与 `NativeEditorView` 中串联 `isUsingPen` 状态，确保画笔/橡皮擦工具与 PencilKit 工具同步
+  - 相关文件：
+    - `Views/Editor/Canvas/NativeCanvasView.swift`
+    - `Views/Editor/NativeEditorView.swift`
+    - `ViewModels/CanvasStateManager.swift`
+
+- **文档与规范更新**
+  - 将 v4 设计方案从 Plan 模式结果整理为独立文档：`docs/design/editor_optimization_v4.md`
+  - 在 `.cursor/rules/base/document.mdc` 中补充约定：
+    - Plan 模式产出的架构/交互/实现方案，确认后必须保存到 `docs/design/` 目录，并在文件名中包含版本号与主题（如 `editor_optimization_v4.md`），便于归档与回溯
+
+### 影响评估
+- 对用户体验的直接改善：
+  - 选框拖拽/缩放稳定可控，不再“稍微一动就整个飞出去”
+  - 画布缩放状态可视且可控，找回内容和对齐生成区域更简单
+  - 绘图模式在模拟器和外接鼠标场景下更易用，同时通过双指/触控板保留画布漫游能力
+- 对架构的延续性：
+  - 坐标映射与截图链路在 `NativeCanvasView` 中被明确建模，后续扩展（如预览截取区域、缩略图生成）有清晰入口
+  - Zoom HUD 基于现有 scrollView 实现，没有额外引入状态源，保持单一事实来源
+
+---
+
 ## 2025-12-11 23:45 - 修复原生编辑器编译错误 🔧
 
 ### 问题背景

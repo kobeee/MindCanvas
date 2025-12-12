@@ -62,6 +62,9 @@ class NativeCanvasView: UIView {
     
     /// 图层更新回调
     var onLayersUpdated: (([LayerNode]) -> Void)?
+
+    /// 缩放变化回调
+    var onZoomChanged: ((CGFloat) -> Void)?
     
     // MARK: - Initialization
     
@@ -108,7 +111,7 @@ class NativeCanvasView: UIView {
         pencilCanvas.backgroundColor = .clear
         pencilCanvas.isOpaque = false
         pencilCanvas.tool = inkingTool
-        pencilCanvas.drawingPolicy = .pencilOnly  // 只允许 Pencil，手指用于滚动
+        // drawingPolicy 由 currentMode 决定（在 updateGestureHandling 中统一设置）
         pencilCanvas.delegate = self
         
         // 图层堆叠
@@ -120,6 +123,10 @@ class NativeCanvasView: UIView {
         // 初始化画布居中
         DispatchQueue.main.async { [weak self] in
             self?.centerCanvas()
+            self?.updateGestureHandling()
+            if let zoomScale = self?.scrollView.zoomScale {
+                self?.onZoomChanged?(zoomScale)
+            }
         }
     }
     
@@ -161,6 +168,17 @@ class NativeCanvasView: UIView {
     /// 重置缩放
     func resetZoom() {
         scrollView.setZoomScale(1.0, animated: true)
+    }
+
+    /// 当前缩放比例
+    var zoomScale: CGFloat {
+        scrollView.zoomScale
+    }
+
+    /// 设置缩放比例（会自动限制在 min/max 范围内）
+    func setZoomScale(_ scale: CGFloat, animated: Bool) {
+        let clamped = max(minZoomScale, min(maxZoomScale, scale))
+        scrollView.setZoomScale(clamped, animated: animated)
     }
     
     /// 清空画布
@@ -304,12 +322,16 @@ class NativeCanvasView: UIView {
             // 对象模式: 禁用 PencilKit，启用对象手势
             pencilCanvas.isUserInteractionEnabled = false
             objectLayerView.isUserInteractionEnabled = true
+            // 单指拖动平移画布
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 1
             
         case .drawingMode:
-            // 绘图模式: 启用 PencilKit (仅 Pencil)，禁用对象手势
+            // 绘图模式: 启用 PencilKit（允许任何输入绘制），禁用对象手势
             pencilCanvas.isUserInteractionEnabled = true
-            pencilCanvas.drawingPolicy = .pencilOnly  // 手指仅用于滚动
+            pencilCanvas.drawingPolicy = .anyInput
             objectLayerView.isUserInteractionEnabled = false
+            // 绘图模式下：单指用于绘制；双指用于平移画布（更符合“any-input + 可漫游”）
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
         }
     }
     
@@ -333,21 +355,42 @@ class NativeCanvasView: UIView {
     
     // MARK: - Snapshot
     
-    /// 捕获指定区域的快照 (合并所有图层)
-    func captureSnapshot(rect: CGRect) -> UIImage? {
-        let renderer = UIGraphicsImageRenderer(bounds: rect)
-        return renderer.image { context in
+    /// 捕获内容坐标系中的指定区域快照（合并所有图层）
+    func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
+        let bounded = contentRect.intersection(contentView.bounds)
+        guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else { return nil }
+
+        let renderer = UIGraphicsImageRenderer(size: bounded.size)
+        return renderer.image { rendererContext in
+            // 将要裁剪的区域移动到 (0,0)
+            rendererContext.cgContext.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
+
             // 渲染 Layer 1: 对象图层
-            objectLayerView.drawHierarchy(in: rect, afterScreenUpdates: true)
-            
+            objectLayerView.drawHierarchy(in: objectLayerView.bounds, afterScreenUpdates: true)
+
             // 渲染 Layer 2: PencilKit 绘图
-            pencilCanvas.drawHierarchy(in: rect, afterScreenUpdates: true)
+            pencilCanvas.drawHierarchy(in: pencilCanvas.bounds, afterScreenUpdates: true)
         }
+    }
+
+    /// 将“视口（屏幕）坐标系”的 rect 映射到“画布内容坐标系”的 rect
+    /// - Parameter viewportRect: 相对于 NativeCanvasView 自身 bounds 的屏幕坐标 rect（即 SwiftUI HUD 的坐标系）
+    func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
+        // 1) 先转换到 scrollView 坐标（scrollView 填满 self，但仍走 convert 以避免未来布局变化）
+        let rectInScrollView = scrollView.convert(viewportRect, from: self)
+        // 2) 再转换到 contentView 坐标（UIKit 会自动处理 zoom/center 等变换）
+        return contentView.convert(rectInScrollView, from: scrollView)
+    }
+
+    /// 捕获“视口（屏幕）坐标系”的指定区域快照（用于 HUD 选框）
+    func captureViewportSnapshot(rect viewportRect: CGRect) -> UIImage? {
+        let contentRect = contentRect(forViewportRect: viewportRect)
+        return captureContentSnapshot(rect: contentRect)
     }
     
     /// 捕获整个画布快照
     func captureFullSnapshot() -> UIImage? {
-        captureSnapshot(rect: contentView.bounds)
+        captureContentSnapshot(rect: contentView.bounds)
     }
 }
 
@@ -366,6 +409,7 @@ extension NativeCanvasView: UIScrollViewDelegate {
             x: scrollView.contentSize.width * 0.5 + offsetX,
             y: scrollView.contentSize.height * 0.5 + offsetY
         )
+        onZoomChanged?(scrollView.zoomScale)
     }
 }
 
@@ -384,11 +428,13 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
     @Binding var toolMode: CanvasToolMode
     var onCanvasUpdated: (() -> Void)?
     var onViewCreated: ((NativeCanvasView) -> Void)?
+    var onZoomChanged: ((CGFloat) -> Void)? = nil
     
     func makeUIView(context: Context) -> NativeCanvasView {
         let view = NativeCanvasView()
         view.currentMode = toolMode
         view.onCanvasUpdated = onCanvasUpdated
+        view.onZoomChanged = onZoomChanged
         
         // 通知外部视图已创建
         onViewCreated?(view)
