@@ -94,6 +94,7 @@ enum Theme {
         
         // 正文
         static let headline = Font.headline
+        static let subheadline = Font.subheadline
         static let body = Font.body
         static let bodyBold = Font.body.weight(.semibold)
         static let callout = Font.callout

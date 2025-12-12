@@ -106,6 +106,11 @@ class ResizableImageView: UIView {
         pinchGesture.delegate = self
         rotateGesture.delegate = self
     }
+
+    /// 让“画布缩放”优先：当 scrollView pinch 能识别时，本对象的 pinch 应当失败
+    func requireObjectPinchToFail(_ gesture: UIGestureRecognizer) {
+        pinchGesture.require(toFail: gesture)
+    }
     
     // MARK: - Image Loading
     

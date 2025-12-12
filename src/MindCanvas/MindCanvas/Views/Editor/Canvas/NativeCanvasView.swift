@@ -65,6 +65,14 @@ class NativeCanvasView: UIView {
 
     /// 缩放变化回调
     var onZoomChanged: ((CGFloat) -> Void)?
+
+    /// 绘制中标记（用于避免 PencilKit 渲染期间触发布局更新造成闪烁）
+    private var isDrawing = false
+
+    // MARK: - Indirect input / drawing freeze
+
+    private var storedPanEnabled: Bool = true
+    private var storedPinchEnabled: Bool = true
     
     // MARK: - Initialization
     
@@ -94,6 +102,21 @@ class NativeCanvasView: UIView {
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.bounces = true
         scrollView.bouncesZoom = true
+
+        // 显式允许 Indirect 输入（Simulator 触控板 / 鼠标滚轮）
+        if #available(iOS 13.4, *) {
+            // 触控板两指滑动是 continuous scroll
+            scrollView.panGestureRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
+        }
+        if let pinch = scrollView.pinchGestureRecognizer {
+            // 允许触屏 + 触控板/鼠标相关输入
+            var types: [NSNumber] = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            if #available(iOS 13.4, *) {
+                types.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+                types.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
+            }
+            pinch.allowedTouchTypes = types
+        }
         
         // 配置内容视图
         contentView.backgroundColor = .white
@@ -256,6 +279,11 @@ class NativeCanvasView: UIView {
         
         imageViews[layer.id] = imageView
         objectLayerView.addSubview(imageView)
+
+        // 画布缩放优先：scrollView 的 pinch 能工作时，对象 pinch 必须先失败
+        if let scrollPinch = scrollView.pinchGestureRecognizer {
+            imageView.requireObjectPinchToFail(scrollPinch)
+        }
         
         // 确保正确的渲染顺序
         sortLayers()
@@ -332,6 +360,32 @@ class NativeCanvasView: UIView {
             objectLayerView.isUserInteractionEnabled = false
             // 绘图模式下：单指用于绘制；双指用于平移画布（更符合“any-input + 可漫游”）
             scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
+
+            // 绘图模式下：允许 scrollView 的 pinch 缩放正常工作（不被 PencilKit 吞掉）
+            if let scrollPinch = scrollView.pinchGestureRecognizer,
+               let pencilPinch = pencilCanvas.gestureRecognizers?.first(where: { $0 is UIPinchGestureRecognizer }) {
+                // 让 PencilKit 的 pinch 优先失败，从而把 pinch 缩放交给 scrollView
+                pencilPinch.require(toFail: scrollPinch)
+            }
+        }
+    }
+
+    private func setScrollTransformsFrozen(_ frozen: Bool) {
+        if frozen {
+            storedPanEnabled = scrollView.panGestureRecognizer.isEnabled
+            storedPinchEnabled = scrollView.pinchGestureRecognizer?.isEnabled ?? true
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
+            if #available(iOS 13.4, *) {
+                scrollView.panGestureRecognizer.allowedScrollTypesMask = []
+            }
+        } else {
+            scrollView.panGestureRecognizer.isEnabled = storedPanEnabled
+            scrollView.pinchGestureRecognizer?.isEnabled = storedPinchEnabled
+            if #available(iOS 13.4, *) {
+                // 恢复默认（触控板两指滑动为 continuous，滚轮为 discrete）
+                scrollView.panGestureRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
+            }
         }
     }
     
@@ -360,16 +414,26 @@ class NativeCanvasView: UIView {
         let bounded = contentRect.intersection(contentView.bounds)
         guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else { return nil }
 
-        let renderer = UIGraphicsImageRenderer(size: bounded.size)
+        let scale = UIScreen.main.scale
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        // 1) PencilKit：用官方导出，避免 drawHierarchy offscreen 漏画/空白
+        let drawingImage = pencilCanvas.drawing.image(from: bounded, scale: scale)
+
+        // 2) 对象层：用 Core Animation 渲染（确定性），并裁剪到 bounded
+        let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
         return renderer.image { rendererContext in
-            // 将要裁剪的区域移动到 (0,0)
-            rendererContext.cgContext.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
+            let ctx = rendererContext.cgContext
+            ctx.saveGState()
+            ctx.clip(to: CGRect(origin: .zero, size: bounded.size))
+            ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
+            objectLayerView.layer.render(in: ctx)
+            ctx.restoreGState()
 
-            // 渲染 Layer 1: 对象图层
-            objectLayerView.drawHierarchy(in: objectLayerView.bounds, afterScreenUpdates: true)
-
-            // 渲染 Layer 2: PencilKit 绘图
-            pencilCanvas.drawHierarchy(in: pencilCanvas.bounds, afterScreenUpdates: true)
+            // 叠加 PencilKit 层（透明背景）
+            drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
     }
 
@@ -402,6 +466,14 @@ extension NativeCanvasView: UIScrollViewDelegate {
     }
     
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        // 绘制过程中不做居中布局更新，避免 PencilKit 渲染被打断导致笔划闪烁/短暂消失
+        guard !isDrawing else {
+            onZoomChanged?(scrollView.zoomScale)
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         // 缩放时保持画布居中
         let offsetX = max((scrollView.bounds.width - scrollView.contentSize.width) * 0.5, 0)
         let offsetY = max((scrollView.bounds.height - scrollView.contentSize.height) * 0.5, 0)
@@ -409,6 +481,7 @@ extension NativeCanvasView: UIScrollViewDelegate {
             x: scrollView.contentSize.width * 0.5 + offsetX,
             y: scrollView.contentSize.height * 0.5 + offsetY
         )
+        CATransaction.commit()
         onZoomChanged?(scrollView.zoomScale)
     }
 }
@@ -416,6 +489,17 @@ extension NativeCanvasView: UIScrollViewDelegate {
 // MARK: - PKCanvasViewDelegate
 
 extension NativeCanvasView: PKCanvasViewDelegate {
+    func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+        isDrawing = true
+        // 绘制期间冻结 scrollView 变换，避免 Simulator/触控板 Indirect 输入导致坐标系漂移
+        setScrollTransformsFrozen(true)
+    }
+
+    func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+        isDrawing = false
+        setScrollTransformsFrozen(false)
+    }
+
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         onCanvasUpdated?()
     }
@@ -446,6 +530,10 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
         if uiView.currentMode != toolMode {
             uiView.currentMode = toolMode
         }
+
+        // 重新绑定回调，确保 SwiftUI 重建闭包后链路不失效
+        uiView.onCanvasUpdated = onCanvasUpdated
+        uiView.onZoomChanged = onZoomChanged
     }
     
     func makeCoordinator() -> Coordinator {

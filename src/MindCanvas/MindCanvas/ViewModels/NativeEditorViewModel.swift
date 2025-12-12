@@ -28,6 +28,15 @@ final class NativeEditorViewModel {
     
     var prompt = ""
     var isGenerating = false
+    /// 图生图/文生图流程的提示（用于 UI 呈现失败原因，避免“点了没反应/空 sheet”）
+    var flowHintMessage: String?
+
+    // MARK: - 生成流程（由 View 的 activeSheet 驱动）
+    // 这里不再维护 sheet 的 presented 状态，避免出现“双状态源”导致的无法再次打开问题。
+    // 仅保留流程中需要复用的数据（预览图 / base64）。
+
+    private var pendingImageToImageBase64: String?
+    private var pendingImageToImagePreview: UIImage?
     
     // MARK: - 服务
     
@@ -169,85 +178,167 @@ final class NativeEditorViewModel {
     
     // MARK: - AI 生成工作流
     
-    /// 生成图片
-    func generate() async {
-        guard !prompt.isEmpty else { return }
+    /// 图生图：准备预览（立即截取选框内容，然后弹出确认浮窗）
+    @discardableResult
+    func prepareImageToImageFlow() -> Bool {
+        guard !isGenerating else { return false }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            flowHintMessage = "请输入生成描述"
+            return false
+        }
+        guard let canvasView else {
+            flowHintMessage = "画布尚未就绪"
+            return false
+        }
+        guard stateManager.isMagicFrameVisible else {
+            flowHintMessage = "请先显示选框并框选区域"
+            return false
+        }
+
+        // 视口坐标（magicFrame）-> 画布内容坐标（截图使用 contentRect）
+        let viewportRect = stateManager.magicFrame
+        let contentRect = canvasView.contentRect(forViewportRect: viewportRect)
+
+        guard let snapshot = canvasView.captureContentSnapshot(rect: contentRect),
+              let imageData = snapshot.pngData() else {
+            pendingImageToImagePreview = nil
+            pendingImageToImageBase64 = nil
+            flowHintMessage = "预览准备失败：选框无效或截图失败（区域过小/越界/渲染失败）"
+            return false
+        }
+
+        pendingImageToImagePreview = snapshot
+        pendingImageToImageBase64 = imageData.base64EncodedString()
+        flowHintMessage = nil
+        return true
+    }
+
+    func getPendingImageToImagePreview() -> UIImage? {
+        pendingImageToImagePreview
+    }
+
+    func cancelImageToImageFlow() {
+        pendingImageToImageBase64 = nil
+        pendingImageToImagePreview = nil
+        flowHintMessage = nil
+    }
+
+    /// 图生图：用户确认后执行生成
+    func confirmImageToImageGenerate() async {
+        guard !isGenerating else { return }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         guard let context = modelContext else { return }
         guard let canvasView = canvasView else { return }
         guard stateManager.isMagicFrameVisible else { return }
-        
+        guard let base64String = pendingImageToImageBase64 else { return }
+
         isGenerating = true
-        
-        // Step 1: 创建 Loading Asset
+        flowHintMessage = nil
+        // 生成开始后立即清理 pending（避免 UI dismiss 链路误触发取消导致丢失输入）
+        pendingImageToImageBase64 = nil
+        pendingImageToImagePreview = nil
+
         let loadingAsset = Asset(
             url: "",
             type: .generated,
-            prompt: prompt,
+            prompt: trimmed,
             isLoading: true
         )
-        
+        loadingAsset.generationModeRawValue = GenerationMode.img2img.rawValue
+
         context.insert(loadingAsset)
         try? context.save()
         loadAssets()
-        
-        // Step 2: 捕获 Magic Frame（屏幕坐标）对应的画布内容快照
-        guard let snapshot = canvasView.captureViewportSnapshot(rect: stateManager.magicFrame) else {
-            isGenerating = false
-            context.delete(loadingAsset)
-            return
-        }
-        
-        // 转换为 Base64
-        guard let imageData = snapshot.pngData() else {
-            isGenerating = false
-            context.delete(loadingAsset)
-            return
-        }
-        let base64String = imageData.base64EncodedString()
-        
+
         do {
-            // Step 3: 调用生成 API
             let request = GenerationRequest(
-                prompt: prompt,
+                prompt: trimmed,
                 imageBase64: base64String,
                 model: "Nano Banana Pro"
             )
-            
+
             let response = try await generationService.generate(request: request)
-            
-            // Step 4: 更新 Asset
+
             loadingAsset.url = response.imageUrl
             loadingAsset.thumbnailUrl = response.thumbnailUrl
             loadingAsset.isLoading = false
-            
+
             try? context.save()
             loadAssets()
-            
-            // Step 5: 创建图层节点并回填到画布
+
             let maxZ = canvasDocument.maxZIndex
+            // 回填必须使用“画布内容坐标”frame，而不是视口 magicFrame
+            let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
             let generatedLayer = LayerNode.aiGenerated(
                 url: response.imageUrl,
-                frame: stateManager.magicFrame,
+                frame: contentRect,
                 zIndex: maxZ + 1
             )
-            
+
             canvasView.addLayer(generatedLayer)
             canvasDocument.addLayer(generatedLayer)
-            
-            // Step 6: 清空 Prompt
+
             prompt = ""
-            
-            // 隐藏 Magic Frame
             stateManager.hideMagicFrame()
-            
+
         } catch {
-            // 失败：移除 Loading Asset
+            context.delete(loadingAsset)
+            try? context.save()
+            loadAssets()
+            print("生成失败: \(error)")
+            flowHintMessage = "生成失败：\(error.localizedDescription)"
+        }
+
+        isGenerating = false
+    }
+
+    /// 文生图：生成资源（不自动上画布）
+    func generateTextToImage(prompt: String, ratio: ImageAspectRatio) async {
+        guard !isGenerating else { return }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let context = modelContext else { return }
+
+        isGenerating = true
+
+        let loadingAsset = Asset(
+            url: "",
+            type: .generated,
+            prompt: trimmed,
+            isLoading: true
+        )
+        loadingAsset.generationModeRawValue = GenerationMode.txt2img.rawValue
+        loadingAsset.aspectRatio = ratio.rawValue
+
+        context.insert(loadingAsset)
+        try? context.save()
+        loadAssets()
+
+        do {
+            let request = GenerationRequest(
+                prompt: trimmed,
+                imageBase64: nil,
+                model: "Nano Banana Pro"
+            )
+
+            let response = try await generationService.generate(request: request)
+
+            loadingAsset.url = response.imageUrl
+            loadingAsset.thumbnailUrl = response.thumbnailUrl
+            loadingAsset.isLoading = false
+
+            try? context.save()
+            loadAssets()
+
+        } catch {
             context.delete(loadingAsset)
             try? context.save()
             loadAssets()
             print("生成失败: \(error)")
         }
-        
+
         isGenerating = false
     }
     

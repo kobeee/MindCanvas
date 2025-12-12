@@ -13,6 +13,8 @@ final class Asset {
     var thumbnailUrl: String
     var type: AssetType
     var prompt: String?
+    var generationModeRawValue: String?
+    var aspectRatio: String?
     var createdAt: Date
     var isLoading: Bool
     
@@ -22,6 +24,8 @@ final class Asset {
         self.thumbnailUrl = thumbnailUrl ?? url
         self.type = type
         self.prompt = prompt
+        self.generationModeRawValue = nil
+        self.aspectRatio = nil
         self.createdAt = Date()
         self.isLoading = isLoading
     }

@@ -7,6 +7,9 @@ struct NativeEditorView: View {
     let project: Project
     @State private var viewModel: NativeEditorViewModel
     @Environment(\.columnVisibilityBinding) private var columnVisibility
+    @State private var activeSheet: ActiveSheet?
+    @State private var lastPresentedSheet: ActiveSheet?
+    @State private var didConfirmImageToImage: Bool = false
     
     init(project: Project) {
         self.project = project
@@ -49,7 +52,20 @@ struct NativeEditorView: View {
             Divider()
             
             // 右侧：控制面板
-            NativeControlPanel(viewModel: viewModel)
+            NativeControlPanel(
+                viewModel: viewModel,
+                onImageToImageTapped: {
+                    // 先准备预览（截图/校验），成功才打开 sheet，避免空内容
+                    let ok = viewModel.prepareImageToImageFlow()
+                    if ok, viewModel.getPendingImageToImagePreview() != nil {
+                        didConfirmImageToImage = false
+                        activeSheet = .img2imgConfirm
+                    }
+                },
+                onTextToImageTapped: {
+                    activeSheet = .txt2img
+                }
+            )
                 .frame(width: 320)
         }
         .navigationTitle(project.name)
@@ -71,7 +87,76 @@ struct NativeEditorView: View {
             columnVisibility?.wrappedValue = .all
             viewModel.saveCanvasDocument()
         }
+        .onChange(of: activeSheet) { _, newValue in
+            if let sheet = newValue {
+                lastPresentedSheet = sheet
+                if sheet == .img2imgConfirm {
+                    didConfirmImageToImage = false
+                }
+            }
+        }
+        .sheet(item: $activeSheet, onDismiss: {
+            // 仅当用户点外部 dismiss（未确认）时才清理 pending，避免 confirm 任务尚未读取 base64 就被清空
+            if lastPresentedSheet == .img2imgConfirm, didConfirmImageToImage == false {
+                viewModel.cancelImageToImageFlow()
+            }
+            lastPresentedSheet = nil
+            didConfirmImageToImage = false
+        }) { sheet in
+            switch sheet {
+            case .img2imgConfirm:
+                if let preview = viewModel.getPendingImageToImagePreview() {
+                    ImageToImageConfirmSheet(
+                        previewImage: preview,
+                        prompt: viewModel.prompt,
+                        onConfirm: {
+                            didConfirmImageToImage = true
+                            activeSheet = nil
+                            Task { await viewModel.confirmImageToImageGenerate() }
+                        },
+                        onCancel: {
+                            viewModel.cancelImageToImageFlow()
+                            activeSheet = nil
+                        }
+                    )
+                } else {
+                    VStack(spacing: 12) {
+                        Text("预览准备失败")
+                            .font(.headline)
+                        if let msg = viewModel.flowHintMessage, !msg.isEmpty {
+                            Text(msg)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
+                        }
+                        Button("关闭") {
+                            activeSheet = nil
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.vertical, 24)
+                }
+            case .txt2img:
+                TextToImageSheet(
+                    onGenerate: { prompt, ratio in
+                        activeSheet = nil
+                        Task { await viewModel.generateTextToImage(prompt: prompt, ratio: ratio) }
+                    },
+                    onCancel: {
+                        activeSheet = nil
+                    }
+                )
+            }
+        }
     }
+}
+
+private enum ActiveSheet: String, Identifiable {
+    case img2imgConfirm
+    case txt2img
+
+    var id: String { rawValue }
 }
 
 // MARK: - 原生画布容器
@@ -79,8 +164,8 @@ struct NativeEditorView: View {
 private struct NativeCanvasContainer: View {
     @Bindable var viewModel: NativeEditorViewModel
 
-    @State private var zoomText: String = "100"
-    @State private var isEditingZoom: Bool = false
+    @State private var zoomPercentDraft: String = "100"
+    @FocusState private var isZoomFieldFocused: Bool
     
     var body: some View {
         GeometryReader { proxy in
@@ -132,9 +217,9 @@ private struct NativeCanvasContainer: View {
             viewModel.canvasView?.setDrawingTool(isPen: newValue)
         }
         .onChange(of: viewModel.stateManager.zoomScale) { _, newValue in
-            // 避免正在编辑时被实时缩放刷新打断
-            guard !isEditingZoom else { return }
-            zoomText = "\(Int((newValue * 100).rounded()))"
+            // 未聚焦时：同步真实缩放到 HUD（聚焦时不打断用户输入）
+            guard !isZoomFieldFocused else { return }
+            zoomPercentDraft = "\(Int((newValue * 100).rounded()))"
         }
     }
 
@@ -149,20 +234,20 @@ private struct NativeCanvasContainer: View {
             }
             .buttonStyle(.bordered)
 
-            TextField("", text: $zoomText)
+            TextField("", text: $zoomPercentDraft)
                 .frame(width: 72)
                 .multilineTextAlignment(.center)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numberPad)
-                .onTapGesture {
-                    isEditingZoom = true
-                }
-                .onSubmit {
-                    applyZoomText()
-                }
-                .onChange(of: zoomText) { _, _ in
-                    // 仅标记编辑状态即可，避免被 onChange(zoomScale) 覆盖
-                    isEditingZoom = true
+                .focused($isZoomFieldFocused)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("完成") {
+                            applyZoomDraft()
+                            isZoomFieldFocused = false
+                        }
+                    }
                 }
 
             Text("%")
@@ -184,10 +269,13 @@ private struct NativeCanvasContainer: View {
         .cornerRadius(12)
     }
 
-    private func applyZoomText() {
-        defer { isEditingZoom = false }
-        let trimmed = zoomText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let percent = Double(trimmed) else { return }
+    private func applyZoomDraft() {
+        let trimmed = zoomPercentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let percent = Double(trimmed) else {
+            // 输入非法：回滚到真实缩放值
+            zoomPercentDraft = "\(Int((viewModel.stateManager.zoomScale * 100).rounded()))"
+            return
+        }
         let scale = percent / 100.0
         viewModel.canvasView?.setZoomScale(scale, animated: true)
     }
@@ -290,6 +378,8 @@ private struct NativeCanvasContainer: View {
 
 private struct NativeControlPanel: View {
     @Bindable var viewModel: NativeEditorViewModel
+    let onImageToImageTapped: () -> Void
+    let onTextToImageTapped: () -> Void
     
     var body: some View {
         ScrollView {
@@ -386,9 +476,7 @@ private struct NativeControlPanel: View {
     private var generateSection: some View {
         VStack(spacing: 12) {
             Button {
-                Task {
-                    await viewModel.generate()
-                }
+                onImageToImageTapped()
             } label: {
                 if viewModel.isGenerating {
                     HStack {
@@ -397,15 +485,26 @@ private struct NativeControlPanel: View {
                         Text("生成中...")
                     }
                 } else {
-                    Label("生成图片", systemImage: "wand.and.stars")
+                    Label("图生图", systemImage: "wand.and.stars")
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.prompt.isEmpty || 
-                     viewModel.isGenerating || 
-                     !viewModel.stateManager.isMagicFrameVisible)
+            .disabled(
+                viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                viewModel.isGenerating ||
+                !viewModel.stateManager.isMagicFrameVisible
+            )
             .frame(maxWidth: .infinity)
             .frame(height: 50)
+
+            Button {
+                onTextToImageTapped()
+            } label: {
+                Label("文生图", systemImage: "paintpalette")
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isGenerating)
+            .frame(maxWidth: .infinity)
         }
     }
     
@@ -427,7 +526,7 @@ private struct NativeControlPanel: View {
                 
                 infoRow(
                     icon: "wand.and.stars",
-                    text: "点击生成按钮开始创作"
+                    text: "点击图生图开始创作，或使用文生图生成独立素材"
                 )
                 
                 if !viewModel.stateManager.isMagicFrameVisible {
@@ -437,6 +536,20 @@ private struct NativeControlPanel: View {
                         Text("请先显示选框")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                }
+
+                if let msg = viewModel.flowHintMessage, !msg.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(msg)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(8)
                     .background(Color.orange.opacity(0.1))

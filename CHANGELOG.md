@@ -1,5 +1,72 @@
 # 开发记录
 
+## 2025-12-12 - 编辑器交互问题修复 v1.1（Zoom / 触控板 / Sheet / 绘画漂移 / 图生图预览）
+
+### 背景
+依据 `docs/design/fix/editor_interaction_fixes_v1.1.md` 的“唯一方案”，对原生编辑器在 Simulator 触控板场景下暴露的问题做集中修复：Zoom HUD 卡死、Sheet 无法再次打开、绘制漂移、图生图预览截图不确定与回填坐标风险。
+
+### 主要改动（iOS）
+- **Zoom HUD：百分比卡死**
+  - 用 `FocusState` 作为“是否编辑”的唯一依据，引入输入草稿 `zoomPercentDraft` 与实际缩放 `zoomScale` 分离
+  - 数字键盘增加“完成”按钮，显式应用输入并退出编辑态
+  - 相关文件：`src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+- **Sheet：单一事实来源**
+  - 移除 ViewModel 中 `isTextToImagePresented / isImageToImageConfirmPresented`，由 View 的 `activeSheet` 作为唯一驱动
+  - 图生图：先准备预览成功才打开确认 Sheet；点外部 dismiss 会正确清理 pending；确认生成时避免因 dismiss 链路提前清空输入
+  - 相关文件：
+    - `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+    - `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+
+- **Simulator 触控板：Indirect 输入 + 绘制漂移**
+  - 显式允许 `scroll wheel / trackpad` 的 scroll 类型与 pinch 的 touch types（包含 indirect）
+  - 绘制开始/结束时冻结/恢复 scrollView 的 pan/pinch/scroll wheel，避免绘制中坐标系变化导致漂移
+  - 相关文件：`src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+
+- **图生图预览：确定性截图 + 回填坐标一致**
+  - `magicFrame` 保持“视口坐标”语义；截图与回填统一转换为“画布内容坐标”
+  - 截图链路替换 `drawHierarchy`：PencilKit 使用 `PKDrawing.image(...)` 导出；对象层使用 `CALayer.render(in:)` 合成
+  - 相关文件：
+    - `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+    - `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+
+## 2025-12-12 - 编辑器问题修复与生成流程优化 v1.0
+
+### 背景
+基于《编辑器问题修复与生成流程优化方案 v1.0》，对原生编辑器的缩放、手势与生成流程做一次集中修复与增强，提升稳定性与可控性；同时补齐“图生图确认预览”和“文生图”能力。
+
+### 主要改动
+- **问题修复：缩放 HUD 百分比不更新**
+  - 修复 `NativeCanvasViewWrapper.updateUIView` 未重新绑定回调导致的缩放状态回传链路失效
+  - 相关文件：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+- **问题修复：双指捏合缩放不可用**
+  - 调整绘图模式下的 pinch 手势协调，确保 scrollView 的缩放手势可用
+  - 相关文件：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+- **问题修复：绘画模式下笔划闪烁/短暂消失**
+  - 绘制期间避免触发影响 PencilKit 渲染的居中布局更新，并禁用缩放回调中的隐式动画
+  - 相关文件：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+- **生成流程：图生图确认预览浮窗**
+  - 点击“图生图”后先截取选框区域内容并弹出确认浮窗，用户确认后才执行生成
+  - 相关文件：
+    - `Views/Editor/Sheets/ImageToImageConfirmSheet.swift`
+    - `ViewModels/NativeEditorViewModel.swift`
+    - `Views/Editor/NativeEditorView.swift`
+
+- **生成流程：新增文生图（生成独立素材）**
+  - 新增文生图输入浮窗，支持选择生成尺寸比例（仅记录元数据，不影响 mock 生成）
+  - 生成结果进入资源库（不自动上画布）
+  - 相关文件：
+    - `Views/Editor/Sheets/TextToImageSheet.swift`
+    - `Models/Generation.swift`
+    - `Models/Asset.swift`
+    - `ViewModels/NativeEditorViewModel.swift`
+
+### 验证
+- 新增验证文档：`docs/tests/validation/2025-12-12-编辑器问题修复与生成流程优化.md`
+
 ## 2025-12-12 - 原生编辑器 v4 交互与画布体验优化 ✨
 
 ### 背景
