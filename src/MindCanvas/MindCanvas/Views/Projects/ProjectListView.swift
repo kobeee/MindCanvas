@@ -10,7 +10,7 @@ struct ProjectListView: View {
             ScrollView {
                 LazyVStack(spacing: 20) {
                     ForEach(projects) { project in
-                        NavigationLink(destination: EditorView(project: project)) {
+                        NavigationLink(destination: NativeEditorView(project: project)) {
                             ProjectCard(project: project)
                         }
                         .buttonStyle(.plain)
