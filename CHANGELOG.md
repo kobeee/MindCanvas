@@ -1,5 +1,297 @@
 # 开发记录
 
+## 2025-12-12 - 编辑器布局修复 v1.0 ✅
+
+### 修复目标
+解决编辑器在 iPhone 和 iPad 上"揉成一团"的布局问题，实现全屏沉浸式横屏编辑体验。
+
+### 核心变更
+
+#### 1. 导航架构重构：从 Push 改为 FullScreenCover
+**文件**: `ProjectListView.swift`
+
+**变更前**:
+- 使用 `NavigationLink` 进入编辑器
+- 编辑器作为导航堆栈中的详情页
+- iPad 上左侧 Sidebar 保留，压缩画布空间
+
+**变更后**:
+- 添加 `@State private var selectedProject: Project?`
+- 使用 `.fullScreenCover(item: $selectedProject)` 呈现编辑器
+- 编辑器覆盖整个屏幕，Sidebar 完全消失
+
+```swift
+// 触发方式从 NavigationLink 改为 Button + State
+Button {
+    selectedProject = project
+} label: {
+    ProjectCard(project: project)
+}
+
+// 新增全屏模态展示
+.fullScreenCover(item: $selectedProject) { project in
+    NativeEditorView(project: project)
+}
+```
+
+#### 2. 编辑器布局简化：恢复硬编码三栏布局
+**文件**: `NativeEditorView.swift`
+
+**移除内容**:
+- ❌ 移除 `@Environment(\.horizontalSizeClass)`
+- ❌ 移除 `@Environment(\.columnVisibilityBinding)`
+- ❌ 移除 `showLibrarySheet` / `showControlPanelSheet` 状态
+- ❌ 移除 `compactLayout` / `regularLayout` 判断逻辑
+- ❌ 移除 iPhone 专用的 Toolbar 按钮和 Sheet 面板
+- ❌ 移除 `.navigationTitle` 和 `.navigationBarTitleDisplayMode`
+
+**新增内容**:
+- ✅ 添加 `@Environment(\.dismiss)` 用于关闭全屏视图
+- ✅ 恢复简单的 `HStack` 三栏布局：
+  ```
+  [资源库 300pt] | [画布 自适应] | [控制面板 320pt]
+  ```
+- ✅ 在左上角添加关闭按钮（替代原导航栏返回）
+
+**新布局结构**:
+```swift
+var body: some View {
+    HStack(spacing: 0) {
+        NativeAssetLibraryView(...).frame(width: 300)
+        Divider()
+        NativeCanvasContainer(viewModel: viewModel)
+        Divider()
+        NativeControlPanel(...).frame(width: 320)
+    }
+    .overlay(alignment: .topLeading) {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark.circle.fill")
+        }
+    }
+}
+```
+
+### 预期效果
+
+#### iPad
+- ✅ 点击项目 → 界面覆盖全屏（左侧导航栏消失）
+- ✅ 沉浸式三栏创作界面，画布空间充足（> 500pt）
+- ✅ 点击关闭按钮 → 恢复项目列表界面
+
+#### iPhone
+- ✅ 启动后自动横屏，利用长边（~850pt）容纳三栏布局
+- ✅ 画布剩余空间约 230pt（850 - 620），足够基本编辑
+
+### 技术决策
+
+1. **为什么使用 `.fullScreenCover` 而非 `.sheet`?**
+   - `.sheet` 在 iPad 上默认呈现为卡片模式，无法完全覆盖屏幕
+   - `.fullScreenCover` 创建新的 Window 级上下文，物理上隔离导航层级
+
+2. **为什么回滚响应式布局?**
+   - 专业创作工具需要稳定的工作区，不应随屏幕尺寸动态调整
+   - 在确保横屏的前提下，硬编码布局更简洁、可控
+
+3. **为什么不保留 compact 模式的 Sheet 面板?**
+   - 简化代码，减少维护成本
+   - 后续会通过强制横屏统一体验，无需适配竖屏
+
+#### 3. 全局横屏设置
+**文件**: `MindCanvas.xcodeproj/project.pbxproj`
+
+**变更**:
+- ✅ iPad: 移除竖屏支持，只保留 `UIInterfaceOrientationLandscapeLeft` 和 `UIInterfaceOrientationLandscapeRight`
+- ✅ iPhone: 移除竖屏支持，只保留横屏方向
+
+**效果**:
+- App 启动后自动进入横屏模式
+- 旋转设备只在左横屏和右横屏之间切换
+- 无需代码动态控制方向
+
+### 影响范围
+- ✅ 无编译错误
+- ✅ 不影响现有功能（资源库、控制面板、画布交互等）
+- ✅ 仅改变导航方式和布局呈现
+
+---
+
+## 2025-12-12 - 绘图漂移问题排查记录（未解决）⚠️
+
+### 问题现象
+- 绘图模式下，笔画绘制过程中会漂移
+- 松开后笔画恢复到正确位置
+- **漂移方向始终是右下角**
+- 执行某些操作（点击图生图、文生图、显示/隐藏选框等）后问题有时会消失
+- 重新进入页面后问题又出现
+- 测试环境：Simulator + 触控板
+
+### 已尝试的所有修复方案（均无效）
+
+#### 方案 1：绘制过程中不触发保存回调
+```swift
+func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+    guard !isDrawing else { return }  // 绘制中跳过
+    onCanvasUpdated?()
+}
+```
+**假设**：访问 `pencilCanvas.drawing` 数据可能干扰绘制
+**结果**：无效
+
+#### 方案 2：scrollViewDidZoom 绘制中完全跳过
+```swift
+func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    guard !isDrawing else { return }
+    // ...
+}
+```
+**假设**：居中布局更新干扰绘制
+**结果**：无效
+
+#### 方案 3：updateUIView 绘制中跳过
+```swift
+func updateUIView(_ uiView: NativeCanvasView, context: Context) {
+    guard !uiView.isDrawing else { return }
+    // ...
+}
+```
+**假设**：SwiftUI 更新干扰 UIKit 绘制
+**结果**：无效
+
+#### 方案 4：彻底冻结 scrollView
+```swift
+private func setScrollTransformsFrozen(_ frozen: Bool) {
+    if frozen {
+        scrollView.panGestureRecognizer.isEnabled = false
+        scrollView.pinchGestureRecognizer?.isEnabled = false
+        scrollView.isScrollEnabled = false
+        scrollView.bounces = false
+        scrollView.bouncesZoom = false
+        scrollView.panGestureRecognizer.allowedScrollTypesMask = []
+    }
+    // ...
+}
+```
+**假设**：手势和滚动事件干扰绘制
+**结果**：无效
+
+#### 方案 5：layoutSubviews 绘制中保护
+```swift
+override func layoutSubviews() {
+    super.layoutSubviews()
+    guard !isDrawing else { return }
+    // ...
+}
+```
+**假设**：frame 变化导致坐标系变化
+**结果**：无效
+
+#### 方案 6：setZoomScale 绘制中保护
+```swift
+func setZoomScale(_ scale: CGFloat, animated: Bool) {
+    guard !isDrawing else { return }
+    // ...
+}
+```
+**假设**：HUD 按钮触发缩放干扰绘制
+**结果**：无效
+
+#### 方案 7：禁用 PKCanvasView 自身的 ScrollView 行为
+```swift
+// PKCanvasView 继承自 UIScrollView！
+pencilCanvas.isScrollEnabled = false
+pencilCanvas.minimumZoomScale = 1.0
+pencilCanvas.maximumZoomScale = 1.0
+pencilCanvas.bouncesZoom = false
+pencilCanvas.bounces = false
+pencilCanvas.alwaysBounceVertical = false
+pencilCanvas.alwaysBounceHorizontal = false
+```
+**假设**：嵌套 ScrollView 导致坐标冲突
+**结果**：无效
+
+#### 方案 8：进入绘图模式时重置手势状态
+```swift
+private func resetScrollViewGestures() {
+    scrollView.panGestureRecognizer.isEnabled = false
+    scrollView.pinchGestureRecognizer?.isEnabled = false
+    DispatchQueue.main.async { ... }
+}
+```
+**假设**：手势状态残留导致问题
+**结果**：无效
+
+#### 方案 9：scrollViewDidScroll 强制恢复 contentOffset
+```swift
+func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    if isDrawing {
+        scrollView.contentOffset = storedContentOffset
+    }
+}
+```
+**假设**：contentOffset 被意外修改导致右下角漂移
+**结果**：无效
+
+### 问题特征分析
+
+1. **漂移方向固定为右下角**
+   - 在 iOS 坐标系中，右下 = X+ Y+
+   - 可能与 contentOffset 增加有关
+   - 但强制恢复 contentOffset 也无效
+
+2. **松开后恢复正确位置**
+   - 说明 PencilKit 内部记录的坐标是正确的
+   - 问题出在显示/渲染层面
+
+3. **某些操作后问题消失**
+   - 这些操作都会触发 SwiftUI 视图更新
+   - 可能会"意外"重置某些状态
+
+4. **重新进入页面问题复现**
+   - 与视图初始化有关
+
+### 架构信息
+
+```
+NativeCanvasView (UIView)
+└── scrollView (UIScrollView) - 外层滚动/缩放
+    └── contentView (UIView) - 5000x5000 画布
+        ├── objectLayerView (UIView) - 图片图层
+        └── pencilCanvas (PKCanvasView) - 绘图层
+            └── 继承自 UIScrollView！
+```
+
+### 可能的根因方向（未验证）
+
+1. **Simulator 触控板的特殊行为**
+   - Simulator 中触控板输入的事件类型可能和真机不同
+   - 需要在真机上测试验证
+
+2. **PKCanvasView 的内部实现**
+   - PKCanvasView 可能有我们无法控制的内部行为
+   - Apple 没有公开足够的 API
+
+3. **SwiftUI/UIKit 混合架构的问题**
+   - GeometryReader 可能导致意外的布局更新
+   - SwiftUI 的声明式更新可能和 UIKit 冲突
+
+4. **坐标转换问题**
+   - 触摸点从 window 坐标到 PKCanvasView 局部坐标的转换可能有问题
+   - scrollView 的 transform 可能影响坐标转换
+
+### 建议的后续排查方向
+
+1. **在真机上测试** - 确认是否为 Simulator 特有问题
+2. **简化架构** - 尝试不使用外层 scrollView，直接使用 PKCanvasView 自身的缩放功能
+3. **使用 Apple 官方示例** - 参考 Apple 的 PencilKit 示例代码
+4. **提交 Apple 反馈** - 如果是 PencilKit 的 bug
+
+### 修改的文件
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+
+---
+
+---
+
 ## 2025-12-12 - 编辑器交互问题修复 v1.1（Zoom / 触控板 / Sheet / 绘画漂移 / 图生图预览）
 
 ### 背景

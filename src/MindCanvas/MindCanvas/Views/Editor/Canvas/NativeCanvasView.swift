@@ -67,12 +67,18 @@ class NativeCanvasView: UIView {
     var onZoomChanged: ((CGFloat) -> Void)?
 
     /// 绘制中标记（用于避免 PencilKit 渲染期间触发布局更新造成闪烁）
-    private var isDrawing = false
+    private(set) var isDrawing = false
 
     // MARK: - Indirect input / drawing freeze
 
     private var storedPanEnabled: Bool = true
     private var storedPinchEnabled: Bool = true
+    private var storedScrollEnabled: Bool = true
+    private var storedBounces: Bool = true
+    private var storedBouncesZoom: Bool = true
+    private var storedScrollViewInteraction: Bool = true
+    private var storedContentOffset: CGPoint = .zero
+    private var storedZoomScale: CGFloat = 1.0
     
     // MARK: - Initialization
     
@@ -137,6 +143,19 @@ class NativeCanvasView: UIView {
         // drawingPolicy 由 currentMode 决定（在 updateGestureHandling 中统一设置）
         pencilCanvas.delegate = self
         
+        // 关键：禁用 PKCanvasView 自身的滚动行为！
+        // PKCanvasView 继承自 UIScrollView，如果不禁用，会和外层 scrollView 冲突
+        // 这可能是导致绘图漂移的根本原因
+        pencilCanvas.isScrollEnabled = false
+        pencilCanvas.minimumZoomScale = 1.0
+        pencilCanvas.maximumZoomScale = 1.0
+        pencilCanvas.bouncesZoom = false
+        pencilCanvas.bounces = false
+        pencilCanvas.alwaysBounceVertical = false
+        pencilCanvas.alwaysBounceHorizontal = false
+        pencilCanvas.showsVerticalScrollIndicator = false
+        pencilCanvas.showsHorizontalScrollIndicator = false
+        
         // 图层堆叠
         contentView.addSubview(objectLayerView)
         contentView.addSubview(pencilCanvas)
@@ -173,6 +192,9 @@ class NativeCanvasView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         
+        // 绘制过程中不修改任何 frame，避免坐标系变化导致笔画漂移
+        guard !isDrawing else { return }
+        
         // 设置内容视图和图层尺寸
         contentView.frame = CGRect(origin: .zero, size: canvasSize)
         objectLayerView.frame = contentView.bounds
@@ -200,6 +222,8 @@ class NativeCanvasView: UIView {
 
     /// 设置缩放比例（会自动限制在 min/max 范围内）
     func setZoomScale(_ scale: CGFloat, animated: Bool) {
+        // 绘制过程中不允许缩放，避免坐标系变化
+        guard !isDrawing else { return }
         let clamped = max(minZoomScale, min(maxZoomScale, scale))
         scrollView.setZoomScale(clamped, animated: animated)
     }
@@ -358,30 +382,67 @@ class NativeCanvasView: UIView {
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingPolicy = .anyInput
             objectLayerView.isUserInteractionEnabled = false
-            // 绘图模式下：单指用于绘制；双指用于平移画布（更符合“any-input + 可漫游”）
+            // 绘图模式下：双指用于平移画布
             scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
-
-            // 绘图模式下：允许 scrollView 的 pinch 缩放正常工作（不被 PencilKit 吞掉）
-            if let scrollPinch = scrollView.pinchGestureRecognizer,
-               let pencilPinch = pencilCanvas.gestureRecognizers?.first(where: { $0 is UIPinchGestureRecognizer }) {
-                // 让 PencilKit 的 pinch 优先失败，从而把 pinch 缩放交给 scrollView
-                pencilPinch.require(toFail: scrollPinch)
-            }
+            
+            // 重置 scrollView 手势识别器状态，确保干净的起点
+            resetScrollViewGestures()
+        }
+    }
+    
+    /// 重置 scrollView 的手势识别器（确保进入绘图模式时状态干净）
+    private func resetScrollViewGestures() {
+        // 临时禁用再启用，强制重置手势状态
+        let panEnabled = scrollView.panGestureRecognizer.isEnabled
+        let pinchEnabled = scrollView.pinchGestureRecognizer?.isEnabled ?? true
+        
+        scrollView.panGestureRecognizer.isEnabled = false
+        scrollView.pinchGestureRecognizer?.isEnabled = false
+        
+        // 在下一个 run loop 重新启用
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // 只有当不在绘制中时才恢复
+            guard !self.isDrawing else { return }
+            self.scrollView.panGestureRecognizer.isEnabled = panEnabled
+            self.scrollView.pinchGestureRecognizer?.isEnabled = pinchEnabled
         }
     }
 
     private func setScrollTransformsFrozen(_ frozen: Bool) {
         if frozen {
+            // 存储当前状态
             storedPanEnabled = scrollView.panGestureRecognizer.isEnabled
             storedPinchEnabled = scrollView.pinchGestureRecognizer?.isEnabled ?? true
+            storedScrollEnabled = scrollView.isScrollEnabled
+            storedBounces = scrollView.bounces
+            storedBouncesZoom = scrollView.bouncesZoom
+            storedScrollViewInteraction = scrollView.isUserInteractionEnabled
+            storedContentOffset = scrollView.contentOffset
+            storedZoomScale = scrollView.zoomScale
+            
+            // 完全冻结 scrollView - 使用最激进的方式
             scrollView.panGestureRecognizer.isEnabled = false
             scrollView.pinchGestureRecognizer?.isEnabled = false
+            scrollView.isScrollEnabled = false
+            scrollView.bounces = false
+            scrollView.bouncesZoom = false
+            // 禁用 scrollView 本身的交互，但保持 pencilCanvas 可用
+            // 注意：不能禁用 scrollView.isUserInteractionEnabled，否则 pencilCanvas 也无法接收事件
             if #available(iOS 13.4, *) {
                 scrollView.panGestureRecognizer.allowedScrollTypesMask = []
             }
+            
+            // 取消所有正在进行的手势
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
         } else {
+            // 恢复状态
             scrollView.panGestureRecognizer.isEnabled = storedPanEnabled
             scrollView.pinchGestureRecognizer?.isEnabled = storedPinchEnabled
+            scrollView.isScrollEnabled = storedScrollEnabled
+            scrollView.bounces = storedBounces
+            scrollView.bouncesZoom = storedBouncesZoom
             if #available(iOS 13.4, *) {
                 // 恢复默认（触控板两指滑动为 continuous，滚轮为 discrete）
                 scrollView.panGestureRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
@@ -391,6 +452,8 @@ class NativeCanvasView: UIView {
     
     /// 切换绘图工具
     func setDrawingTool(isPen: Bool) {
+        // 绘制过程中不切换工具，避免可能的干扰
+        guard !isDrawing else { return }
         pencilCanvas.tool = isPen ? inkingTool : eraserTool
     }
     
@@ -465,12 +528,17 @@ extension NativeCanvasView: UIScrollViewDelegate {
         contentView
     }
     
-    func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        // 绘制过程中不做居中布局更新，避免 PencilKit 渲染被打断导致笔划闪烁/短暂消失
-        guard !isDrawing else {
-            onZoomChanged?(scrollView.zoomScale)
-            return
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // 关键修复：绘制过程中强制恢复 contentOffset，阻止任何滚动
+        // 这是导致"向右下角漂移"的根本原因！
+        if isDrawing {
+            scrollView.contentOffset = storedContentOffset
         }
+    }
+    
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        // 绘制过程中完全跳过，不做任何处理（包括回调），避免任何可能干扰绘制的操作
+        guard !isDrawing else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -498,9 +566,14 @@ extension NativeCanvasView: PKCanvasViewDelegate {
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
         isDrawing = false
         setScrollTransformsFrozen(false)
+        // 绘制结束后再触发更新回调（避免绘制过程中访问 drawing 数据导致坐标漂移）
+        onCanvasUpdated?()
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        // 绘制过程中不触发回调（因为回调可能会访问 drawing 数据，干扰正在进行的绘制）
+        // 仅在绘制结束时（canvasViewDidEndUsingTool）触发一次
+        guard !isDrawing else { return }
         onCanvasUpdated?()
     }
 }
@@ -527,6 +600,9 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: NativeCanvasView, context: Context) {
+        // 绘制过程中不进行任何更新，避免干扰 PencilKit 绘制坐标系
+        guard !uiView.isDrawing else { return }
+        
         if uiView.currentMode != toolMode {
             uiView.currentMode = toolMode
         }

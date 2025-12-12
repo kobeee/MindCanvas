@@ -4,13 +4,16 @@ import SwiftData
 struct ProjectListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Project.lastModified, order: .reverse) private var projects: [Project]
+    @State private var selectedProject: Project?
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 20) {
                     ForEach(projects) { project in
-                        NavigationLink(destination: NativeEditorView(project: project)) {
+                        Button {
+                            selectedProject = project
+                        } label: {
                             ProjectCard(project: project)
                         }
                         .buttonStyle(.plain)
@@ -33,6 +36,9 @@ struct ProjectListView: View {
                 if projects.isEmpty {
                     createSampleProjects()
                 }
+            }
+            .fullScreenCover(item: $selectedProject) { project in
+                NativeEditorView(project: project)
             }
         }
     }

@@ -6,7 +6,8 @@ import SwiftData
 struct NativeEditorView: View {
     let project: Project
     @State private var viewModel: NativeEditorViewModel
-    @Environment(\.columnVisibilityBinding) private var columnVisibility
+    @Environment(\.dismiss) private var dismiss
+    
     @State private var activeSheet: ActiveSheet?
     @State private var lastPresentedSheet: ActiveSheet?
     @State private var didConfirmImageToImage: Bool = false
@@ -55,7 +56,6 @@ struct NativeEditorView: View {
             NativeControlPanel(
                 viewModel: viewModel,
                 onImageToImageTapped: {
-                    // 先准备预览（截图/校验），成功才打开 sheet，避免空内容
                     let ok = viewModel.prepareImageToImageFlow()
                     if ok, viewModel.getPendingImageToImagePreview() != nil {
                         didConfirmImageToImage = false
@@ -66,25 +66,27 @@ struct NativeEditorView: View {
                     activeSheet = .txt2img
                 }
             )
-                .frame(width: 320)
+            .frame(width: 320)
         }
-        .navigationTitle(project.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                TextField("项目名称", text: $viewModel.projectName)
-                    .textFieldStyle(.plain)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
+        .overlay(alignment: .topLeading) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .background(
+                        Circle()
+                            .fill(.black.opacity(0.3))
+                            .frame(width: 32, height: 32)
+                    )
             }
+            .padding()
         }
         .onAppear {
-            columnVisibility?.wrappedValue = .detailOnly
             viewModel.loadCanvasDocument()
         }
         .onDisappear {
-            columnVisibility?.wrappedValue = .all
             viewModel.saveCanvasDocument()
         }
         .onChange(of: activeSheet) { _, newValue in
@@ -96,7 +98,6 @@ struct NativeEditorView: View {
             }
         }
         .sheet(item: $activeSheet, onDismiss: {
-            // 仅当用户点外部 dismiss（未确认）时才清理 pending，避免 confirm 任务尚未读取 base64 就被清空
             if lastPresentedSheet == .img2imgConfirm, didConfirmImageToImage == false {
                 viewModel.cancelImageToImageFlow()
             }
