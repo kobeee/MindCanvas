@@ -7,7 +7,7 @@ enum Theme {
     enum Colors {
         // 主品牌色
         static let accent = Color("AccentColor")
-        static let brandBlue = Color(hex: "#007AFF")
+        static let brandBlue = Color.fromHex("#007AFF") ?? Color.blue
         
         // 背景色
         static let appBackground = Color(uiColor: .systemGroupedBackground)
@@ -25,7 +25,7 @@ enum Theme {
         
         // 渐变金色（用于高级功能）
         static let goldGradient = LinearGradient(
-            colors: [Color(hex: "#FFD700"), Color(hex: "#FFA500")],
+            colors: [Color.fromHex("#FFD700") ?? Color.yellow, Color.fromHex("#FFA500") ?? Color.orange],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )

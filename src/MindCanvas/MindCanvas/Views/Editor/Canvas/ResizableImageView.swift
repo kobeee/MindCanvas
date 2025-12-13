@@ -170,7 +170,33 @@ class ResizableImageView: UIView {
         gesture.setTranslation(.zero, in: superview)
         
         if gesture.state == .ended {
+            // 记录移动操作用于撤销
+            let fromFrame = node.frame
             syncToNode()
+            let toFrame = node.frame
+            
+            // 如果位置发生了变化，记录操作
+            if fromFrame != toFrame {
+                let action = MoveLayerAction(
+                    layerID: node.id,
+                    fromFrame: fromFrame,
+                    toFrame: toFrame,
+                    canvasView: superview?.superview as? NativeCanvasView
+                )
+                
+                // 通过回调通知状态管理器记录操作
+                onNodeUpdated?(node)
+                
+                // 如果有父视图且是 NativeCanvasView，直接记录操作
+                if let canvasView = superview?.superview as? NativeCanvasView {
+                    // 这里需要通过某种方式访问 CanvasStateManager
+                    // 暂时通过通知中心发送
+                    NotificationCenter.default.post(
+                        name: .canvasActionRecorded,
+                        object: action
+                    )
+                }
+            }
         }
     }
     
@@ -182,12 +208,40 @@ class ResizableImageView: UIView {
         gesture.scale = 1.0
         
         if gesture.state == .ended {
+            // 记录缩放操作用于撤销
+            let fromFrame = node.frame
+            
             // 更新 frame 以反映新尺寸
             let newWidth = bounds.width * transform.a
             let newHeight = bounds.height * transform.d
             bounds.size = CGSize(width: newWidth, height: newHeight)
             transform = CGAffineTransform(rotationAngle: node.rotation)
             syncToNode()
+            
+            let toFrame = node.frame
+            
+            // 如果尺寸发生了变化，记录操作
+            if fromFrame != toFrame {
+                let action = ScaleLayerAction(
+                    layerID: node.id,
+                    fromFrame: fromFrame,
+                    toFrame: toFrame,
+                    canvasView: superview?.superview as? NativeCanvasView
+                )
+                
+                // 通过回调通知状态管理器记录操作
+                onNodeUpdated?(node)
+                
+                // 如果有父视图且是 NativeCanvasView，直接记录操作
+                if let canvasView = superview?.superview as? NativeCanvasView {
+                    // 这里需要通过某种方式访问 CanvasStateManager
+                    // 暂时通过通知中心发送
+                    NotificationCenter.default.post(
+                        name: .canvasActionRecorded,
+                        object: action
+                    )
+                }
+            }
         }
     }
     
@@ -198,7 +252,33 @@ class ResizableImageView: UIView {
         gesture.rotation = 0
         
         if gesture.state == .ended {
+            // 记录旋转操作用于撤销
+            let fromRotation = node.rotation
             syncToNode()
+            let toRotation = node.rotation
+            
+            // 如果旋转角度发生了变化，记录操作
+            if abs(fromRotation - toRotation) > 0.001 {
+                let action = RotateLayerAction(
+                    layerID: node.id,
+                    fromRotation: fromRotation,
+                    toRotation: toRotation,
+                    canvasView: superview?.superview as? NativeCanvasView
+                )
+                
+                // 通过回调通知状态管理器记录操作
+                onNodeUpdated?(node)
+                
+                // 如果有父视图且是 NativeCanvasView，直接记录操作
+                if let canvasView = superview?.superview as? NativeCanvasView {
+                    // 这里需要通过某种方式访问 CanvasStateManager
+                    // 暂时通过通知中心发送
+                    NotificationCenter.default.post(
+                        name: .canvasActionRecorded,
+                        object: action
+                    )
+                }
+            }
         }
     }
     

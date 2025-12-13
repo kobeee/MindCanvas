@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 /// 原生编辑器视图 (重构后的主编辑器)
 /// 集成了原生画布、工具栏和控制面板
@@ -12,9 +13,49 @@ struct NativeEditorView: View {
     @State private var lastPresentedSheet: ActiveSheet?
     @State private var didConfirmImageToImage: Bool = false
     
+    // 图片选择器
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showPhotoPicker = false
+    @State private var showImageSourceMenu = false
+    @State private var showCamera = false
+    
     init(project: Project) {
         self.project = project
         self._viewModel = State(initialValue: NativeEditorViewModel(project: project))
+    }
+    
+    /// 设置绘图操作的撤销支持
+    private func setupDrawingUndoSupport() {
+        // 等待画布视图初始化完成
+        guard let canvasView = viewModel.canvasView else { return }
+        
+        // 存储上一次的绘图数据
+        var lastDrawingData = canvasView.getDrawingData()
+        
+        // 监听画布更新
+        let originalOnCanvasUpdated = canvasView.onCanvasUpdated
+        canvasView.onCanvasUpdated = { [weak viewModel] in
+            // 调用原始回调
+            originalOnCanvasUpdated?()
+            
+            guard let viewModel = viewModel else { return }
+            
+            let currentDrawingData = canvasView.getDrawingData()
+            
+            // 如果数据发生变化，记录操作
+            if let lastData = lastDrawingData,
+               lastData != currentDrawingData {
+                let action = DrawingAction(
+                    fromDrawingData: lastData,
+                    toDrawingData: currentDrawingData,
+                    canvasView: canvasView
+                )
+                viewModel.stateManager.recordAction(action)
+            }
+            
+            // 更新上一次的数据
+            lastDrawingData = currentDrawingData
+        }
     }
     
     var body: some View {
@@ -48,7 +89,12 @@ struct NativeEditorView: View {
             Divider()
             
             // 中间：原生画布
-            NativeCanvasContainer(viewModel: viewModel)
+            NativeCanvasContainer(
+                viewModel: viewModel,
+                onImageImport: {
+                    showImageSourceMenu = true
+                }
+            )
             
             Divider()
             
@@ -85,6 +131,57 @@ struct NativeEditorView: View {
         }
         .onAppear {
             viewModel.loadCanvasDocument()
+            // 绑定清屏回调（支持撤销）
+            viewModel.stateManager.onClearCanvas = { [weak viewModel] in
+                guard let viewModel = viewModel, let canvasView = viewModel.canvasView else { return }
+                // 记录当前状态用于撤销
+                let previousLayers = canvasView.getLayers()
+                let previousDrawingData = canvasView.getDrawingData()
+                let action = ClearCanvasAction(
+                    previousLayers: previousLayers,
+                    previousDrawingData: previousDrawingData,
+                    canvasView: canvasView
+                )
+                viewModel.stateManager.recordAction(action)
+                // 执行清屏
+                canvasView.clearCanvas()
+            }
+            // 绑定复制回调（支持撤销）
+            viewModel.stateManager.onDuplicateSelected = { [weak viewModel] in
+                guard let viewModel = viewModel,
+                      let canvasView = viewModel.canvasView,
+                      let selectedID = viewModel.stateManager.selectedNodeID,
+                      let selectedLayer = canvasView.getLayers().first(where: { $0.id == selectedID })
+                else { return }
+                // 创建复制的图层（偏移一点位置）
+                let duplicatedLayer = LayerNode(
+                    id: UUID(),
+                    type: selectedLayer.type,
+                    url: selectedLayer.url,
+                    frame: selectedLayer.frame.offsetBy(dx: 20, dy: 20),
+                    rotation: selectedLayer.rotation,
+                    isLocked: selectedLayer.isLocked,
+                    zIndex: (canvasView.getLayers().map(\.zIndex).max() ?? 0) + 1,
+                    opacity: selectedLayer.opacity,
+                    createdAt: Date()
+                )
+                // 记录操作用于撤销
+                let action = DuplicateLayerAction(
+                    originalLayerID: selectedID,
+                    duplicatedLayer: duplicatedLayer,
+                    canvasView: canvasView
+                )
+                viewModel.stateManager.recordAction(action)
+                // 执行复制
+                canvasView.addLayer(duplicatedLayer)
+                // 选中新复制的图层
+                viewModel.stateManager.selectNode(duplicatedLayer.id)
+            }
+        }
+        
+        // 设置绘图操作的撤销支持
+        .task {
+            setupDrawingUndoSupport()
         }
         .onDisappear {
             viewModel.saveCanvasDocument()
@@ -94,6 +191,39 @@ struct NativeEditorView: View {
                 lastPresentedSheet = sheet
                 if sheet == .img2imgConfirm {
                     didConfirmImageToImage = false
+                }
+            }
+        }
+        // 图片来源选择菜单
+        .confirmationDialog("选择图片来源", isPresented: $showImageSourceMenu) {
+            Button("从相册选择") {
+                showPhotoPicker = true
+            }
+            if CameraImagePicker.isCameraAvailable {
+                Button("拍照") {
+                    showCamera = true
+                }
+            }
+            Button("取消", role: .cancel) { }
+        }
+        .photosPicker(
+            isPresented: $showPhotoPicker,
+            selection: $selectedPhotoItem,
+            matching: .images
+        )
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let item = newItem else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await viewModel.importImage(data)
+                }
+            }
+            selectedPhotoItem = nil
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraImagePicker { imageData in
+                Task {
+                    await viewModel.importImage(imageData)
                 }
             }
         }
@@ -164,214 +294,284 @@ private enum ActiveSheet: String, Identifiable {
 
 private struct NativeCanvasContainer: View {
     @Bindable var viewModel: NativeEditorViewModel
-
-    @State private var zoomPercentDraft: String = "100"
-    @FocusState private var isZoomFieldFocused: Bool
+    var onImageImport: () -> Void
+    
+    // 箭头绘制状态
+    @State private var isDrawingArrow = false
+    @State private var arrowStartPoint: CGPoint?
+    @State private var arrowEndPoint: CGPoint?
+    
+    // 矩形绘制状态
+    @State private var isDrawingRectangle = false
+    @State private var rectangleStartPoint: CGPoint?
+    @State private var rectangleEndPoint: CGPoint?
+    
+    // 文字编辑状态
+    @State private var isEditingText = false
+    @State private var textPosition: CGPoint = .zero
+    @State private var editingText: String = ""
+    
+    // 标注绘制状态
+    @State private var isDrawingAnnotation = false
+    @State private var annotationStartPoint: CGPoint?
+    @State private var annotationEndPoint: CGPoint?
     
     var body: some View {
         GeometryReader { proxy in
-        ZStack {
-            Color.gray.opacity(0.05)
-            
-            // 原生画布视图
-            NativeCanvasViewWrapper(
-                toolMode: $viewModel.stateManager.currentMode,
-                onCanvasUpdated: {
-                    viewModel.saveCanvasDocument()
-                },
-                onViewCreated: { view in
-                    // 绑定画布视图引用
-                    viewModel.canvasView = view
-                    // 初始化绘图工具
-                    view.setDrawingTool(isPen: viewModel.stateManager.isUsingPen)
-                },
-                onZoomChanged: { scale in
-                    viewModel.stateManager.zoomScale = scale
-                }
-            )
-            
-            // Magic Frame 叠加层
-            MagicFrameView(
-                frame: $viewModel.stateManager.magicFrame,
-                isVisible: $viewModel.stateManager.isMagicFrameVisible,
-                viewportSize: proxy.size
-            )
-            
-            // 左下角缩放 HUD
-            VStack {
-                Spacer()
-                HStack {
-                    zoomHUD
-                    Spacer()
-                }
-                .padding(.leading, 16)
-                .padding(.bottom, 16)
-            }
-
-            // 顶部工具栏
-            VStack {
-                canvasToolbar
-                Spacer()
-            }
-        }}
-        .onChange(of: viewModel.stateManager.isUsingPen) { _, newValue in
-            viewModel.canvasView?.setDrawingTool(isPen: newValue)
-        }
-        .onChange(of: viewModel.stateManager.zoomScale) { _, newValue in
-            // 未聚焦时：同步真实缩放到 HUD（聚焦时不打断用户输入）
-            guard !isZoomFieldFocused else { return }
-            zoomPercentDraft = "\(Int((newValue * 100).rounded()))"
-        }
-    }
-
-    private var zoomHUD: some View {
-        HStack(spacing: 8) {
-            Button {
-                let next = viewModel.stateManager.zoomScale - 0.1
-                viewModel.canvasView?.setZoomScale(next, animated: true)
-            } label: {
-                Image(systemName: "minus")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-
-            TextField("", text: $zoomPercentDraft)
-                .frame(width: 72)
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad)
-                .focused($isZoomFieldFocused)
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("完成") {
-                            applyZoomDraft()
-                            isZoomFieldFocused = false
+            ZStack {
+                Color.gray.opacity(0.05)
+                
+                // 原生画布视图
+                NativeCanvasViewWrapper(
+                    currentTool: $viewModel.stateManager.currentTool,
+                    onCanvasUpdated: {
+                        viewModel.saveCanvasDocument()
+                    },
+                    onViewCreated: { view in
+                        viewModel.canvasView = view
+                        // 设置箭头创建回调
+                        view.onArrowCreated = { arrow in
+                            // 这里可以添加箭头创建后的处理逻辑
+                        }
+                    },
+                    onZoomChanged: { scale in
+                        viewModel.stateManager.zoomScale = scale
+                    }
+                )
+                
+                // 箭头绘制层
+                if viewModel.stateManager.currentTool == .arrow {
+                    ZStack {
+                        // 显示正在绘制的箭头
+                        if isDrawingArrow, let start = arrowStartPoint, let end = arrowEndPoint {
+                            ArrowView(
+                                startPoint: start,
+                                endPoint: end,
+                                color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
+                                lineWidth: viewModel.stateManager.arrowLineWidth
+                            )
+                        }
+                        
+                        // 箭头绘制手势
+                        ArrowDrawingView(
+                            isDrawing: $isDrawingArrow,
+                            startPoint: $arrowStartPoint,
+                            endPoint: $arrowEndPoint,
+                            color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
+                            lineWidth: viewModel.stateManager.arrowLineWidth
+                        ) { start, end in
+                            // 创建箭头图层
+                            let arrow = ArrowLayerNode(
+                                startPoint: start,
+                                endPoint: end,
+                                color: viewModel.stateManager.arrowColor,
+                                lineWidth: viewModel.stateManager.arrowLineWidth,
+                                zIndex: viewModel.canvasView?.getArrowLayerManager().getNextZIndex() ?? 0
+                            )
+                            viewModel.canvasView?.addArrow(arrow)
                         }
                     }
                 }
-
-            Text("%")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Button {
-                let next = viewModel.stateManager.zoomScale + 0.1
-                viewModel.canvasView?.setZoomScale(next, animated: true)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .cornerRadius(12)
-    }
-
-    private func applyZoomDraft() {
-        let trimmed = zoomPercentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let percent = Double(trimmed) else {
-            // 输入非法：回滚到真实缩放值
-            zoomPercentDraft = "\(Int((viewModel.stateManager.zoomScale * 100).rounded()))"
-            return
-        }
-        let scale = percent / 100.0
-        viewModel.canvasView?.setZoomScale(scale, animated: true)
-    }
-    
-    private var canvasToolbar: some View {
-        HStack(spacing: 12) {
-            // 工具模式切换
-            Picker("工具模式", selection: $viewModel.stateManager.currentMode) {
-                ForEach(CanvasToolMode.allCases) { mode in
-                    Label(mode.displayName, systemImage: mode.iconName)
-                        .tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 200)
-            
-            Divider()
-                .frame(height: 20)
-            
-            // 绘图工具切换 (仅在绘图模式下显示)
-            if viewModel.stateManager.currentMode == .drawingMode {
-                Button {
-                    viewModel.stateManager.selectPen()
-                } label: {
-                    Image(systemName: "pencil.tip")
-                        .foregroundColor(viewModel.stateManager.isUsingPen ? .blue : .secondary)
-                }
-                .buttonStyle(.bordered)
                 
-                Button {
-                    viewModel.stateManager.selectEraser()
-                } label: {
-                    Image(systemName: "eraser.fill")
-                        .foregroundColor(!viewModel.stateManager.isUsingPen ? .blue : .secondary)
+                // 矩形绘制层
+                if viewModel.stateManager.currentTool == .rectangle {
+                    ZStack {
+                        // 显示正在绘制的矩形
+                        if isDrawingRectangle, let start = rectangleStartPoint, let end = rectangleEndPoint {
+                            let rect = CGRect(
+                                x: min(start.x, end.x),
+                                y: min(start.y, end.y),
+                                width: abs(end.x - start.x),
+                                height: abs(end.y - start.y)
+                            )
+                            
+                            RectangleShapeView(
+                                rect: rect,
+                                color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
+                                lineWidth: viewModel.stateManager.rectangleLineWidth,
+                                isFilled: viewModel.stateManager.rectangleIsFilled
+                            )
+                        }
+                        
+                        // 矩形绘制手势
+                        RectangleDrawingView(
+                            isDrawing: $isDrawingRectangle,
+                            startPoint: $rectangleStartPoint,
+                            endPoint: $rectangleEndPoint,
+                            color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
+                            lineWidth: viewModel.stateManager.rectangleLineWidth,
+                            isFilled: viewModel.stateManager.rectangleIsFilled
+                        ) { rect in
+                            // 创建矩形图层
+                            let rectangle = RectangleLayerNode(
+                                rect: rect,
+                                color: viewModel.stateManager.rectangleColor,
+                                lineWidth: viewModel.stateManager.rectangleLineWidth,
+                                isFilled: viewModel.stateManager.rectangleIsFilled,
+                                zIndex: viewModel.canvasView?.getRectangleLayerManager().getNextZIndex() ?? 0
+                            )
+                            viewModel.canvasView?.addRectangle(rectangle)
+                        }
+                    }
                 }
-                .buttonStyle(.bordered)
-            }
-            
-            // 图层操作 (仅在对象模式且有选中时显示)
-            if viewModel.stateManager.currentMode == .objectMode,
-               viewModel.stateManager.hasSelection {
                 
-                Divider()
-                    .frame(height: 20)
-                
-                Button {
-                    viewModel.bringSelectedLayerToFront()
-                } label: {
-                    Image(systemName: "square.3.layers.3d.top.filled")
+                // 显示所有箭头
+                ForEach(viewModel.canvasView?.getArrowLayerManager().arrows ?? []) { arrow in
+                    ArrowView(
+                        startPoint: arrow.startPoint,
+                        endPoint: arrow.endPoint,
+                        color: Color.fromHex(arrow.color) ?? .black,
+                        lineWidth: arrow.lineWidth
+                    )
                 }
-                .buttonStyle(.bordered)
-                .help("置顶")
                 
-                Button {
-                    viewModel.sendSelectedLayerToBack()
-                } label: {
-                    Image(systemName: "square.3.layers.3d.bottom.filled")
+                // 文字编辑层
+                if viewModel.stateManager.currentTool == .text {
+                    TextEditingView(
+                        isEditing: $isEditingText,
+                        position: $textPosition,
+                        text: $editingText,
+                        fontSize: viewModel.stateManager.textFontSize,
+                        color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
+                    ) { position, text in
+                        // 创建文字图层
+                        let textLayer = TextLayerNode(
+                            position: position,
+                            text: text,
+                            fontSize: viewModel.stateManager.textFontSize,
+                            color: viewModel.stateManager.textColor,
+                            fontName: viewModel.stateManager.textFontName,
+                            zIndex: viewModel.canvasView?.getTextLayerManager().getNextZIndex() ?? 0
+                        )
+                        viewModel.canvasView?.addText(textLayer)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .help("置底")
                 
-                Button {
-                    viewModel.toggleSelectedLayerLock()
-                } label: {
-                    Image(systemName: "lock.fill")
+                // 显示所有矩形
+                ForEach(viewModel.canvasView?.getRectangleLayerManager().rectangles ?? []) { rectangle in
+                    RectangleShapeView(
+                        rect: rectangle.rect,
+                        color: Color.fromHex(rectangle.color) ?? .black,
+                        lineWidth: rectangle.lineWidth,
+                        isFilled: rectangle.isFilled
+                    )
                 }
-                .buttonStyle(.bordered)
-                .help("锁定/解锁")
                 
-                Button(role: .destructive) {
-                    viewModel.deleteSelectedLayer()
-                } label: {
-                    Image(systemName: "trash")
+                // 标注绘制层
+                if viewModel.stateManager.currentTool == .annotation {
+                    ZStack {
+                        // 显示正在绘制的标注框
+                        if isDrawingAnnotation, let start = annotationStartPoint, let end = annotationEndPoint {
+                            let rect = CGRect(
+                                x: min(start.x, end.x),
+                                y: min(start.y, end.y),
+                                width: abs(end.x - start.x),
+                                height: abs(end.y - start.y)
+                            )
+                            
+                            Rectangle()
+                                .stroke(Color.fromHex(viewModel.stateManager.annotationColor) ?? .blue, lineWidth: viewModel.stateManager.annotationLineWidth)
+                                .frame(width: rect.width, height: rect.height)
+                                .position(x: rect.midX, y: rect.midY)
+                        }
+                        
+                        // 标注绘制手势
+                        AnnotationDrawingView(
+                            isDrawing: $isDrawingAnnotation,
+                            startPoint: $annotationStartPoint,
+                            endPoint: $annotationEndPoint,
+                            color: Color.fromHex(viewModel.stateManager.annotationColor) ?? .blue,
+                            lineWidth: viewModel.stateManager.annotationLineWidth,
+                            fontSize: viewModel.stateManager.annotationFontSize
+                        ) { rect, text in
+                            // 创建标注图层
+                            let annotation = AnnotationLayerNode(
+                                rect: rect,
+                                text: text,
+                                fontSize: viewModel.stateManager.annotationFontSize,
+                                color: viewModel.stateManager.annotationColor,
+                                lineWidth: viewModel.stateManager.annotationLineWidth,
+                                zIndex: viewModel.canvasView?.getAnnotationLayerManager().getNextZIndex() ?? 0
+                            )
+                            viewModel.canvasView?.addAnnotation(annotation)
+                        }
+                    }
                 }
-                .buttonStyle(.bordered)
-                .help("删除")
-            }
-            
-            Spacer()
-            
-            // Magic Frame 切换
-            Button {
-                viewModel.stateManager.toggleMagicFrame()
-            } label: {
-                Label(
-                    viewModel.stateManager.isMagicFrameVisible ? "隐藏选框" : "显示选框",
-                    systemImage: "viewfinder"
+                
+                // 显示所有文字
+                ForEach(viewModel.canvasView?.getTextLayerManager().textLayers ?? []) { textLayer in
+                    TextDisplayView(textLayer: textLayer)
+                }
+                
+                // 显示所有标注
+                ForEach(viewModel.canvasView?.getAnnotationLayerManager().annotations ?? []) { annotation in
+                    AnnotationView(annotation: annotation)
+                }
+                
+                // Magic Frame 叠加层
+                MagicFrameView(
+                    frame: $viewModel.stateManager.magicFrame,
+                    isVisible: $viewModel.stateManager.isMagicFrameVisible,
+                    viewportSize: proxy.size
                 )
+                
+                // 左上角：功能键
+                VStack {
+                    HStack {
+                        CanvasActionBar(
+                            canUndo: viewModel.stateManager.canUndo,
+                            canRedo: viewModel.stateManager.canRedo,
+                            hasSelection: viewModel.stateManager.hasSelection,
+                            onUndo: { viewModel.stateManager.undo() },
+                            onRedo: { viewModel.stateManager.redo() },
+                            onDuplicate: { viewModel.stateManager.duplicateSelected() },
+                            onClear: { viewModel.stateManager.clearCanvas() }
+                        )
+                        Spacer()
+                        
+                        // Magic Frame 切换按钮
+                        Button {
+                            viewModel.stateManager.toggleMagicFrame()
+                        } label: {
+                            Label(
+                                viewModel.stateManager.isMagicFrameVisible ? "隐藏选框" : "显示选框",
+                                systemImage: "viewfinder"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal, Theme.Spacing.lg)
+                    .padding(.top, Theme.Spacing.lg)
+                    Spacer()
+                }
+                
+                // 左下角：缩放滑动条
+                VStack {
+                    Spacer()
+                    HStack {
+                        ZoomSlider(
+                            zoomScale: $viewModel.stateManager.zoomScale,
+                            onZoomChanged: { scale in
+                                viewModel.canvasView?.setZoomScale(scale, animated: true)
+                            }
+                        )
+                        Spacer()
+                    }
+                    .padding(.leading, Theme.Spacing.lg)
+                    .padding(.bottom, Theme.Spacing.lg + 60) // 为底部工具栏留空间
+                }
+                
+                // 底部：工具栏
+                VStack {
+                    Spacer()
+                    CanvasToolbar(
+                        currentTool: $viewModel.stateManager.currentTool,
+                        onImageImport: onImageImport
+                    )
+                    .padding(.bottom, Theme.Spacing.xl)
+                }
             }
-            .buttonStyle(.borderedProminent)
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .cornerRadius(12)
-        .padding()
     }
 }
 
@@ -586,6 +786,7 @@ private struct NativeAssetLibraryView: View {
     @State private var showingPublishSheet = false
     @State private var publishTitle = ""
     @State private var assetToPublish: Asset?
+    @State private var selectedPhotoItem: PhotosPickerItem?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -594,9 +795,10 @@ private struct NativeAssetLibraryView: View {
                 Text("资源库")
                     .font(.headline)
                 Spacer()
-                Button {
-                    // TODO: 打开图片选择器
-                } label: {
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images
+                ) {
                     Image(systemName: "plus.circle.fill")
                         .font(.title3)
                 }
@@ -633,6 +835,15 @@ private struct NativeAssetLibraryView: View {
                 }
                 .padding()
             }
+        }
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let item = newItem else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    onImport(data)
+                }
+            }
+            selectedPhotoItem = nil
         }
         .sheet(isPresented: $showingPublishSheet) {
             if let asset = assetToPublish {

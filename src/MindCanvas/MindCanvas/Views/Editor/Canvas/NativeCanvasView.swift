@@ -26,10 +26,28 @@ class NativeCanvasView: UIView {
     private let minZoomScale: CGFloat = 0.5
     private let maxZoomScale: CGFloat = 3.0
     
-    /// 当前工具模式
+    /// 当前工具（新架构）
+    var currentTool: CanvasTool = .select {
+        didSet {
+            updateForTool(currentTool)
+        }
+    }
+    
+    /// 当前工具模式（兼容旧代码，将被移除）
+    @available(*, deprecated, message: "使用 currentTool 代替")
     var currentMode: CanvasToolMode = .objectMode {
         didSet {
-            updateGestureHandling()
+            // 兼容层：将旧模式映射到新工具
+            switch currentMode {
+            case .objectMode:
+                if currentTool != .select && currentTool != .pan && currentTool != .image {
+                    currentTool = .select
+                }
+            case .drawingMode:
+                if currentTool != .pen && currentTool != .eraser {
+                    currentTool = .pen
+                }
+            }
         }
     }
     
@@ -44,6 +62,18 @@ class NativeCanvasView: UIView {
     
     /// 图片视图字典 (nodeID -> ResizableImageView)
     private var imageViews: [UUID: ResizableImageView] = [:]
+    
+    /// 箭头图层管理器
+    private let arrowLayerManager = ArrowLayerManager()
+    
+    /// 矩形图层管理器
+    private let rectangleLayerManager = RectangleLayerManager()
+    
+    /// 文字图层管理器
+    private let textLayerManager = TextLayerManager()
+    
+    /// 标注图层管理器
+    private let annotationLayerManager = AnnotationLayerManager()
     
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
@@ -68,6 +98,20 @@ class NativeCanvasView: UIView {
 
     /// 绘制中标记（用于避免 PencilKit 渲染期间触发布局更新造成闪烁）
     private(set) var isDrawing = false
+    
+    // MARK: - 箭头绘制
+    
+    /// 箭头绘制回调
+    var onArrowCreated: ((ArrowLayerNode) -> Void)?
+    
+    /// 矩形绘制回调
+    var onRectangleCreated: ((RectangleLayerNode) -> Void)?
+    
+    /// 文字创建回调
+    var onTextCreated: ((TextLayerNode) -> Void)?
+    
+    /// 标注创建回调
+    var onAnnotationCreated: ((AnnotationLayerNode) -> Void)?
 
     // MARK: - Indirect input / drawing freeze
 
@@ -111,11 +155,9 @@ class NativeCanvasView: UIView {
 
         // 显式允许 Indirect 输入（Simulator 触控板 / 鼠标滚轮）
         if #available(iOS 13.4, *) {
-            // 触控板两指滑动是 continuous scroll
             scrollView.panGestureRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
         }
         if let pinch = scrollView.pinchGestureRecognizer {
-            // 允许触屏 + 触控板/鼠标相关输入
             var types: [NSNumber] = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             if #available(iOS 13.4, *) {
                 types.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
@@ -140,12 +182,9 @@ class NativeCanvasView: UIView {
         pencilCanvas.backgroundColor = .clear
         pencilCanvas.isOpaque = false
         pencilCanvas.tool = inkingTool
-        // drawingPolicy 由 currentMode 决定（在 updateGestureHandling 中统一设置）
         pencilCanvas.delegate = self
         
-        // 关键：禁用 PKCanvasView 自身的滚动行为！
-        // PKCanvasView 继承自 UIScrollView，如果不禁用，会和外层 scrollView 冲突
-        // 这可能是导致绘图漂移的根本原因
+        // 关键：禁用 PKCanvasView 自身的滚动行为
         pencilCanvas.isScrollEnabled = false
         pencilCanvas.minimumZoomScale = 1.0
         pencilCanvas.maximumZoomScale = 1.0
@@ -165,7 +204,7 @@ class NativeCanvasView: UIView {
         // 初始化画布居中
         DispatchQueue.main.async { [weak self] in
             self?.centerCanvas()
-            self?.updateGestureHandling()
+            self?.updateForTool(self?.currentTool ?? .select)
             if let zoomScale = self?.scrollView.zoomScale {
                 self?.onZoomChanged?(zoomScale)
             }
@@ -181,8 +220,6 @@ class NativeCanvasView: UIView {
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-        
-        // 内容视图和子图层的 frame 在 layoutSubviews 中设置
     }
     
     private func setupGestures() {
@@ -365,47 +402,105 @@ class NativeCanvasView: UIView {
         return layers.first { $0.id == id }
     }
     
-    // MARK: - Tool Mode Management
+    // MARK: - Tool Management (新架构)
     
-    /// 更新手势处理 (根据当前模式)
-    private func updateGestureHandling() {
-        switch currentMode {
-        case .objectMode:
-            // 对象模式: 禁用 PencilKit，启用对象手势
+    /// 根据工具更新手势处理
+    func updateForTool(_ tool: CanvasTool) {
+        switch tool {
+        case .select:
+            // 选择工具：禁用 PencilKit，启用对象手势，禁用画布滚动
             pencilCanvas.isUserInteractionEnabled = false
             objectLayerView.isUserInteractionEnabled = true
-            // 单指拖动平移画布
-            scrollView.panGestureRecognizer.minimumNumberOfTouches = 1
+            scrollView.isScrollEnabled = false
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
             
-        case .drawingMode:
-            // 绘图模式: 启用 PencilKit（允许任何输入绘制），禁用对象手势
+        case .pan:
+            // 平移工具：禁用 PencilKit，禁用对象手势，启用画布滚动
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.isEnabled = true
+            scrollView.panGestureRecognizer.minimumNumberOfTouches = 1
+            scrollView.pinchGestureRecognizer?.isEnabled = false
+            
+        case .pen:
+            // 画笔工具：启用 PencilKit，禁用对象手势，锁定画布
             pencilCanvas.isUserInteractionEnabled = true
+            pencilCanvas.tool = inkingTool
             pencilCanvas.drawingPolicy = .anyInput
             objectLayerView.isUserInteractionEnabled = false
-            // 绘图模式下：双指用于平移画布
-            scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
+            scrollView.isScrollEnabled = false
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
+            lockContentOffset()
             
-            // 重置 scrollView 手势识别器状态，确保干净的起点
-            resetScrollViewGestures()
+        case .eraser:
+            // 橡皮擦工具：启用 PencilKit，禁用对象手势，锁定画布
+            pencilCanvas.isUserInteractionEnabled = true
+            pencilCanvas.tool = eraserTool
+            pencilCanvas.drawingPolicy = .anyInput
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = false
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
+            lockContentOffset()
+            
+        case .image:
+            // 图片工具：与选择工具类似，但点击时会触发图片导入
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = true
+            scrollView.isScrollEnabled = false
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.pinchGestureRecognizer?.isEnabled = false
+            
+        case .arrow:
+            // 箭头工具：禁用 PencilKit，禁用对象手势，启用画布滚动
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.isEnabled = true
+            scrollView.pinchGestureRecognizer?.isEnabled = true
+            
+        case .rectangle:
+            // 矩形工具：禁用 PencilKit，禁用对象手势，启用画布滚动
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.isEnabled = true
+            scrollView.pinchGestureRecognizer?.isEnabled = true
+            
+        case .text:
+            // 文字工具：禁用 PencilKit，禁用对象手势，启用画布滚动
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.isEnabled = true
+            scrollView.pinchGestureRecognizer?.isEnabled = true
+            
+        case .annotation:
+            // 标注工具：禁用 PencilKit，禁用对象手势，启用画布滚动
+            pencilCanvas.isUserInteractionEnabled = false
+            objectLayerView.isUserInteractionEnabled = false
+            scrollView.isScrollEnabled = true
+            scrollView.panGestureRecognizer.isEnabled = true
+            scrollView.pinchGestureRecognizer?.isEnabled = true
         }
     }
     
-    /// 重置 scrollView 的手势识别器（确保进入绘图模式时状态干净）
-    private func resetScrollViewGestures() {
-        // 临时禁用再启用，强制重置手势状态
-        let panEnabled = scrollView.panGestureRecognizer.isEnabled
-        let pinchEnabled = scrollView.pinchGestureRecognizer?.isEnabled ?? true
-        
-        scrollView.panGestureRecognizer.isEnabled = false
-        scrollView.pinchGestureRecognizer?.isEnabled = false
-        
-        // 在下一个 run loop 重新启用
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            // 只有当不在绘制中时才恢复
-            guard !self.isDrawing else { return }
-            self.scrollView.panGestureRecognizer.isEnabled = panEnabled
-            self.scrollView.pinchGestureRecognizer?.isEnabled = pinchEnabled
+    /// 锁定当前 contentOffset（用于绘图模式）
+    private func lockContentOffset() {
+        storedContentOffset = scrollView.contentOffset
+    }
+    
+    /// 更新手势处理（兼容旧代码）
+    @available(*, deprecated, message: "使用 updateForTool(_:) 代替")
+    private func updateGestureHandling() {
+        switch currentMode {
+        case .objectMode:
+            updateForTool(.select)
+        case .drawingMode:
+            updateForTool(currentTool == .eraser ? .eraser : .pen)
         }
     }
 
@@ -421,21 +516,15 @@ class NativeCanvasView: UIView {
             storedContentOffset = scrollView.contentOffset
             storedZoomScale = scrollView.zoomScale
             
-            // 完全冻结 scrollView - 使用最激进的方式
+            // 完全冻结 scrollView
             scrollView.panGestureRecognizer.isEnabled = false
             scrollView.pinchGestureRecognizer?.isEnabled = false
             scrollView.isScrollEnabled = false
             scrollView.bounces = false
             scrollView.bouncesZoom = false
-            // 禁用 scrollView 本身的交互，但保持 pencilCanvas 可用
-            // 注意：不能禁用 scrollView.isUserInteractionEnabled，否则 pencilCanvas 也无法接收事件
             if #available(iOS 13.4, *) {
                 scrollView.panGestureRecognizer.allowedScrollTypesMask = []
             }
-            
-            // 取消所有正在进行的手势
-            scrollView.panGestureRecognizer.isEnabled = false
-            scrollView.pinchGestureRecognizer?.isEnabled = false
         } else {
             // 恢复状态
             scrollView.panGestureRecognizer.isEnabled = storedPanEnabled
@@ -444,17 +533,16 @@ class NativeCanvasView: UIView {
             scrollView.bounces = storedBounces
             scrollView.bouncesZoom = storedBouncesZoom
             if #available(iOS 13.4, *) {
-                // 恢复默认（触控板两指滑动为 continuous，滚轮为 discrete）
                 scrollView.panGestureRecognizer.allowedScrollTypesMask = [.continuous, .discrete]
             }
         }
     }
     
-    /// 切换绘图工具
+    /// 切换绘图工具（兼容旧代码）
+    @available(*, deprecated, message: "使用 currentTool = .pen/.eraser 代替")
     func setDrawingTool(isPen: Bool) {
-        // 绘制过程中不切换工具，避免可能的干扰
         guard !isDrawing else { return }
-        pencilCanvas.tool = isPen ? inkingTool : eraserTool
+        currentTool = isPen ? .pen : .eraser
     }
     
     // MARK: - Drawing Operations
@@ -482,10 +570,10 @@ class NativeCanvasView: UIView {
         format.scale = scale
         format.opaque = false
 
-        // 1) PencilKit：用官方导出，避免 drawHierarchy offscreen 漏画/空白
+        // 1) PencilKit：用官方导出
         let drawingImage = pencilCanvas.drawing.image(from: bounded, scale: scale)
 
-        // 2) 对象层：用 Core Animation 渲染（确定性），并裁剪到 bounded
+        // 2) 对象层：用 Core Animation 渲染
         let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
         return renderer.image { rendererContext in
             let ctx = rendererContext.cgContext
@@ -495,21 +583,18 @@ class NativeCanvasView: UIView {
             objectLayerView.layer.render(in: ctx)
             ctx.restoreGState()
 
-            // 叠加 PencilKit 层（透明背景）
+            // 叠加 PencilKit 层
             drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
     }
 
-    /// 将“视口（屏幕）坐标系”的 rect 映射到“画布内容坐标系”的 rect
-    /// - Parameter viewportRect: 相对于 NativeCanvasView 自身 bounds 的屏幕坐标 rect（即 SwiftUI HUD 的坐标系）
+    /// 将"视口坐标系"的 rect 映射到"画布内容坐标系"的 rect
     func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
-        // 1) 先转换到 scrollView 坐标（scrollView 填满 self，但仍走 convert 以避免未来布局变化）
         let rectInScrollView = scrollView.convert(viewportRect, from: self)
-        // 2) 再转换到 contentView 坐标（UIKit 会自动处理 zoom/center 等变换）
         return contentView.convert(rectInScrollView, from: scrollView)
     }
 
-    /// 捕获“视口（屏幕）坐标系”的指定区域快照（用于 HUD 选框）
+    /// 捕获"视口坐标系"的指定区域快照
     func captureViewportSnapshot(rect viewportRect: CGRect) -> UIImage? {
         let contentRect = contentRect(forViewportRect: viewportRect)
         return captureContentSnapshot(rect: contentRect)
@@ -518,6 +603,190 @@ class NativeCanvasView: UIView {
     /// 捕获整个画布快照
     func captureFullSnapshot() -> UIImage? {
         captureContentSnapshot(rect: contentView.bounds)
+    }
+    
+    // MARK: - 箭头管理
+    
+    /// 获取箭头图层管理器
+    func getArrowLayerManager() -> ArrowLayerManager {
+        return arrowLayerManager
+    }
+    
+    /// 添加箭头
+    func addArrow(_ arrow: ArrowLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            // 记录操作用于撤销
+            let action = AddArrowAction(
+                arrow: arrow,
+                canvasView: self
+            )
+            
+            // 通过通知中心发送操作
+            NotificationCenter.default.post(
+                name: .canvasActionRecorded,
+                object: action
+            )
+        }
+        
+        arrowLayerManager.addArrow(arrow)
+        onArrowCreated?(arrow)
+        onCanvasUpdated?()
+    }
+    
+    /// 移除箭头
+    func removeArrow(id: UUID) {
+        arrowLayerManager.removeArrow(id: id)
+        onCanvasUpdated?()
+    }
+    
+    /// 更新箭头
+    func updateArrow(_ arrow: ArrowLayerNode) {
+        arrowLayerManager.updateArrow(arrow)
+        onCanvasUpdated?()
+    }
+    
+    /// 清空所有箭头
+    func clearArrows() {
+        arrowLayerManager.clearAll()
+        onCanvasUpdated?()
+    }
+    
+    // MARK: - 矩形管理
+    
+    /// 获取矩形图层管理器
+    func getRectangleLayerManager() -> RectangleLayerManager {
+        return rectangleLayerManager
+    }
+    
+    /// 添加矩形
+    func addRectangle(_ rectangle: RectangleLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            // 记录操作用于撤销
+            let action = AddRectangleAction(
+                rectangle: rectangle,
+                canvasView: self
+            )
+            
+            // 通过通知中心发送操作
+            NotificationCenter.default.post(
+                name: .canvasActionRecorded,
+                object: action
+            )
+        }
+        
+        rectangleLayerManager.addRectangle(rectangle)
+        onRectangleCreated?(rectangle)
+        onCanvasUpdated?()
+    }
+    
+    /// 移除矩形
+    func removeRectangle(id: UUID) {
+        rectangleLayerManager.removeRectangle(id: id)
+        onCanvasUpdated?()
+    }
+    
+    /// 更新矩形
+    func updateRectangle(_ rectangle: RectangleLayerNode) {
+        rectangleLayerManager.updateRectangle(rectangle)
+        onCanvasUpdated?()
+    }
+    
+    /// 清空所有矩形
+    func clearRectangles() {
+        rectangleLayerManager.clearAll()
+        onCanvasUpdated?()
+    }
+    
+    // MARK: - 文字管理
+    
+    /// 获取文字图层管理器
+    func getTextLayerManager() -> TextLayerManager {
+        return textLayerManager
+    }
+    
+    /// 添加文字
+    func addText(_ text: TextLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            // 记录操作用于撤销
+            let action = AddTextAction(
+                text: text,
+                canvasView: self
+            )
+            
+            // 通过通知中心发送操作
+            NotificationCenter.default.post(
+                name: .canvasActionRecorded,
+                object: action
+            )
+        }
+        
+        textLayerManager.addText(text)
+        onTextCreated?(text)
+        onCanvasUpdated?()
+    }
+    
+    /// 移除文字
+    func removeText(id: UUID) {
+        textLayerManager.removeText(id: id)
+        onCanvasUpdated?()
+    }
+    
+    /// 更新文字
+    func updateText(_ text: TextLayerNode) {
+        textLayerManager.updateText(text)
+        onCanvasUpdated?()
+    }
+    
+    /// 清空所有文字
+    func clearTexts() {
+        textLayerManager.clearAll()
+        onCanvasUpdated?()
+    }
+    
+    // MARK: - 标注管理
+    
+    /// 获取标注图层管理器
+    func getAnnotationLayerManager() -> AnnotationLayerManager {
+        return annotationLayerManager
+    }
+    
+    /// 添加标注
+    func addAnnotation(_ annotation: AnnotationLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            // 记录操作用于撤销
+            let action = AddAnnotationAction(
+                annotation: annotation,
+                canvasView: self
+            )
+            
+            // 通过通知中心发送操作
+            NotificationCenter.default.post(
+                name: .canvasActionRecorded,
+                object: action
+            )
+        }
+        
+        annotationLayerManager.addAnnotation(annotation)
+        onAnnotationCreated?(annotation)
+        onCanvasUpdated?()
+    }
+    
+    /// 移除标注
+    func removeAnnotation(id: UUID) {
+        annotationLayerManager.removeAnnotation(id: id)
+        onCanvasUpdated?()
+    }
+    
+    /// 更新标注
+    func updateAnnotation(_ annotation: AnnotationLayerNode) {
+        annotationLayerManager.updateAnnotation(annotation)
+        onCanvasUpdated?()
+    }
+    
+    /// 清空所有标注
+    func clearAnnotations() {
+        annotationLayerManager.clearAll()
+        onCanvasUpdated?()
     }
 }
 
@@ -529,20 +798,17 @@ extension NativeCanvasView: UIScrollViewDelegate {
     }
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // 关键修复：绘制过程中强制恢复 contentOffset，阻止任何滚动
-        // 这是导致"向右下角漂移"的根本原因！
+        // 绘制过程中强制恢复 contentOffset
         if isDrawing {
             scrollView.contentOffset = storedContentOffset
         }
     }
     
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        // 绘制过程中完全跳过，不做任何处理（包括回调），避免任何可能干扰绘制的操作
         guard !isDrawing else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // 缩放时保持画布居中
         let offsetX = max((scrollView.bounds.width - scrollView.contentSize.width) * 0.5, 0)
         let offsetY = max((scrollView.bounds.height - scrollView.contentSize.height) * 0.5, 0)
         contentView.center = CGPoint(
@@ -559,20 +825,16 @@ extension NativeCanvasView: UIScrollViewDelegate {
 extension NativeCanvasView: PKCanvasViewDelegate {
     func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
         isDrawing = true
-        // 绘制期间冻结 scrollView 变换，避免 Simulator/触控板 Indirect 输入导致坐标系漂移
         setScrollTransformsFrozen(true)
     }
 
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
         isDrawing = false
         setScrollTransformsFrozen(false)
-        // 绘制结束后再触发更新回调（避免绘制过程中访问 drawing 数据导致坐标漂移）
         onCanvasUpdated?()
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-        // 绘制过程中不触发回调（因为回调可能会访问 drawing 数据，干扰正在进行的绘制）
-        // 仅在绘制结束时（canvasViewDidEndUsingTool）触发一次
         guard !isDrawing else { return }
         onCanvasUpdated?()
     }
@@ -582,6 +844,47 @@ extension NativeCanvasView: PKCanvasViewDelegate {
 
 /// SwiftUI 包装器
 struct NativeCanvasViewWrapper: UIViewRepresentable {
+    @Binding var currentTool: CanvasTool
+    var onCanvasUpdated: (() -> Void)?
+    var onViewCreated: ((NativeCanvasView) -> Void)?
+    var onZoomChanged: ((CGFloat) -> Void)? = nil
+    
+    func makeUIView(context: Context) -> NativeCanvasView {
+        let view = NativeCanvasView()
+        view.currentTool = currentTool
+        view.onCanvasUpdated = onCanvasUpdated
+        view.onZoomChanged = onZoomChanged
+        
+        onViewCreated?(view)
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: NativeCanvasView, context: Context) {
+        guard !uiView.isDrawing else { return }
+        
+        if uiView.currentTool != currentTool {
+            uiView.currentTool = currentTool
+        }
+
+        uiView.onCanvasUpdated = onCanvasUpdated
+        uiView.onZoomChanged = onZoomChanged
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    class Coordinator {
+        // 预留
+    }
+}
+
+// MARK: - 兼容旧的 ToolMode Wrapper（将被移除）
+
+/// 兼容旧代码的包装器
+@available(*, deprecated, message: "使用新的 NativeCanvasViewWrapper 代替")
+struct LegacyNativeCanvasViewWrapper: UIViewRepresentable {
     @Binding var toolMode: CanvasToolMode
     var onCanvasUpdated: (() -> Void)?
     var onViewCreated: ((NativeCanvasView) -> Void)?
@@ -593,21 +896,18 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
         view.onCanvasUpdated = onCanvasUpdated
         view.onZoomChanged = onZoomChanged
         
-        // 通知外部视图已创建
         onViewCreated?(view)
         
         return view
     }
     
     func updateUIView(_ uiView: NativeCanvasView, context: Context) {
-        // 绘制过程中不进行任何更新，避免干扰 PencilKit 绘制坐标系
         guard !uiView.isDrawing else { return }
         
         if uiView.currentMode != toolMode {
             uiView.currentMode = toolMode
         }
 
-        // 重新绑定回调，确保 SwiftUI 重建闭包后链路不失效
         uiView.onCanvasUpdated = onCanvasUpdated
         uiView.onZoomChanged = onZoomChanged
     }
@@ -617,6 +917,6 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
     }
     
     class Coordinator {
-        // 预留：用于处理更复杂的回调
+        // 预留
     }
 }

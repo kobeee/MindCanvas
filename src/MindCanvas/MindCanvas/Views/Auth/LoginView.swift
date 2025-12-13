@@ -66,7 +66,7 @@ struct LoginView: View {
             modernSocialButton(
                 title: "使用 Google 登录",
                 icon: "g.circle.fill",
-                iconColor: Color(hex: "#DB4437")
+                iconColor: Color.fromHex("#DB4437") ?? Color.red
             ) {
                 Task {
                     await authManager.loginWithGoogle()
@@ -76,7 +76,7 @@ struct LoginView: View {
             modernSocialButton(
                 title: "使用 GitHub 登录",
                 icon: "chevron.left.forwardslash.chevron.right",
-                iconColor: Color(hex: "#333333")
+                iconColor: Color.fromHex("#333333") ?? Color.gray
             ) {
                 Task {
                     await authManager.loginWithGithub()

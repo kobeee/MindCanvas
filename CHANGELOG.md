@@ -1,5 +1,422 @@
 # 开发记录
 
+## 2025-12-13 - 编译错误修复 v1.2.1 🔧
+
+### 概述
+修复画布工具完善版本中的编译错误，确保项目可以正常编译运行。
+
+### 修复的编译错误
+
+#### 1. Combine 模块导入问题 ✅
+**错误信息**：`Static subscript 'subscript(_enclosingInstance:wrapped:storage:)' is not available due to missing import of defining module 'Combine'`
+
+**修复文件**：
+- `AnnotationLayerNode.swift` - 添加 `import Combine`
+- `RectangleLayerNode.swift` - 添加 `import Combine`
+- `ArrowLayerNode.swift` - 添加 `import Combine`
+- `TextLayerNode.swift` - 添加 `import Combine`
+
+#### 2. Color 扩展冲突问题 ✅
+**错误信息**：`Invalid redeclaration of 'init(hex:)'`
+
+**修复方案**：
+- 将 `Color.init(hex:)` 改为 `Color.fromHex(_:) -> Color?` 静态方法
+- 更新所有使用 `Color(hex:)` 的地方改为 `Color.fromHex() ?? 默认颜色`
+
+**修复文件**：
+- `Extensions/Color+Hex.swift` - 修改扩展方法
+- `Views/Editor/Canvas/AnnotationView.swift` - 更新颜色创建
+- `Views/Editor/Canvas/TextEditingView.swift` - 更新颜色创建
+- `Views/Editor/NativeEditorView.swift` - 更新多个颜色创建
+- `Views/Auth/LoginView.swift` - 更新颜色创建
+- `Infrastructure/Theme.swift` - 更新颜色创建
+
+#### 3. 箭头视图 StrokeStyle 问题 ✅
+**错误信息**：
+- `Value of type 'StrokeShapeView<Path, Color, EmptyView>' has no member 'lineCap'`
+- `Cannot infer contextual base in reference to member 'round'`
+
+**修复方案**：
+- 将 `.stroke(color, lineWidth: lineWidth).lineCap(.round).lineJoin(.round)`
+- 改为 `.stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))`
+
+**修复文件**：
+- `Views/Editor/Canvas/ArrowView.swift` - 使用 StrokeStyle 设置线条样式
+
+### 技术要点
+
+#### SwiftUI 绘图 API 正确用法
+在 SwiftUI 中，线条样式（如线帽、连接方式）应该通过 `StrokeStyle` 结构体设置，而不是直接在 `.stroke()` 修饰符链上调用。
+
+#### 可选类型处理
+`Color.fromHex()` 返回可选类型 `Color?`，在使用时必须提供默认值或进行可选绑定，确保类型安全。
+
+#### 模块导入规范
+使用 `@Published` 和 `ObservableObject` 时必须显式导入 `Combine` 框架，避免编译错误。
+
+### 影响范围
+- 修复了所有新增工具相关的编译错误
+- 确保项目可以在 Xcode 中正常编译
+- 不影响任何功能逻辑
+
+---
+
+## 2025-12-13 - 画布工具完善 v1.2 🎨
+
+### 概述
+完善画布工具栏，实现了箭头、矩形、文字、标注等绘图工具，并将撤销/恢复系统集成到所有操作中。
+
+### 新增工具实现
+
+#### 1. 箭头工具 ✅
+- **新增文件**: `ArrowView.swift` - 箭头绘制组件
+- **新增文件**: `ArrowLayerNode.swift` - 箭头数据模型
+- **功能**: 拖拽绘制箭头，支持自定义颜色和线宽
+- **撤销支持**: 完整的添加/删除/修改操作
+
+#### 2. 矩形工具 ✅
+- **新增文件**: `RectangleView.swift` - 矩形绘制组件
+- **新增文件**: `RectangleLayerNode.swift` - 矩形数据模型
+- **功能**: 拖拽绘制矩形，支持填充/空心模式
+- **撤销支持**: 完整的添加/删除/修改操作
+
+#### 3. 文字工具 ✅
+- **新增文件**: `TextEditingView.swift` - 文字输入和显示组件
+- **新增文件**: `TextLayerNode.swift` - 文字数据模型
+- **功能**: 点击画布添加文字，支持字体、大小、颜色设置
+- **撤销支持**: 完整的添加/删除/修改操作
+
+#### 4. 标注工具 ✅
+- **新增文件**: `AnnotationView.swift` - 标注绘制组件
+- **新增文件**: `AnnotationLayerNode.swift` - 标注数据模型
+- **功能**: 绘制矩形框+文字组合，弹出对话框输入标注内容
+- **撤销支持**: 完整的添加/删除/修改操作
+
+### 撤销/恢复系统完善
+
+#### 集成到所有操作
+- **图层移动**: 记录移动前后的位置
+- **图层缩放**: 记录缩放前后的尺寸
+- **图层旋转**: 记录旋转前后的角度
+- **绘图操作**: 记录绘图数据变化
+- **工具操作**: 箭头、矩形、文字、标注的创建和修改
+
+#### 通知机制
+- **新增文件**: `Notification+Name.swift` - 定义通知名称
+- **实现**: 使用 NotificationCenter 传递操作记录
+- **优势**: 解耦组件间依赖，统一处理撤销/恢复
+
+### 工具栏更新
+
+#### 主工具栏扩展
+- 将所有工具添加到主工具栏显示
+- 工具顺序：选择、平移、画笔、橡皮擦、箭头、矩形、文字、标注、图片
+- 保持一致的设计语言和交互体验
+
+### 持久化支持
+
+#### 画布文档扩展
+- 添加箭头、矩形、文字、标注的持久化
+- 支持完整的保存和加载功能
+- 维护 Z-Index 顺序和属性
+
+### 新增扩展
+
+#### 颜色支持
+- **新增文件**: `Color+Hex.swift` - 十六进制颜色转换
+- **功能**: 支持字符串颜色值到 SwiftUI Color 的转换
+
+### 技术亮点
+
+#### 统一架构
+- 所有工具遵循相同的设计模式
+- 统一的数据模型和管理器
+- 一致的撤销/恢复集成
+
+#### 手势处理
+- 每个工具独占手势，避免冲突
+- 箭头、矩形、标注使用拖拽手势
+- 文字工具使用点击手势
+
+#### 性能优化
+- 使用 `@Published` 和 `Observable` 响应式更新
+- 懒加载和按需渲染
+- 最小化视图重建
+
+### 文件清单
+
+**新增文件:**
+- `Views/Editor/Canvas/ArrowView.swift`
+- `Models/Canvas/ArrowLayerNode.swift`
+- `Views/Editor/Canvas/RectangleView.swift`
+- `Models/Canvas/RectangleLayerNode.swift`
+- `Views/Editor/Canvas/TextEditingView.swift`
+- `Models/Canvas/TextLayerNode.swift`
+- `Views/Editor/Canvas/AnnotationView.swift`
+- `Models/Canvas/AnnotationLayerNode.swift`
+- `Extensions/Notification+Name.swift`
+- `Extensions/Color+Hex.swift`
+
+**修改文件:**
+- `Models/Canvas/CanvasTool.swift` - 添加工具到主工具栏
+- `Models/Canvas/CanvasAction.swift` - 添加所有工具的操作
+- `Models/Canvas/CanvasDocument.swift` - 添加持久化支持
+- `ViewModels/CanvasStateManager.swift` - 添加状态管理
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 添加工具支持
+- `Views/Editor/NativeEditorView.swift` - 集成工具视图
+- `ViewModels/NativeEditorViewModel.swift` - 添加保存/加载支持
+- `Views/Editor/Canvas/ResizableImageView.swift` - 集成撤销/恢复
+
+### 后续计划
+- [ ] 真机测试所有工具功能
+- [ ] 优化工具切换性能
+- [ ] 添加更多工具属性设置面板
+
+---
+
+## 2025-12-13 - 图片工具拍照功能 + 撤销/恢复系统 v1.1 📸
+
+### 概述
+完善图片工具的"拍照"功能，并实现基于 Command Pattern 的撤销/恢复系统。
+
+### 图片工具完善
+
+#### 问题
+按照设计方案，图片工具应弹出菜单提供"从相册选择"和"拍照"两个选项，但之前实现只有相册选择。
+
+#### 解决方案
+1. 新增 `CameraImagePicker.swift` - 包装 UIImagePickerController 实现相机拍照
+2. 修改 `NativeEditorView.swift` - 添加图片来源选择菜单（confirmationDialog）
+3. 拍照功能仅在真机（相机可用）时显示
+
+#### 新增文件
+- `Views/Editor/Canvas/CameraImagePicker.swift`
+
+#### 修改文件
+- `Views/Editor/NativeEditorView.swift`
+  - 新增 `showImageSourceMenu` 状态
+  - 新增 `showCamera` 状态
+  - 图片工具点击 → 弹出选择菜单（相册/拍照）
+  - `fullScreenCover` 展示相机
+
+### 撤销/恢复系统 (Command Pattern)
+
+#### 核心设计
+采用命令模式（Command Pattern），每个可撤销操作封装为一个 Action 对象：
+- 每个 Action 实现 `execute()` 和 `undo()` 方法
+- `CanvasStateManager` 维护 undoStack 和 redoStack
+- 新操作入栈时清空 redoStack
+- 撤销时从 undoStack 弹出，执行 undo()，压入 redoStack
+- 恢复时从 redoStack 弹出，执行 execute()，压入 undoStack
+
+#### 新增文件
+- `Models/Canvas/CanvasAction.swift` - 定义撤销/恢复协议和各类 Action：
+  - `CanvasAction` 协议
+  - `AddLayerAction` - 添加图层
+  - `RemoveLayerAction` - 移除图层
+  - `MoveLayerAction` - 移动图层
+  - `ScaleLayerAction` - 缩放图层
+  - `RotateLayerAction` - 旋转图层
+  - `ZIndexLayerAction` - 调整图层顺序
+  - `LockLayerAction` - 锁定/解锁图层
+  - `DrawingAction` - 绘图操作（快照）
+  - `ClearCanvasAction` - 清屏操作
+  - `DuplicateLayerAction` - 复制图层
+  - `CompoundAction` - 复合操作
+
+#### 修改文件
+- `ViewModels/CanvasStateManager.swift`
+  - 新增 `undoStack` / `redoStack` 私有属性
+  - 新增 `maxUndoSteps = 50` 限制
+  - 实现 `recordAction(_:)` 方法
+  - 实现 `undo()` / `redo()` 方法
+  - 实现 `clearUndoRedoStacks()` 方法
+  - `canUndo` / `canRedo` 返回栈非空状态
+
+- `Views/Editor/NativeEditorView.swift`
+  - `onClearCanvas` 回调：记录当前状态后执行清屏
+  - `onDuplicateSelected` 回调：记录操作后执行复制
+
+### 功能状态
+
+| 功能 | 状态 |
+|:---|:---:|
+| 图片工具 - 相册选择 | ✅ |
+| 图片工具 - 拍照 | ✅（仅真机） |
+| 撤销 - 清屏 | ✅ |
+| 撤销 - 复制图层 | ✅ |
+| 撤销 - 其他操作 | 🔜 待集成 |
+
+### 后续计划
+- [ ] 将撤销支持集成到更多操作（移动/缩放/旋转/绘图等）
+- [ ] 实现箭头/文字/标注/矩形工具
+- [ ] 真机验证拍照功能
+
+---
+
+## 2025-12-13 - 画布工具栏重构 v1.0 (Tool-Based Architecture) 🎨
+
+### 概述
+按照《画布工具栏重构设计方案 v1.0》，将画布从"模式切换"架构重构为"工具切换"架构，参考 Figma/Canva 等专业设计工具的交互模式。
+
+### 核心目标
+1. **消除手势冲突**：每个工具独占手势，彻底解决笔画漂移问题
+2. **提升操作直觉**：工具即功能，所见即所得
+3. **简化状态管理**：无需维护复杂的模式切换逻辑
+
+### 架构变化
+
+#### 移除的概念
+- `CanvasToolMode.objectMode` / `drawingMode` → 改为具体工具
+- 双指捏合缩放 → 改为滑动条缩放，避免手势冲突
+- Zoom HUD 的 +/- 按钮 → 改为滑动条
+
+#### 新增的概念
+- `CanvasTool` 枚举（select/pan/pen/eraser/image 等）
+- 底部工具栏 `CanvasToolbar`
+- 左上角功能键 `CanvasActionBar`（撤销/恢复/复制/清屏）
+- 缩放滑动条 `ZoomSlider`
+
+### 新增文件
+
+#### 1. Models/Canvas/CanvasTool.swift
+定义所有可用工具的枚举：
+- `.select` - 选择工具：选中/移动/缩放/旋转对象
+- `.pan` - 平移工具：拖动平移整个画布
+- `.pen` - 画笔工具：自由绘制笔画
+- `.eraser` - 橡皮擦：擦除笔画
+- `.image` - 图片工具：导入相册/拍照
+- `.arrow/.text/.annotation/.rectangle` - 预留工具
+
+#### 2. Views/Editor/Canvas/CanvasToolbar.swift
+底部工具栏组件：
+- 毛玻璃背景 `.ultraThinMaterial`
+- 圆角矩形形状
+- 选中态：品牌蓝填充 + 白色图标
+- 未选中态：透明背景 + 次要文本色图标
+- Spring 动画切换
+
+#### 3. Views/Editor/Canvas/ZoomSlider.swift
+缩放滑动条组件：
+- 滑动范围：50% ~ 300%
+- 品牌蓝滑块和轨道
+- 百分比数字可编辑
+- 等宽字体显示
+
+#### 4. Views/Editor/Canvas/CanvasActionBar.swift
+左上角功能键组件：
+- 撤销/恢复/复制/清屏按钮
+- 清屏带确认 Alert
+- 禁用态透明度降低
+
+### 重构的文件
+
+#### 1. ViewModels/CanvasStateManager.swift
+- 新增 `currentTool: CanvasTool` 属性
+- 保留兼容属性 `currentMode`（标记 deprecated）
+- 新增 `canUndo` / `canRedo` 属性（预留）
+- 新增 `onClearCanvas` / `onDuplicateSelected` 回调
+
+#### 2. Views/Editor/Canvas/NativeCanvasView.swift
+- 新增 `currentTool` 属性
+- 新增 `updateForTool(_:)` 方法
+- 每个工具的手势独占配置：
+  - select: 禁用 PK，启用对象手势，禁用画布滚动
+  - pan: 禁用 PK，禁用对象手势，启用单指滚动
+  - pen/eraser: 启用 PK，锁定画布
+  - image: 同 select
+- 更新 `NativeCanvasViewWrapper` 使用 `currentTool`
+
+#### 3. Views/Editor/NativeEditorView.swift
+- 移除旧的顶部工具栏（模式切换 Picker、画笔/橡皮擦按钮）
+- 新增底部工具栏 `CanvasToolbar`
+- 新增左上角功能键 `CanvasActionBar`
+- 更新缩放控制为 `ZoomSlider`
+- 新增图片选择器 `PhotosPicker`
+
+### 工具行为定义
+
+| 工具 | PencilKit | 对象层 | 画布滚动 |
+|:---|:---:|:---:|:---:|
+| select | 禁用 | 启用 | 禁用 |
+| pan | 禁用 | 禁用 | 单指启用 |
+| pen | 启用（画笔） | 禁用 | 锁定 |
+| eraser | 启用（橡皮擦） | 禁用 | 锁定 |
+| image | 禁用 | 启用 | 禁用 |
+
+### 兼容性处理
+- 保留 `CanvasToolMode` 枚举文件
+- `CanvasStateManager` 中保留 `currentMode` 兼容属性
+- `NativeCanvasView` 中保留 `setDrawingTool(isPen:)` 兼容方法
+- 所有兼容 API 标记 `@available(*, deprecated)`
+
+### 预期效果
+- ✅ 消除绘图漂移：每个工具独占手势，无冲突
+- ✅ 直觉操作：点击工具即切换，无需理解"模式"概念
+- ✅ 简化代码：移除复杂的模式判断逻辑
+- ✅ 可扩展：预留箭头/文字/标注/矩形等工具位置
+
+### 后续计划
+- [ ] Phase 3: 实现撤销/恢复系统（Command Pattern）
+- [ ] Phase 4: 实现箭头/文字/标注/矩形工具
+- [ ] 真机验证绘图漂移问题是否彻底解决
+
+### 文件清单
+**新增：**
+- `Models/Canvas/CanvasTool.swift`
+- `Views/Editor/Canvas/CanvasToolbar.swift`
+- `Views/Editor/Canvas/ZoomSlider.swift`
+- `Views/Editor/Canvas/CanvasActionBar.swift`
+
+**修改：**
+- `ViewModels/CanvasStateManager.swift`
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+- `Views/Editor/NativeEditorView.swift`
+
+---
+
+## 2025-12-13 - 绘图漂移排查记录（未复现原因，待定）⚠️
+
+### 现象
+- Simulator + 触控板绘图时，笔迹实时向右下漂移，松手后恢复。
+
+### 排查过程与发现
+- 手势收敛：绘图模式禁用 pan/pinch/scroll，锁定 contentOffset；对象模式保留拖动/缩放。
+- 多轮精细日志：monitor + 状态快照（scrollOffset/lockedOffset/zoom/gesture state/pencil offset），绘制前后 frame/bounds 记录。
+- 实际日志结果：外层 scrollView offset 始终 2127.5,2016.5，PKCanvasView contentOffset 始终 0，zoom=1；未出现 drift/pencil_offset_reset 触发。
+- 结论：漂移并非外层滚动/缩放或 PK contentOffset 变化导致，更像 PK/Simulator 渲染层的临时偏移。
+
+### 建议的下一步（未实施）
+- 真机验证：判断是否为 Simulator/触控板特有问题。
+- A/B 试验：绘图模式切换为“独立 PKCanvasView，无外层 UIScrollView”以确认是否 Scroll 容器相关。
+- 如仍漂移，再转向坐标映射/渲染链路排查。
+
+### 变更文件
+- 无，日志已清理
+
+## 2025-12-12 - 编辑器手势收敛与漂移护栏 v1.2 ✅
+
+### 背景
+- 笔画绘制时仍偶发右下漂移，怀疑根因是绘图模式下 scrollView 仍有残余滚动/缩放入口。
+
+### 核心变更
+- **手势收敛**
+  - 对象模式：保留画布拖动与捏合缩放，禁用 PencilKit 交互。
+  - 绘画模式：仅允许笔/手指绘制，完全禁用画布拖动与缩放（pan/pinch/scroll 均关闭），锁定当前 contentOffset。
+- **缩放护栏**
+  - `setZoomScale` / `resetZoom` 仅在对象模式下生效，绘图模式直接忽略，避免 HUD 或程序调用影响坐标系。
+  - 绘图模式或绘制中触发的 `scrollViewDidScroll` 均强制回退到锁定 offset。
+
+### 修改文件
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+
+### 预期效果
+- 绘图模式下无论触控板/鼠标/手指，画布不会再发生平移或缩放，消除笔画实时漂移的来源。
+- 对象模式保持原有拖动与缩放体验；Magic Frame 叠加交互不受影响。
+
+### 风险与验证
+- 尚未在真机验证；需重点回归：对象模式下拖动/缩放是否正常，绘图模式下缩放按钮被禁用后体验是否符合预期。
+
 ## 2025-12-12 - 编辑器布局修复 v1.0 ✅
 
 ### 修复目标

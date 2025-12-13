@@ -381,6 +381,18 @@ final class NativeEditorViewModel {
         // 同步图层数据
         canvasDocument.layers = canvasView.getLayers()
         
+        // 同步箭头数据
+        canvasDocument.arrows = canvasView.getArrowLayerManager().arrows
+        
+        // 同步矩形数据
+        canvasDocument.rectangles = canvasView.getRectangleLayerManager().rectangles
+        
+        // 同步文字数据
+        canvasDocument.texts = canvasView.getTextLayerManager().textLayers
+        
+        // 同步标注数据
+        canvasDocument.annotations = canvasView.getAnnotationLayerManager().annotations
+        
         // 同步绘图数据
         canvasDocument.drawingData = canvasView.getDrawingData()
         
@@ -394,6 +406,30 @@ final class NativeEditorViewModel {
         
         // 加载图层
         canvasView.setLayers(canvasDocument.layers)
+        
+        // 加载箭头
+        let arrowManager = canvasView.getArrowLayerManager()
+        for arrow in canvasDocument.arrows {
+            arrowManager.addArrow(arrow)
+        }
+        
+        // 加载矩形
+        let rectangleManager = canvasView.getRectangleLayerManager()
+        for rectangle in canvasDocument.rectangles {
+            rectangleManager.addRectangle(rectangle)
+        }
+        
+        // 加载文字
+        let textManager = canvasView.getTextLayerManager()
+        for text in canvasDocument.texts {
+            textManager.addText(text)
+        }
+        
+        // 加载标注
+        let annotationManager = canvasView.getAnnotationLayerManager()
+        for annotation in canvasDocument.annotations {
+            annotationManager.addAnnotation(annotation)
+        }
         
         // 加载绘图
         if let drawingData = canvasDocument.drawingData {
