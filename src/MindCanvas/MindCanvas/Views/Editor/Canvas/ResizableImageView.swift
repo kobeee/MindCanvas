@@ -50,6 +50,12 @@ class ResizableImageView: UIView {
     /// 选中回调
     var onSelected: ((UUID) -> Void)?
     
+    /// 操作开始回调（用于撤销）
+    var onOperationStart: ((LayerNode) -> Void)?
+    
+    /// 操作结束回调（用于撤销）
+    var onOperationEnd: ((LayerNode, LayerNode) -> Void)?
+    
     // MARK: - Initialization
     
     init(node: LayerNode) {
@@ -165,52 +171,43 @@ class ResizableImageView: UIView {
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard !node.isLocked else { return }
         
-        let translation = gesture.translation(in: superview)
-        center = CGPoint(x: center.x + translation.x, y: center.y + translation.y)
-        gesture.setTranslation(.zero, in: superview)
-        
-        if gesture.state == .ended {
-            // 记录移动操作用于撤销
-            let fromFrame = node.frame
-            syncToNode()
-            let toFrame = node.frame
+        switch gesture.state {
+        case .began:
+            // 操作开始，保存初始状态
+            onOperationStart?(node)
             
-            // 如果位置发生了变化，记录操作
-            if fromFrame != toFrame {
-                let action = MoveLayerAction(
-                    layerID: node.id,
-                    fromFrame: fromFrame,
-                    toFrame: toFrame,
-                    canvasView: superview?.superview as? NativeCanvasView
-                )
-                
-                // 通过回调通知状态管理器记录操作
-                onNodeUpdated?(node)
-                
-                // 如果有父视图且是 NativeCanvasView，直接记录操作
-                if let canvasView = superview?.superview as? NativeCanvasView {
-                    // 这里需要通过某种方式访问 CanvasStateManager
-                    // 暂时通过通知中心发送
-                    NotificationCenter.default.post(
-                        name: .canvasActionRecorded,
-                        object: action
-                    )
-                }
-            }
+        case .changed:
+            // 实时更新位置
+            let translation = gesture.translation(in: superview)
+            center = CGPoint(x: center.x + translation.x, y: center.y + translation.y)
+            gesture.setTranslation(.zero, in: superview)
+            onNodeUpdated?(node)
+            
+        case .ended:
+            // 操作结束，记录最终状态
+            syncToNode()
+            onOperationEnd?(node, node)
+            
+        default:
+            break
         }
     }
     
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         guard !node.isLocked else { return }
         
-        let scale = gesture.scale
-        transform = transform.scaledBy(x: scale, y: scale)
-        gesture.scale = 1.0
-        
-        if gesture.state == .ended {
-            // 记录缩放操作用于撤销
-            let fromFrame = node.frame
+        switch gesture.state {
+        case .began:
+            // 操作开始，保存初始状态
+            onOperationStart?(node)
             
+        case .changed:
+            // 实时更新缩放
+            transform = transform.scaledBy(x: gesture.scale, y: gesture.scale)
+            gesture.scale = 1.0
+            onNodeUpdated?(node)
+            
+        case .ended:
             // 更新 frame 以反映新尺寸
             let newWidth = bounds.width * transform.a
             let newHeight = bounds.height * transform.d
@@ -218,67 +215,36 @@ class ResizableImageView: UIView {
             transform = CGAffineTransform(rotationAngle: node.rotation)
             syncToNode()
             
-            let toFrame = node.frame
+            // 操作结束，记录最终状态
+            onOperationEnd?(node, node)
             
-            // 如果尺寸发生了变化，记录操作
-            if fromFrame != toFrame {
-                let action = ScaleLayerAction(
-                    layerID: node.id,
-                    fromFrame: fromFrame,
-                    toFrame: toFrame,
-                    canvasView: superview?.superview as? NativeCanvasView
-                )
-                
-                // 通过回调通知状态管理器记录操作
-                onNodeUpdated?(node)
-                
-                // 如果有父视图且是 NativeCanvasView，直接记录操作
-                if let canvasView = superview?.superview as? NativeCanvasView {
-                    // 这里需要通过某种方式访问 CanvasStateManager
-                    // 暂时通过通知中心发送
-                    NotificationCenter.default.post(
-                        name: .canvasActionRecorded,
-                        object: action
-                    )
-                }
-            }
+        default:
+            break
         }
     }
     
     @objc private func handleRotate(_ gesture: UIRotationGestureRecognizer) {
         guard !node.isLocked else { return }
         
-        transform = transform.rotated(by: gesture.rotation)
-        gesture.rotation = 0
-        
-        if gesture.state == .ended {
-            // 记录旋转操作用于撤销
-            let fromRotation = node.rotation
-            syncToNode()
-            let toRotation = node.rotation
+        switch gesture.state {
+        case .began:
+            // 操作开始，保存初始状态
+            onOperationStart?(node)
             
-            // 如果旋转角度发生了变化，记录操作
-            if abs(fromRotation - toRotation) > 0.001 {
-                let action = RotateLayerAction(
-                    layerID: node.id,
-                    fromRotation: fromRotation,
-                    toRotation: toRotation,
-                    canvasView: superview?.superview as? NativeCanvasView
-                )
-                
-                // 通过回调通知状态管理器记录操作
-                onNodeUpdated?(node)
-                
-                // 如果有父视图且是 NativeCanvasView，直接记录操作
-                if let canvasView = superview?.superview as? NativeCanvasView {
-                    // 这里需要通过某种方式访问 CanvasStateManager
-                    // 暂时通过通知中心发送
-                    NotificationCenter.default.post(
-                        name: .canvasActionRecorded,
-                        object: action
-                    )
-                }
-            }
+        case .changed:
+            // 实时更新旋转
+            transform = transform.rotated(by: gesture.rotation)
+            gesture.rotation = 0
+            onNodeUpdated?(node)
+            
+        case .ended:
+            syncToNode()
+            
+            // 操作结束，记录最终状态
+            onOperationEnd?(node, node)
+            
+        default:
+            break
         }
     }
     

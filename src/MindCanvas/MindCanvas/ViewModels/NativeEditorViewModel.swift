@@ -436,6 +436,9 @@ final class NativeEditorViewModel {
             canvasView.loadDrawing(from: drawingData)
         }
         
+        // 清空撤销栈（新会话开始）
+        stateManager.clearUndoRedoStacks()
+        
         print("画布文档已加载")
     }
 }

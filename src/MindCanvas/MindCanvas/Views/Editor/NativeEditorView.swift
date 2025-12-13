@@ -29,32 +29,14 @@ struct NativeEditorView: View {
         // 等待画布视图初始化完成
         guard let canvasView = viewModel.canvasView else { return }
         
-        // 存储上一次的绘图数据
-        var lastDrawingData = canvasView.getDrawingData()
-        
-        // 监听画布更新
+        // 监听画布更新 - 只用于保存文档，不再记录撤销操作
         let originalOnCanvasUpdated = canvasView.onCanvasUpdated
         canvasView.onCanvasUpdated = { [weak viewModel] in
             // 调用原始回调
             originalOnCanvasUpdated?()
             
-            guard let viewModel = viewModel else { return }
-            
-            let currentDrawingData = canvasView.getDrawingData()
-            
-            // 如果数据发生变化，记录操作
-            if let lastData = lastDrawingData,
-               lastData != currentDrawingData {
-                let action = DrawingAction(
-                    fromDrawingData: lastData,
-                    toDrawingData: currentDrawingData,
-                    canvasView: canvasView
-                )
-                viewModel.stateManager.recordAction(action)
-            }
-            
-            // 更新上一次的数据
-            lastDrawingData = currentDrawingData
+            // 保存画布文档
+            viewModel?.saveCanvasDocument()
         }
     }
     

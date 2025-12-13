@@ -161,20 +161,21 @@ struct DrawingAction: CanvasAction {
     let fromDrawingData: Data?
     let toDrawingData: Data?
     weak var canvasView: NativeCanvasView?
-    
-    var description: String { "绘图操作" }
-    
+
+    var description: String { "绘图操作(from=\(fromDrawingData?.count ?? 0), to=\(toDrawingData?.count ?? 0))" }
+
     func execute() {
+        print("[DEBUG] DrawingAction.execute: to=\(toDrawingData?.count ?? 0)")
         if let data = toDrawingData {
             canvasView?.loadDrawing(from: data)
         }
     }
-    
+
     func undo() {
+        print("[DEBUG] DrawingAction.undo: from=\(fromDrawingData?.count ?? 0)")
         if let data = fromDrawingData {
             canvasView?.loadDrawing(from: data)
         } else {
-            // 如果之前没有绘图数据，清空画布绘图
             canvasView?.loadDrawing(from: Data())
         }
     }

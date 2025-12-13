@@ -1,5 +1,322 @@
 # 开发记录
 
+## 2025-12-13 - 画布架构重构 v2.0 (直接使用 PKCanvasView 内置缩放)
+
+### 问题背景
+
+用户报告两个严重问题：
+1. **笔画漂移**：绘制过程中笔画向右下漂移，松手后恢复
+2. **撤销后笔画复活**：撤销第3笔后画第4笔，被撤销的第3笔"复活"
+
+经过多次"屎上雕花"式修补（增加标记、调整时序、冻结坐标系统等），问题始终无法彻底解决。
+
+### 根因发现
+
+**关键发现**：PKCanvasView 本身就是 UIScrollView 的子类！
+
+旧架构将 PKCanvasView 嵌套在另一个 UIScrollView 中：
+```
+NativeCanvasView (UIView)
+└── scrollView (UIScrollView)      ← 外层滚动/缩放
+    └── contentView (UIView)
+        ├── objectLayerView        ← 图片图层
+        └── pencilCanvas (PKCanvasView)  ← 继承自 UIScrollView！
+```
+
+这是一个已知的 Apple 问题（FB15166022）：PKCanvasView 嵌套在 UIScrollView 中会导致坐标转换错误。
+
+### 解决方案：架构重构
+
+参考 GitHub 开源项目 [simonbs/InfiniteCanvas](https://github.com/simonbs/InfiniteCanvas)，完全重构画布架构：
+
+**新架构**：直接使用 PKCanvasView 的内置缩放功能
+```
+NativeCanvasView (UIView)
+└── pencilCanvas (PKCanvasView)    ← 直接作为根滚动容器
+    └── objectLayerView            ← 图片图层作为 PKCanvasView 的子视图
+```
+
+### 核心代码变更
+
+#### 1. 移除外层 UIScrollView
+```swift
+// 旧代码
+private let scrollView = UIScrollView()
+private let contentView = UIView()
+
+// 新代码：直接使用 PKCanvasView
+let pencilCanvas = PKCanvasView()
+```
+
+#### 2. 使用 PKCanvasView 的内置缩放
+```swift
+// 设置画布大小
+pencilCanvas.contentSize = canvasSize  // 5000x5000
+
+// 启用缩放 - PKCanvasView 内置功能！
+pencilCanvas.minimumZoomScale = 0.5
+pencilCanvas.maximumZoomScale = 3.0
+```
+
+#### 3. 对象图层作为 PKCanvasView 的子视图
+```swift
+// 插入到 PKCanvasView 的最底层
+pencilCanvas.insertSubview(objectLayerView, at: 0)
+addSubview(pencilCanvas)
+```
+
+#### 4. 工具切换使用 drawingGestureRecognizer
+```swift
+func updateForTool(_ tool: CanvasTool) {
+    switch tool {
+    case .select:
+        pencilCanvas.drawingGestureRecognizer.isEnabled = false
+        objectLayerView.isUserInteractionEnabled = true
+        pencilCanvas.isScrollEnabled = false
+
+    case .pan:
+        pencilCanvas.drawingGestureRecognizer.isEnabled = false
+        objectLayerView.isUserInteractionEnabled = false
+        pencilCanvas.isScrollEnabled = true
+
+    case .pen, .eraser:
+        pencilCanvas.drawingGestureRecognizer.isEnabled = true
+        objectLayerView.isUserInteractionEnabled = false
+        pencilCanvas.isScrollEnabled = false
+    // ...
+    }
+}
+```
+
+#### 5. 缩放回调通过 UIScrollViewDelegate
+```swift
+// PKCanvasViewDelegate 继承自 UIScrollViewDelegate
+func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    onZoomChanged?(scrollView.zoomScale)
+}
+```
+
+### 架构对比
+
+| 特性 | 旧架构 | 新架构 |
+|:---|:---|:---|
+| 滚动/缩放容器 | 外层 UIScrollView | PKCanvasView 自身 |
+| 图层嵌套深度 | 4 层 | 2 层 |
+| 坐标系统 | 复杂（多层转换） | 简单（单一坐标系） |
+| 手势冲突 | 需要复杂协调 | PKCanvasView 内部处理 |
+| 代码行数 | ~750 行 | ~720 行 |
+
+### 预期效果
+
+1. **笔画漂移**：应彻底解决（根因已消除）
+2. **撤销复活**：应大幅改善（数据一致性增强）
+3. **性能提升**：减少坐标转换开销
+
+### 修改文件
+
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 完全重写
+
+### 参考资料
+
+- [simonbs/InfiniteCanvas](https://github.com/simonbs/InfiniteCanvas) - PKCanvasView 无限画布实现
+- [codelynx/PKCanvasViewTester](https://github.com/codelynx/PKCanvasViewTester) - PKCanvasView 测试项目
+- Apple Feedback FB15166022 - PKCanvasView 嵌套 UIScrollView 的已知问题
+
+### 后续验证
+
+- [ ] 在模拟器上测试笔画漂移问题
+- [ ] 在真机上测试 Apple Pencil 绘图
+- [ ] 验证撤销/恢复功能
+- [ ] 测试图片图层的拖拽/缩放
+- [ ] 测试画布缩放和平移
+
+---
+
+## 2025-12-13 - 撤销后笔画复活问题修复 v1.2.5
+
+### 问题描述
+用户报告：画完笔画 1, 2, 3 后撤销第 3 笔，再画第 4 笔时，被撤销的第 3 笔会"复活"出现在画布上。
+
+### 根因分析
+
+#### 1. PKDrawing 数据规范化问题
+从日志发现：`loadDrawing: data.count=1264` 但 `loadDrawing: done, currentData.count=1286`
+
+**关键发现**：PKDrawing(data:) 初始化后调用 dataRepresentation() 得到的数据可能与原始数据不同。PencilKit 内部会对数据进行"规范化"，导致字节数变化。
+
+这意味着撤销加载旧数据后，`strokeStartDrawingData` 仍然是旧的 1264 字节，但实际画布数据已经变成 1286 字节。当画新笔画时，撤销系统使用的基准数据是错误的。
+
+#### 2. 解冻坐标系统时机问题
+`canvasViewDidEndUsingTool` 中立即调用 `setScrollTransformsFrozen(false)` 会触发布局更新，可能导致 `canvasViewDrawingDidChange` 被错误地调用，进而影响撤销数据的记录。
+
+#### 3. 与笔画漂移的关联
+日志中的 `Unable to find stroke from stroke group in drawing` 错误表明 PencilKit 内部 stroke 索引失效。这与笔画漂移问题可能同源：
+- 绘制过程中坐标系统发生变化
+- 释放笔触时坐标系统恢复
+- PencilKit 尝试重新定位 stroke 时出错
+- 被撤销的 stroke 数据被错误地"恢复"
+
+### 修复方案
+
+#### 1. loadDrawing 时同步更新撤销基准
+```swift
+func loadDrawing(from data: Data) {
+    isLoadingDrawing = true
+    pencilCanvas.drawing = drawing
+    // 使用加载后的实际数据作为新的基准
+    strokeStartDrawingData = getDrawingData()
+    DispatchQueue.main.async { self.isLoadingDrawing = false }
+}
+```
+
+#### 2. 添加 isLoadingDrawing 标记
+区分用户绘制导致的 `canvasViewDrawingDidChange` 和程序加载导致的变化，避免错误处理。
+
+#### 3. 优化坐标系统冻结/解冻
+- 使用 `UIView.performWithoutAnimation` 确保立即生效
+- 在解冻前先恢复坐标状态，再恢复交互状态
+- 解冻操作延迟执行，确保 PencilKit 完成内部处理
+
+#### 4. 增强 scrollViewDidScroll 保护
+在绘图模式下，任何超过 0.1pt 的偏移都强制恢复，防止坐标漂移。
+
+#### 5. 调整 canvasViewDidEndUsingTool 时序
+先获取绘图数据，延迟解冻坐标系统，再延迟创建撤销操作。
+
+### 技术背景：PKCanvasView + UIScrollView 的已知问题
+
+搜索发现这是 Apple 公认的架构性问题（FB15166022 至今未解决）：
+- PKCanvasView 嵌套在 UIScrollView 中时，坐标转换可能出错
+- 缩放比例 < 1.0 时特别不稳定
+- 有开发者在此问题上花费 64 小时仍未找到完美解决方案
+
+**Apple 官方建议**：PKCanvasView 应与 UIScrollView 分离，而非嵌套。
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+
+### 后续建议
+如果问题仍然存在，考虑更彻底的架构调整：
+1. 将 PKCanvasView 从 UIScrollView 中移出，置于同级
+2. 实现独立的滚动同步机制
+3. 或限制缩放范围（仅支持 >= 1.0）
+
+---
+
+## 2025-12-13 - 清理调试日志 v1.2.4
+
+### 变更内容
+清理 `NativeCanvasView.swift` 中笔画撤销相关的调试日志 (`[Undo]` 前缀的 print 语句)。
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+
+---
+
+## 2025-12-13 - 绘制笔画撤销修复 v1.2.3
+
+### 问题描述
+绘制的笔画无法撤销，撤销操作没有被正确记录。
+
+### 根因分析
+PencilKit 的 `canvasViewDidEndUsingTool` 委托方法被调用时，`pencilCanvas.drawing` 的数据可能还没有更新完成。之前使用 0.01 秒的延迟不够长，导致获取到的"当前数据"实际上还是"开始时的数据"。
+
+### 修复方案
+1. **增加 `hasPendingStrokeUndo` 标记**：追踪是否有待处理的笔画撤销操作
+2. **双重触发机制**：
+   - 在 `canvasViewDrawingDidChange` 中：当不在绘制状态且有待处理操作时，尝试创建撤销
+   - 在 `canvasViewDidEndUsingTool` 中：延迟 0.1 秒后作为兜底触发
+3. **防重复处理**：`tryCreateStrokeUndoAction` 方法确保每个笔画只创建一次撤销操作
+
+### 技术要点
+- `canvasViewDrawingDidChange` 在绘图数据真正变化时被调用，比 `canvasViewDidEndUsingTool` 更可靠
+- 通过 `hasPendingStrokeUndo` 标记避免重复创建撤销操作
+- 延迟从 0.01 秒增加到 0.1 秒，作为兜底保护
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+
+---
+
+## 2025-12-13 - 撤销/恢复系统修复 v1.2.2 🔧
+
+### 概述
+修复撤销/恢复系统中的关键问题，特别是绘制操作无法撤销的bug，并排查笔画漂移的根本原因。
+
+### 问题分析
+
+#### 1. 双重撤销记录机制冲突 ✅
+**问题**：存在两套撤销记录机制在冲突
+- **新机制**：在 `canvasViewDidEndUsingTool` 中记录撤销
+- **旧机制**：在 `onCanvasUpdated` 回调中记录撤销
+
+**根因**：旧机制的 `lastDrawingData` 在绘制过程中被错误更新，导致数据比较混乱，甚至可能重置了新机制的数据。
+
+**修复**：
+- 移除 `NativeEditorView` 中的旧撤销记录机制
+- `onCanvasUpdated` 回调只用于保存文档，不再记录撤销操作
+- 统一使用 `canvasViewDidEndUsingTool` 中的新机制
+
+#### 2. 绘制数据获取时机问题 ✅
+**问题**：`canvasViewDidEndUsingTool` 调用时，`getDrawingData()` 返回的还是开始时的数据
+
+**现象**：
+- 开始绘制：数据大小=42
+- 结束绘制：数据大小=654（说明确实画了）
+- 但获取的当前数据还是42
+
+**修复**：
+- 调整时序：先获取绘图数据，再解冻坐标系统
+- 添加延迟：使用 `DispatchQueue.main.asyncAfter` 确保数据更新完成
+- 增强调试：添加详细的坐标状态和数据变化日志
+
+#### 3. 坐标系统重置问题 ✅
+**问题**：`setScrollTransformsFrozen(false)` 恢复坐标时可能影响绘图数据
+
+**修复**：
+- 在恢复坐标前先获取绘图数据
+- 使用 `UIView.performWithoutAnimation` 避免动画干扰
+- 添加坐标状态跟踪日志
+
+### 技术要点
+
+#### PencilKit 委托调用时序
+- `canvasViewDidBeginUsingTool` → 开始绘制
+- `canvasViewDrawingDidChange` → 绘制中（多次调用）
+- `canvasViewDidEndUsingTool` → 结束绘制
+
+**关键发现**：`canvasViewDidEndUsingTool` 可能在 PencilKit 内部更新 drawing 数据之前被调用，需要添加延迟确保数据同步。
+
+#### 坐标系统与绘图数据的关系
+- 坐标系统冻结/恢复可能影响 PencilKit 的内部状态
+- 必须在正确的时机获取绘图数据
+- 双重撤销记录机制会相互干扰
+
+### 修改文件
+
+**核心修改**：
+- `Views/Editor/NativeEditorView.swift` - 移除旧撤销记录机制
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 优化新撤销记录时序
+- `ViewModels/CanvasStateManager.swift` - 增强调试日志
+- `Models/Canvas/CanvasAction.swift` - 增强撤销操作日志
+
+### 调试增强
+
+添加了全面的调试日志系统：
+- 绘制开始/结束时的数据大小
+- 坐标系统状态变化
+- 撤销操作创建和执行过程
+- 恢复栈状态跟踪
+
+### 后续计划
+
+虽然发现了双重机制冲突的问题，但绘制撤销仍然存在时序问题。建议：
+1. 进一步研究 PencilKit 内部机制
+2. 考虑使用 `canvasViewDrawingDidChange` 作为撤销触发点
+3. 在真机上验证是否为 Simulator 特有问题
+
+---
+
 ## 2025-12-13 - 编译错误修复 v1.2.1 🔧
 
 ### 概述
