@@ -58,7 +58,10 @@ class NativeCanvasView: UIView {
     private var layers: [LayerNode] = []
 
     /// 图片视图字典 (nodeID -> ResizableImageView)
-    private var imageViews: [UUID: ResizableImageView] = [:]
+    var imageViews: [UUID: ResizableImageView] = [:]
+
+    /// 箭头视图字典 (nodeID -> SelectableArrowView)
+    var arrowViews: [UUID: SelectableArrowView] = [:]
 
     /// 箭头图层管理器
     private let arrowLayerManager = ArrowLayerManager()
@@ -334,14 +337,71 @@ class NativeCanvasView: UIView {
 
         imageViews[layer.id] = imageView
         objectLayerView.addSubview(imageView)
+        
+        // 根据当前工具状态设置手势
+        if currentTool == .select || currentTool == .image {
+            imageView.enableObjectGestures()
+        }
+        
         sortLayers()
+    }
+    
+    /// 创建箭头视图
+    private func createArrowView(for arrow: ArrowLayerNode) {
+        let arrowView = SelectableArrowView(arrowNode: arrow)
+        
+        var operationStartArrow: ArrowLayerNode?
+        
+        arrowView.onNodeUpdated = { [weak self] updatedArrow in
+            self?.arrowLayerManager.updateArrow(updatedArrow)
+        }
+        
+        arrowView.onSelected = { [weak self] arrowID in
+            self?.selectedNodeID = arrowID
+        }
+        
+        arrowView.onOperationStart = { arrow in
+            operationStartArrow = arrow
+        }
+        
+        arrowView.onOperationEnd = { [weak self] _, endArrow in
+            guard let self = self, let startArrow = operationStartArrow else { return }
+            
+            // 记录箭头移动操作
+            if startArrow.startPoint != endArrow.startPoint || startArrow.endPoint != endArrow.endPoint {
+                let action = MoveArrowAction(
+                    arrowID: startArrow.id,
+                    fromArrow: startArrow,
+                    toArrow: endArrow,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            
+            operationStartArrow = nil
+        }
+        
+        arrowViews[arrow.id] = arrowView
+        objectLayerView.addSubview(arrowView)
+        
+        // 根据当前工具状态设置手势
+        if currentTool == .select || currentTool == .arrow {
+            arrowView.enableArrowGestures()
+        }
     }
 
     /// 更新选中状态
     private func updateSelectionStates() {
+        // 更新图片视图选中状态
         for (id, imageView) in imageViews {
             imageView.isSelected = (id == selectedNodeID)
         }
+        
+        // 更新箭头视图选中状态
+        for (id, arrowView) in arrowViews {
+            arrowView.isSelected = (id == selectedNodeID)
+        }
+        
         onSelectionChanged?(selectedNodeID != nil)
     }
 
@@ -394,14 +454,24 @@ class NativeCanvasView: UIView {
     func updateForTool(_ tool: CanvasTool) {
         switch tool {
         case .select:
-            // 选择工具：禁用绘图，启用对象手势，禁用画布滚动
-            pencilCanvas.isUserInteractionEnabled = true
+            // 选择工具：完全禁用PKCanvasView的交互，让对象层处理所有手势
+            pencilCanvas.isUserInteractionEnabled = false  // 关键修复：完全禁用PKCanvasView交互
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
-            pencilCanvas.drawingPolicy = .default  // 选择模式下不需要绘图
+            pencilCanvas.drawingPolicy = .default
             objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+            
+            // 确保所有对象的手势都能正常工作
+            for imageView in imageViews.values {
+                imageView.enableObjectGestures()
+            }
+            
+            // 确保所有箭头的手势都能正常工作
+            for arrowView in arrowViews.values {
+                arrowView.enableArrowGestures()
+            }
 
         case .pan:
             // 平移工具：禁用绘图，禁用对象手势，启用画布滚动
@@ -438,9 +508,9 @@ class NativeCanvasView: UIView {
 
         case .image:
             // 图片工具：与选择工具类似
-            pencilCanvas.isUserInteractionEnabled = true
+            pencilCanvas.isUserInteractionEnabled = false  // 同样禁用PKCanvasView交互
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
-            pencilCanvas.drawingPolicy = .default  // 图片模式下不需要绘图
+            pencilCanvas.drawingPolicy = .default
             objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
@@ -655,12 +725,15 @@ class NativeCanvasView: UIView {
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
         }
         arrowLayerManager.addArrow(arrow)
+        createArrowView(for: arrow)
         onArrowCreated?(arrow)
         onCanvasUpdated?()
     }
 
     func removeArrow(id: UUID) {
         arrowLayerManager.removeArrow(id: id)
+        arrowViews[id]?.removeFromSuperview()
+        arrowViews.removeValue(forKey: id)
         onCanvasUpdated?()
     }
 

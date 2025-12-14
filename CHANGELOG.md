@@ -1,5 +1,84 @@
 # 开发记录
 
+## 2025-12-14 - 选择工具修复与箭头对象选择支持 ✅
+
+### 问题描述
+选择工具无法选中箭头对象，也无法进行拖动、缩放等操作。同时出现 AttributeGraph 循环检测警告日志。
+
+### 根因分析
+1. **箭头对象架构问题**：箭头使用纯 SwiftUI `ArrowView` 渲染，没有手势识别器支持
+2. **选择系统缺失**：箭头没有集成到选择工具的对象层管理中
+3. **手势冲突**：PKCanvasView 与对象层手势识别器存在冲突
+4. **编译错误**：`UIGestureRecognizerDelegate` 方法缺少 `override` 关键字
+
+### 解决方案
+
+#### 1. 创建可选择箭头视图组件
+- **新增文件**: `SelectableArrowView.swift`
+- 基于 `UIView` 实现的箭头视图，支持手势识别
+- 集成点击选择、拖拽移动功能
+- 支持选中状态视觉反馈（蓝色虚线边框）
+
+#### 2. 修复选择工具手势冲突
+- 在选择模式下完全禁用 PKCanvasView 交互：`pencilCanvas.isUserInteractionEnabled = false`
+- 确保对象层手势获得优先处理权
+- 为所有对象启用统一的手势管理
+
+#### 3. 集成箭头到选择系统
+- 在 `NativeCanvasView` 中添加箭头视图管理
+- 修改箭头添加/删除流程，创建对应的可选择视图
+- 更新选择状态管理，同时支持图片和箭头
+
+#### 4. 撤销/恢复支持
+- 新增 `MoveArrowAction` 类支持箭头移动的撤销操作
+- 保持与现有图片对象相同的撤销/恢复机制
+
+#### 5. 修复编译错误
+- 为 `gestureRecognizerShouldBegin` 添加 `override` 关键字
+- 移除协议方法中错误的 `override` 关键字
+
+### 技术要点
+
+#### 手势优先级管理
+```swift
+case .select:
+    // 完全禁用PKCanvasView交互，让对象层处理所有手势
+    pencilCanvas.isUserInteractionEnabled = false
+    objectLayerView.isUserInteractionEnabled = true
+    // 启用所有对象手势
+    for imageView in imageViews.values {
+        imageView.enableObjectGestures()
+    }
+    for arrowView in arrowViews.values {
+        arrowView.enableArrowGestures()
+    }
+```
+
+#### 箭头视图架构
+- 使用 `CAShapeLayer` 绘制箭头路径
+- 支持动态更新箭头位置和样式
+- 集成选择边框和交互反馈
+
+### 修改文件
+- `Views/Editor/Canvas/SelectableArrowView.swift` (新增)
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+  - 添加箭头视图管理
+  - 修复选择工具手势配置
+  - 更新选择状态管理
+- `Models/Canvas/CanvasAction.swift`
+  - 新增 `MoveArrowAction` 类
+
+### AttributeGraph 循环警告
+此警告通常由 SwiftUI 视图依赖循环引起，可能与箭头视图的状态更新有关。建议后续进一步排查视图状态依赖关系。
+
+### 当前状态
+- ✅ 选择工具可以选中图片对象
+- ✅ 箭头对象支持选择和拖拽（代码层面已完成）
+- ⚠️ AttributeGraph 循环警告待进一步排查
+- 📝 箭头对象选择功能需要实际测试验证
+
+---
+
 ## 2025-12-14 - 手掌工具（平移工具）修复 ✅
 
 ### 问题描述

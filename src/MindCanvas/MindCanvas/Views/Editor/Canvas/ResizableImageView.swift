@@ -118,6 +118,15 @@ class ResizableImageView: UIView {
         pinchGesture.require(toFail: gesture)
     }
     
+    /// 确保对象手势在选中模式下优先
+    func enableObjectGestures() {
+        isUserInteractionEnabled = true
+        panGesture.isEnabled = true
+        pinchGesture.isEnabled = true
+        rotateGesture.isEnabled = true
+        tapGesture.isEnabled = true
+    }
+    
     // MARK: - Image Loading
     
     private func loadImage() {
@@ -300,6 +309,30 @@ extension ResizableImageView: UIGestureRecognizerDelegate {
            (gestureRecognizer == rotateGesture && otherGestureRecognizer == pinchGesture) {
             return true
         }
+        return false
+    }
+    
+    /// 确保对象手势优先于其他手势
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 在选择模式下，所有对象手势都应该可以开始
+        return true
+    }
+    
+    /// 防止其他手势识别器阻止对象手势
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // 不需要等待其他手势失败
+        return false
+    }
+    
+    /// 防止对象手势被其他手势识别器阻止
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // 不需要强制其他手势等待此手势失败
         return false
     }
 }

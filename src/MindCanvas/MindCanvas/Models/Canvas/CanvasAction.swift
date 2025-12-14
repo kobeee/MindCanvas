@@ -254,6 +254,36 @@ struct RemoveArrowAction: CanvasAction {
     }
 }
 
+/// 移动箭头操作
+struct MoveArrowAction: CanvasAction {
+    let arrowID: UUID
+    let fromArrow: ArrowLayerNode
+    let toArrow: ArrowLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "移动箭头: \(arrowID)" }
+    
+    func execute() {
+        canvasView?.updateArrow(toArrow)
+        
+        // 更新箭头视图
+        if let arrowView = canvasView?.arrowViews[arrowID] {
+            arrowView.arrowNode = toArrow
+            arrowView.updateFromNode()
+        }
+    }
+    
+    func undo() {
+        canvasView?.updateArrow(fromArrow)
+        
+        // 更新箭头视图
+        if let arrowView = canvasView?.arrowViews[arrowID] {
+            arrowView.arrowNode = fromArrow
+            arrowView.updateFromNode()
+        }
+    }
+}
+
 /// 修改箭头操作
 struct ModifyArrowAction: CanvasAction {
     let arrowID: UUID
