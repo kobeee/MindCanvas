@@ -28,7 +28,6 @@ class CanvasStateManager {
         NotificationCenter.default.publisher(for: .canvasActionRecorded)
             .sink { [weak self] notification in
                 if let action = notification.object as? any CanvasAction {
-                    print("📝 接收到撤销操作：\(action.description)")
                     self?.recordAction(action)
                 }
             }
@@ -180,37 +179,29 @@ class CanvasStateManager {
     func recordAction(_ action: any CanvasAction) {
         undoStack.append(action)
         // 清空恢复栈（新操作后无法恢复之前撤销的内容）
-        let redoCount = redoStack.count
         redoStack.removeAll()
         // 限制撤销栈大小
         if undoStack.count > maxUndoSteps {
             undoStack.removeFirst()
         }
-        print("[DEBUG] recordAction: \(action.description), undoStack=\(undoStack.count), cleared redoStack(\(redoCount))")
     }
 
     /// 撤销
     func undo() {
         guard let action = undoStack.popLast() else {
-            print("[DEBUG] undo: failed (empty stack)")
             return
         }
-        print("[DEBUG] undo: \(action.description), undoStack=\(undoStack.count)")
         action.undo()
         redoStack.append(action)
-        print("[DEBUG] undo: done, redoStack=\(redoStack.count)")
     }
 
     /// 恢复
     func redo() {
         guard let action = redoStack.popLast() else {
-            print("[DEBUG] redo: failed (empty stack)")
             return
         }
-        print("[DEBUG] redo: \(action.description), redoStack=\(redoStack.count)")
         action.execute()
         undoStack.append(action)
-        print("[DEBUG] redo: done, undoStack=\(undoStack.count)")
     }
     
     /// 清空撤销/恢复栈

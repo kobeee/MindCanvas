@@ -12,7 +12,7 @@ class NativeCanvasView: UIView {
     private let objectLayerView = UIView()
 
     /// Layer 2: PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
-    let pencilCanvas = PKCanvasView()
+    var pencilCanvas = PKCanvasView()
 
     /// 画布尺寸 (超大虚拟画布)
     private let canvasSize = CGSize(width: 5000, height: 5000)
@@ -20,6 +20,9 @@ class NativeCanvasView: UIView {
     /// 缩放范围
     private let minZoomScale: CGFloat = 0.5
     private let maxZoomScale: CGFloat = 3.0
+    
+    /// 撤销后加载方案：true=重建PKCanvasView实例，false=使用append方法
+    private let shouldRecreateCanvasViewOnLoad = true
 
     /// 当前工具（新架构）
     var currentTool: CanvasTool = .select {
@@ -453,32 +456,123 @@ class NativeCanvasView: UIView {
 
     /// 加载绘图数据
     func loadDrawing(from data: Data) {
-        print("[DEBUG] loadDrawing: data.count=\(data.count)")
-
         isLoadingDrawing = true
 
-        // 先清空 PKCanvasView 的内部 UndoManager，防止旧操作干扰
-        pencilCanvas.undoManager?.removeAllActions()
-
-        // 先强制清空当前绘图，断开与之前 stroke 的关联
-        pencilCanvas.drawing = PKDrawing()
-
-        // 再设置新的绘图数据
-        if !data.isEmpty, let drawing = try? PKDrawing(data: data) {
-            pencilCanvas.drawing = drawing
+        // 根据配置选择加载方案
+        if shouldRecreateCanvasViewOnLoad {
+            // 方案1：重建PKCanvasView实例以彻底清除内部状态（推荐）
+            recreateCanvasViewWithDrawing(data)
+        } else {
+            // 方案2：使用PKDrawing.append方法（备选方案）
+            loadDrawingUsingAppend(data)
         }
-
-        // 再次清空 UndoManager（设置 drawing 可能会添加新的 undo 操作）
-        pencilCanvas.undoManager?.removeAllActions()
-
-        // 同步更新撤销基准数据（使用规范化后的数据）
-        strokeStartDrawingData = getDrawingData()
-        print("[DEBUG] loadDrawing: normalized data.count=\(strokeStartDrawingData?.count ?? 0)")
-
+        
         DispatchQueue.main.async { [weak self] in
             self?.isLoadingDrawing = false
-            print("[DEBUG] loadDrawing: done")
         }
+    }
+    
+    /// 重建PKCanvasView实例并设置绘图数据
+    private func recreateCanvasViewWithDrawing(_ data: Data) {
+        // 保存当前状态
+        let oldZoomScale = pencilCanvas.zoomScale
+        let oldContentOffset = pencilCanvas.contentOffset
+        let oldDelegate = pencilCanvas.delegate
+        
+        // 从父视图中移除旧的canvas
+        pencilCanvas.removeFromSuperview()
+        
+        // 创建新的PKCanvasView实例
+        pencilCanvas = PKCanvasView()
+        setupPencilCanvas()
+        
+        // 恢复状态
+        pencilCanvas.delegate = oldDelegate
+        pencilCanvas.zoomScale = oldZoomScale
+        pencilCanvas.contentOffset = oldContentOffset
+        
+        // 设置绘图数据
+        if !data.isEmpty {
+            do {
+                let drawing = try PKDrawing(data: data)
+                pencilCanvas.drawing = drawing
+            } catch {
+                // 静默处理错误，避免日志输出
+            }
+        }
+        
+        // 同步更新撤销基准数据
+        strokeStartDrawingData = getDrawingData()
+    }
+    
+    /// 设置PKCanvasView的基本属性
+    private func setupPencilCanvas() {
+        pencilCanvas.backgroundColor = .white
+        pencilCanvas.isOpaque = true
+        pencilCanvas.tool = inkingTool
+        pencilCanvas.delegate = self
+        
+        // 设置画布大小
+        pencilCanvas.contentSize = canvasSize
+        
+        // 启用缩放
+        pencilCanvas.minimumZoomScale = minZoomScale
+        pencilCanvas.maximumZoomScale = maxZoomScale
+        
+        // 滚动设置
+        pencilCanvas.showsVerticalScrollIndicator = false
+        pencilCanvas.showsHorizontalScrollIndicator = false
+        pencilCanvas.bounces = true
+        pencilCanvas.bouncesZoom = true
+        
+        // 重新插入到视图层次中
+        pencilCanvas.insertSubview(objectLayerView, at: 0)
+        addSubview(pencilCanvas)
+        
+        // 更新约束
+        pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            pencilCanvas.topAnchor.constraint(equalTo: topAnchor),
+            pencilCanvas.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pencilCanvas.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pencilCanvas.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        
+        // 更新工具状态
+        updateForTool(currentTool)
+    }
+    
+    /// 方案2：使用PKDrawing.append方法（备选方案）
+    private func loadDrawingUsingAppend(_ data: Data) {
+        // 完全清空当前绘图
+        pencilCanvas.drawing = PKDrawing()
+        
+        // 清空UndoManager
+        pencilCanvas.undoManager?.removeAllActions()
+        
+        // 如果有数据，使用append方法添加
+        if !data.isEmpty {
+            do {
+                let newDrawing = try PKDrawing(data: data)
+                // 创建新的PKDrawing并append strokes，而不是直接替换
+                var mutableDrawing = pencilCanvas.drawing
+                
+                // 逐个添加strokes，避免直接替换导致的状态问题
+                for stroke in newDrawing.strokes {
+                    mutableDrawing.strokes.append(stroke)
+                }
+                
+                pencilCanvas.drawing = mutableDrawing
+            } catch {
+                // 静默处理错误，避免日志输出
+            }
+        }
+        
+        // 再次清空UndoManager
+        pencilCanvas.undoManager?.removeAllActions()
+        
+        // 同步更新撤销基准数据
+        strokeStartDrawingData = getDrawingData()
     }
 
     // MARK: - Snapshot
@@ -658,11 +752,9 @@ extension NativeCanvasView: PKCanvasViewDelegate {
         isDrawing = true
         strokeStartDrawingData = getDrawingData()
         hasPendingStrokeUndo = true
-        print("[DEBUG] canvasViewDidBeginUsingTool: strokeStartDrawingData.count=\(strokeStartDrawingData?.count ?? 0)")
     }
 
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
-        print("[DEBUG] canvasViewDidEndUsingTool: hasPendingStrokeUndo=\(hasPendingStrokeUndo)")
         isDrawing = false
 
         // 延迟创建撤销操作，确保 PencilKit 数据已更新
@@ -672,10 +764,7 @@ extension NativeCanvasView: PKCanvasViewDelegate {
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-        print("[DEBUG] canvasViewDrawingDidChange: isDrawing=\(isDrawing), isLoadingDrawing=\(isLoadingDrawing), currentData.count=\(getDrawingData()?.count ?? 0)")
-
         if isLoadingDrawing {
-            print("[DEBUG] canvasViewDrawingDidChange: skipped (isLoadingDrawing)")
             return
         }
 
@@ -695,22 +784,17 @@ extension NativeCanvasView: PKCanvasViewDelegate {
 
     private func tryCreateStrokeUndoAction() {
         guard hasPendingStrokeUndo else {
-            print("[DEBUG] tryCreateStrokeUndoAction: skipped (hasPendingStrokeUndo=false)")
             return
         }
 
         guard let startData = strokeStartDrawingData else {
-            print("[DEBUG] tryCreateStrokeUndoAction: skipped (no startData)")
             hasPendingStrokeUndo = false
             return
         }
 
         guard let currentData = getDrawingData() else {
-            print("[DEBUG] tryCreateStrokeUndoAction: skipped (no currentData)")
             return
         }
-
-        print("[DEBUG] tryCreateStrokeUndoAction: startData.count=\(startData.count), currentData.count=\(currentData.count)")
 
         if startData != currentData {
             let action = DrawingAction(
@@ -719,7 +803,6 @@ extension NativeCanvasView: PKCanvasViewDelegate {
                 canvasView: self
             )
 
-            print("[DEBUG] Creating DrawingAction: from=\(startData.count), to=\(currentData.count)")
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
 
             hasPendingStrokeUndo = false

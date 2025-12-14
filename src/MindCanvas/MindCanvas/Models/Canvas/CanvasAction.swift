@@ -165,14 +165,12 @@ struct DrawingAction: CanvasAction {
     var description: String { "绘图操作(from=\(fromDrawingData?.count ?? 0), to=\(toDrawingData?.count ?? 0))" }
 
     func execute() {
-        print("[DEBUG] DrawingAction.execute: to=\(toDrawingData?.count ?? 0)")
         if let data = toDrawingData {
             canvasView?.loadDrawing(from: data)
         }
     }
 
     func undo() {
-        print("[DEBUG] DrawingAction.undo: from=\(fromDrawingData?.count ?? 0)")
         if let data = fromDrawingData {
             canvasView?.loadDrawing(from: data)
         } else {

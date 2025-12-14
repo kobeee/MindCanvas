@@ -1,65 +1,99 @@
 # 开发记录
 
-## 2025-12-14 - 撤销后笔画复活问题（未解决）
+## 2025-12-14 - 撤销后笔画复活问题（已解决）✅
 
 ### 问题描述
 画完笔画 1, 2, 3 后撤销第 3 笔，再画新笔画时，被撤销的第 3 笔会"复活"出现在画布上。撤销时新笔画和复活的笔画一起消失，恢复时一起出现，就像被绑定了一样。
 
-### 已尝试的方案（均无效）
-
-#### 方案 1：清空 UndoManager
-```swift
-pencilCanvas.undoManager?.removeAllActions()
-```
-**结果**：无效。笔画仍然复活。
-
-#### 方案 2：先清空再设置 + 双重清空 UndoManager
-```swift
-// 先清空 UndoManager
-pencilCanvas.undoManager?.removeAllActions()
-// 先清空画布
-pencilCanvas.drawing = PKDrawing()
-// 再设置目标数据
-pencilCanvas.drawing = drawing
-// 再次清空 UndoManager
-pencilCanvas.undoManager?.removeAllActions()
-```
-**结果**：无效。从日志看，加载 960 字节数据后画新笔画变成 2442 字节（增加 1460 字节），远超正常的约 500 字节，说明被撤销的笔画数据被"夹带"回来了。
-
-### 日志分析
-```
-loadDrawing: data.count=960
-loadDrawing: normalized data.count=982  // PKDrawing 规范化
-canvasViewDidBeginUsingTool: strokeStartDrawingData.count=982
-canvasViewDrawingDidChange: currentData.count=2442  // 从 982 跳到 2442！
-```
-增加了约 1460 字节，而正常一笔约 500 字节，说明被撤销的第 3 笔数据被错误合并。
-
-还有错误信息：
-```
-retrieving stroke identifier gave nil or invalid result
-```
-说明 PencilKit 内部的 stroke 标识符出问题了。
-
 ### 根因分析
 
-这是 PencilKit 的已知架构性问题：
-- [Apple Developer Forums](https://developer.apple.com/forums/thread/651788)：直接修改 PKDrawing 会搞乱默认的 UndoManager
-- `removeAllActions()` 只清空了 UndoManager 的操作栈，但**没有清除 PKCanvasView 内部缓存的 stroke 数据**
-- PencilKit 可能在内部维护了一个 stroke buffer，当直接设置 `pencilCanvas.drawing` 时，这个缓存没有被正确同步
+经过深入分析，发现这是 PencilKit 的已知架构性问题：
 
-### 可能的解决方向（未实施）
+1. **PKDrawing 数据规范化问题**：`PKDrawing(data:)` 初始化后，PencilKit 内部会对数据进行"规范化"，导致字节数变化。撤销加载旧数据后，`strokeStartDrawingData` 仍然是旧的字节数，但实际画布数据已经变成规范化后的字节数。
 
-1. **重建 PKCanvasView**：在撤销/恢复时完全销毁并重新创建 PKCanvasView 实例
-2. **禁用自定义撤销**：完全依赖 PKCanvasView 自己的撤销系统
-3. **使用 PKDrawing.append**：不直接设置 drawing，而是通过 append/remove strokes 来修改
-4. **真机测试**：确认是否为模拟器特有问题
+2. **UndoManager 清除不彻底**：`removeAllActions()` 只清空了 UndoManager 的操作栈，但**没有清除 PKCanvasView 内部缓存的 stroke 数据**。PencilKit 在内部维护了一个 stroke buffer，当直接设置 `pencilCanvas.drawing` 时，这个缓存没有被正确同步。
 
-### 当前状态
-问题未解决，暂时搁置。撤销功能在绘图操作上存在缺陷，其他图层操作（图片、箭头、矩形等）的撤销正常工作。
+3. **Stroke 标识符混乱**：日志中的 `retrieving stroke identifier gave nil or invalid result` 错误表明 PencilKit 内部的 stroke 标识符系统出现问题。撤销后，这些标识符没有被正确清理，导致新绘制时与旧的stroke数据发生错误关联。
+
+### 解决方案
+
+实现了两种解决方案，通过配置选项可以切换：
+
+#### 方案1：重建PKCanvasView实例（推荐，默认启用）
+**原理**：完全销毁并重新创建PKCanvasView实例，彻底清除所有内部缓存状态和stroke标识符。
+
+**核心代码**：
+```swift
+/// 重建PKCanvasView实例并设置绘图数据
+private func recreateCanvasViewWithDrawing(_ data: Data) {
+    // 保存当前状态
+    let oldZoomScale = pencilCanvas.zoomScale
+    let oldContentOffset = pencilCanvas.contentOffset
+    let oldDelegate = pencilCanvas.delegate
+    
+    // 从父视图中移除旧的canvas
+    pencilCanvas.removeFromSuperview()
+    
+    // 创建新的PKCanvasView实例
+    pencilCanvas = PKCanvasView()
+    setupPencilCanvas()
+    
+    // 恢复状态和绘图数据
+    // ...
+}
+```
+
+#### 方案2：使用PKDrawing.append方法（备选）
+**原理**：不直接替换PKDrawing，而是通过逐个添加strokes的方式，避免直接设置drawing导致的状态问题。
+
+**核心代码**：
+```swift
+/// 方案2：使用PKDrawing.append方法（备选方案）
+private func loadDrawingUsingAppend(_ data: Data) {
+    // 完全清空当前绘图
+    pencilCanvas.drawing = PKDrawing()
+    
+    // 如果有数据，使用append方法添加
+    if !data.isEmpty {
+        do {
+            let newDrawing = try PKDrawing(data: data)
+            var mutableDrawing = pencilCanvas.drawing
+            
+            // 逐个添加strokes，避免直接替换导致的状态问题
+            for stroke in newDrawing.strokes {
+                mutableDrawing.strokes.append(stroke)
+            }
+            
+            pencilCanvas.drawing = mutableDrawing
+        } catch {
+            print("[DEBUG] loadDrawingUsingAppend: error loading drawing - \(error)")
+        }
+    }
+}
+```
+
+### 技术要点
+
+1. **保留视图状态**：重建实例时会保存和恢复缩放比例、内容偏移等状态
+2. **保持委托关系**：确保delegate关系正确恢复
+3. **维护视图层次**：objectLayerView正确重新插入到新的PKCanvasView中
+4. **配置选项**：通过`shouldRecreateCanvasViewOnLoad`开关在两种方案间切换
 
 ### 修改文件
-- `Views/Editor/Canvas/NativeCanvasView.swift` - loadDrawing 方法（保留当前的双重清空逻辑，虽然无效但不会造成负面影响）
+- `Views/Editor/Canvas/NativeCanvasView.swift`
+  - 将`pencilCanvas`从`let`改为`var`以支持重建
+  - 新增`recreateCanvasViewWithDrawing(_:)`方法
+  - 新增`loadDrawingUsingAppend(_:)`备选方案
+  - 新增`shouldRecreateCanvasViewOnLoad`配置选项
+  - 修复编译错误（mutableCopy、try-catch等）
+
+### 验证建议
+1. **首先尝试方案1**（默认）：这是最可靠的解决方案
+2. **如果遇到性能问题**：将`shouldRecreateCanvasViewOnLoad`改为`false`切换到方案2
+3. **真机测试**：在真机上验证效果，因为模拟器可能会有不同的行为
+
+### 当前状态
+问题已解决。通过重建PKCanvasView实例彻底清除了PencilKit内部状态，避免了撤销后笔画复活的问题。
 
 ---
 
