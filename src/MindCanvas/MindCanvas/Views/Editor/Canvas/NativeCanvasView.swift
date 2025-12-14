@@ -454,17 +454,30 @@ class NativeCanvasView: UIView {
     /// 加载绘图数据
     func loadDrawing(from data: Data) {
         print("[DEBUG] loadDrawing: data.count=\(data.count)")
-        guard let drawing = try? PKDrawing(data: data) else { return }
 
         isLoadingDrawing = true
-        pencilCanvas.drawing = drawing
 
-        // 同步更新撤销基准数据
+        // 先清空 PKCanvasView 的内部 UndoManager，防止旧操作干扰
+        pencilCanvas.undoManager?.removeAllActions()
+
+        // 先强制清空当前绘图，断开与之前 stroke 的关联
+        pencilCanvas.drawing = PKDrawing()
+
+        // 再设置新的绘图数据
+        if !data.isEmpty, let drawing = try? PKDrawing(data: data) {
+            pencilCanvas.drawing = drawing
+        }
+
+        // 再次清空 UndoManager（设置 drawing 可能会添加新的 undo 操作）
+        pencilCanvas.undoManager?.removeAllActions()
+
+        // 同步更新撤销基准数据（使用规范化后的数据）
         strokeStartDrawingData = getDrawingData()
+        print("[DEBUG] loadDrawing: normalized data.count=\(strokeStartDrawingData?.count ?? 0)")
 
         DispatchQueue.main.async { [weak self] in
             self?.isLoadingDrawing = false
-            print("[DEBUG] loadDrawing: done, currentData.count=\(self?.getDrawingData()?.count ?? 0)")
+            print("[DEBUG] loadDrawing: done")
         }
     }
 

@@ -1,5 +1,68 @@
 # 开发记录
 
+## 2025-12-14 - 撤销后笔画复活问题（未解决）
+
+### 问题描述
+画完笔画 1, 2, 3 后撤销第 3 笔，再画新笔画时，被撤销的第 3 笔会"复活"出现在画布上。撤销时新笔画和复活的笔画一起消失，恢复时一起出现，就像被绑定了一样。
+
+### 已尝试的方案（均无效）
+
+#### 方案 1：清空 UndoManager
+```swift
+pencilCanvas.undoManager?.removeAllActions()
+```
+**结果**：无效。笔画仍然复活。
+
+#### 方案 2：先清空再设置 + 双重清空 UndoManager
+```swift
+// 先清空 UndoManager
+pencilCanvas.undoManager?.removeAllActions()
+// 先清空画布
+pencilCanvas.drawing = PKDrawing()
+// 再设置目标数据
+pencilCanvas.drawing = drawing
+// 再次清空 UndoManager
+pencilCanvas.undoManager?.removeAllActions()
+```
+**结果**：无效。从日志看，加载 960 字节数据后画新笔画变成 2442 字节（增加 1460 字节），远超正常的约 500 字节，说明被撤销的笔画数据被"夹带"回来了。
+
+### 日志分析
+```
+loadDrawing: data.count=960
+loadDrawing: normalized data.count=982  // PKDrawing 规范化
+canvasViewDidBeginUsingTool: strokeStartDrawingData.count=982
+canvasViewDrawingDidChange: currentData.count=2442  // 从 982 跳到 2442！
+```
+增加了约 1460 字节，而正常一笔约 500 字节，说明被撤销的第 3 笔数据被错误合并。
+
+还有错误信息：
+```
+retrieving stroke identifier gave nil or invalid result
+```
+说明 PencilKit 内部的 stroke 标识符出问题了。
+
+### 根因分析
+
+这是 PencilKit 的已知架构性问题：
+- [Apple Developer Forums](https://developer.apple.com/forums/thread/651788)：直接修改 PKDrawing 会搞乱默认的 UndoManager
+- `removeAllActions()` 只清空了 UndoManager 的操作栈，但**没有清除 PKCanvasView 内部缓存的 stroke 数据**
+- PencilKit 可能在内部维护了一个 stroke buffer，当直接设置 `pencilCanvas.drawing` 时，这个缓存没有被正确同步
+
+### 可能的解决方向（未实施）
+
+1. **重建 PKCanvasView**：在撤销/恢复时完全销毁并重新创建 PKCanvasView 实例
+2. **禁用自定义撤销**：完全依赖 PKCanvasView 自己的撤销系统
+3. **使用 PKDrawing.append**：不直接设置 drawing，而是通过 append/remove strokes 来修改
+4. **真机测试**：确认是否为模拟器特有问题
+
+### 当前状态
+问题未解决，暂时搁置。撤销功能在绘图操作上存在缺陷，其他图层操作（图片、箭头、矩形等）的撤销正常工作。
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift` - loadDrawing 方法（保留当前的双重清空逻辑，虽然无效但不会造成负面影响）
+
+---
+
 ## 2025-12-13 - 画布架构重构 v2.0 (直接使用 PKCanvasView 内置缩放)
 
 ### 问题背景
