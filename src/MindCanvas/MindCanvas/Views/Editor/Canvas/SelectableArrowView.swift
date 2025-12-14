@@ -60,7 +60,9 @@ class SelectableArrowView: UIView {
     
     private func setupViews() {
         backgroundColor = .clear
-        
+        isOpaque = false
+        clipsToBounds = false // 关键：允许箭头超出边界显示
+
         // 设置箭头图层
         arrowLayer.strokeColor = UIColor(Color.fromHex(arrowNode.color) ?? .black).cgColor
         arrowLayer.lineWidth = arrowNode.lineWidth
@@ -191,14 +193,14 @@ class SelectableArrowView: UIView {
     }
     
     // MARK: - Appearance
-    
+
     private func updateSelectionAppearance() {
         selectionBorder.isHidden = !isSelected
-        
+
         if isSelected {
-            // 创建选中边框路径（稍微扩大箭头边界）
-            let expandedBounds = arrowNode.bounds.insetBy(dx: -10, dy: -10)
-            let path = UIBezierPath(rect: expandedBounds)
+            // 创建选中边框路径（使用本地坐标系，稍微扩大边界）
+            let localBounds = bounds.insetBy(dx: -10, dy: -10)
+            let path = UIBezierPath(rect: localBounds)
             selectionBorder.path = path.cgPath
         }
     }
@@ -212,14 +214,23 @@ class SelectableArrowView: UIView {
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        
+
         // 更新箭头和选中边框
         updateArrowPath()
         if isSelected {
-            let expandedBounds = arrowNode.bounds.insetBy(dx: -10, dy: -10)
-            let path = UIBezierPath(rect: expandedBounds)
+            let localBounds = bounds.insetBy(dx: -10, dy: -10)
+            let path = UIBezierPath(rect: localBounds)
             selectionBorder.path = path.cgPath
         }
+    }
+
+    // MARK: - Hit Testing
+
+    /// 扩大点击区域，让细长的箭头更容易点击
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        // 扩大点击区域 20 点
+        let expandedBounds = bounds.insetBy(dx: -20, dy: -20)
+        return expandedBounds.contains(point)
     }
 }
 

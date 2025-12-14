@@ -157,20 +157,25 @@ class NativeCanvasView: UIView {
         objectLayerView.backgroundColor = .clear
         objectLayerView.isUserInteractionEnabled = true
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
-
-        // 图层堆叠：objectLayerView 在 PKCanvasView 内部，位于绘图内容下方
-        // PKCanvasView 内部有一个用于绘图的子视图，我们把对象层插入到最底部
-        pencilCanvas.insertSubview(objectLayerView, at: 0)
+        objectLayerView.clipsToBounds = false // 关键：允许子视图超出边界显示
+        objectLayerView.isOpaque = false
 
         addSubview(pencilCanvas)
 
-        // 初始化画布居中
+        // 关键修复：将 objectLayerView 添加到 pencilCanvas 内部
+        // 参考 simonbs/InfiniteCanvas 和社区最佳实践
+        // 使用 DispatchQueue 确保 pencilCanvas 布局完成后再添加
         DispatchQueue.main.async { [weak self] in
-            self?.centerCanvas()
-            self?.updateForTool(self?.currentTool ?? .select)
-            if let zoomScale = self?.pencilCanvas.zoomScale {
-                self?.onZoomChanged?(zoomScale)
-            }
+            guard let self = self else { return }
+
+            // 添加到 pencilCanvas 顶层（而不是索引 0）
+            self.pencilCanvas.addSubview(self.objectLayerView)
+            self.objectLayerView.frame = CGRect(origin: .zero, size: self.canvasSize)
+
+            self.centerCanvas()
+            self.updateForTool(self.currentTool)
+            // zoomScale 是非可选值 CGFloat，不需要可选绑定
+            self.onZoomChanged?(self.pencilCanvas.zoomScale)
         }
     }
 
@@ -348,7 +353,9 @@ class NativeCanvasView: UIView {
     
     /// 创建箭头视图
     private func createArrowView(for arrow: ArrowLayerNode) {
+        print("[Arrow] createArrowView: bounds=\(arrow.bounds), objectLayerView.frame=\(objectLayerView.frame)")
         let arrowView = SelectableArrowView(arrowNode: arrow)
+        print("[Arrow] arrowView created: frame=\(arrowView.frame)")
         
         var operationStartArrow: ArrowLayerNode?
         
@@ -383,11 +390,20 @@ class NativeCanvasView: UIView {
         
         arrowViews[arrow.id] = arrowView
         objectLayerView.addSubview(arrowView)
-        
+
         // 根据当前工具状态设置手势
         if currentTool == .select || currentTool == .arrow {
             arrowView.enableArrowGestures()
         }
+
+        // 关键修复：强制立即布局，确保视图可见
+        arrowView.setNeedsLayout()
+        arrowView.layoutIfNeeded()
+        objectLayerView.setNeedsLayout()
+        objectLayerView.layoutIfNeeded()
+
+        print("[Arrow] arrowView added to superview: \(arrowView.superview != nil), frame=\(arrowView.frame)")
+        print("[Arrow] objectLayerView subviews count: \(objectLayerView.subviews.count)")
     }
 
     /// 更新选中状态
@@ -454,20 +470,22 @@ class NativeCanvasView: UIView {
     func updateForTool(_ tool: CanvasTool) {
         switch tool {
         case .select:
-            // 选择工具：完全禁用PKCanvasView的交互，让对象层处理所有手势
-            pencilCanvas.isUserInteractionEnabled = false  // 关键修复：完全禁用PKCanvasView交互
+            // 选择工具：禁用绘图手势，启用对象层手势
+            // 注意：不能设置 pencilCanvas.isUserInteractionEnabled = false
+            // 因为 objectLayerView 是 pencilCanvas 的子视图，父视图禁用交互会导致子视图也无法接收事件
+            pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
-            objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
-            
+            objectLayerView.isUserInteractionEnabled = true
+
             // 确保所有对象的手势都能正常工作
             for imageView in imageViews.values {
                 imageView.enableObjectGestures()
             }
-            
+
             // 确保所有箭头的手势都能正常工作
             for arrowView in arrowViews.values {
                 arrowView.enableArrowGestures()
@@ -507,14 +525,15 @@ class NativeCanvasView: UIView {
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
         case .image:
-            // 图片工具：与选择工具类似
-            pencilCanvas.isUserInteractionEnabled = false  // 同样禁用PKCanvasView交互
+            // 图片工具：与选择工具类似，允许操作对象
+            // 同样不能禁用 pencilCanvas 交互，否则子视图 objectLayerView 也无法接收事件
+            pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
-            objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+            objectLayerView.isUserInteractionEnabled = true
 
         case .arrow, .rectangle, .text, .annotation:
             // 其他工具：禁用绘图，禁用对象手势，启用画布滚动
@@ -537,8 +556,8 @@ class NativeCanvasView: UIView {
     // MARK: - Drawing Operations
 
     /// 获取当前绘图数据
-    func getDrawingData() -> Data? {
-        try? pencilCanvas.drawing.dataRepresentation()
+    func getDrawingData() -> Data {
+        pencilCanvas.drawing.dataRepresentation()
     }
 
     /// 加载绘图数据
@@ -720,12 +739,14 @@ class NativeCanvasView: UIView {
     func getArrowLayerManager() -> ArrowLayerManager { arrowLayerManager }
 
     func addArrow(_ arrow: ArrowLayerNode, recordUndo: Bool = true) {
+        print("[Arrow] addArrow called: start=\(arrow.startPoint), end=\(arrow.endPoint), bounds=\(arrow.bounds)")
         if recordUndo {
             let action = AddArrowAction(arrow: arrow, canvasView: self)
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
         }
         arrowLayerManager.addArrow(arrow)
         createArrowView(for: arrow)
+        print("[Arrow] arrowViews count: \(arrowViews.count), objectLayerView subviews: \(objectLayerView.subviews.count)")
         onArrowCreated?(arrow)
         onCanvasUpdated?()
     }
@@ -882,9 +903,7 @@ extension NativeCanvasView: PKCanvasViewDelegate {
             return
         }
 
-        guard let currentData = getDrawingData() else {
-            return
-        }
+        let currentData = getDrawingData()
 
         if startData != currentData {
             let action = DrawingAction(

@@ -14,17 +14,26 @@ struct ArrowLayerNode: Codable, Identifiable {
     let createdAt: Date
     
     /// 计算箭头的边界框
+    /// 确保边界框有最小尺寸，避免视图大小为 0
     var bounds: CGRect {
         let minX = min(startPoint.x, endPoint.x)
         let minY = min(startPoint.y, endPoint.y)
         let maxX = max(startPoint.x, endPoint.x)
         let maxY = max(startPoint.y, endPoint.y)
-        
+
+        // 确保最小尺寸为 40x40，避免边界框太小无法点击或显示
+        let width = max(maxX - minX, 40)
+        let height = max(maxY - minY, 40)
+
+        // 如果原始尺寸太小，需要调整原点使箭头居中
+        let adjustedMinX = (maxX - minX < 40) ? minX - (40 - (maxX - minX)) / 2 : minX
+        let adjustedMinY = (maxY - minY < 40) ? minY - (40 - (maxY - minY)) / 2 : minY
+
         return CGRect(
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY
+            x: adjustedMinX,
+            y: adjustedMinY,
+            width: width,
+            height: height
         )
     }
     

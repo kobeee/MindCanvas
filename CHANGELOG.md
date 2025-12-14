@@ -1,5 +1,382 @@
 # 开发记录
 
+## 2025-12-14 - 箭头消失问题修复尝试 v2（基于开源项目实践）🔧
+
+### 问题描述
+使用箭头工具在画布上拖动可以实时看到箭头，但手指释放后箭头立即消失不见。
+
+### 根因分析方法
+停止"自己钻牛角尖"，转而研究开源项目的实践经验：
+1. **simonbs/InfiniteCanvas** - PKCanvasView 无限画布实现参考
+2. **Asana/Drawsana** - 完整绘图库，有 SelectionTool 和 ShapeSelectable
+3. 社区最佳实践（Stack Overflow、Apple Developer Forums）
+
+### 发现的关键问题
+
+#### 问题 1: 视图层级结构不当 🔴
+**当前代码**：
+```swift
+pencilCanvas.insertSubview(objectLayerView, at: 0)  // 第 163 行（旧）
+```
+
+**问题**：
+- PKCanvasView 继承自 UIScrollView，内部有复杂的渲染层级
+- 使用 `insertSubview(at: 0)` 会与 PKCanvasView 内部绘图视图冲突
+- PKCanvasView 可能在布局时重新排序子视图，导致 objectLayerView 被覆盖或移除
+
+**社区最佳实践**：
+- 方式1: `canvasView.subviews[0].addSubview(customView)` - 添加到内部子视图
+- 方式2: `canvasView.addSubview(customView)` - 添加到顶层（推荐）
+
+**参考资源**：
+- [PKCanvasView 自定义子视图实现](https://www.appsloveworld.com/swift/100/251/sharing-pkcanvasview-with-a-subview-as-an-image)
+- [SwiftUI/Pencil Kit: Add Background Images](https://levelup.gitconnected.com/swiftui-pencil-kit-add-background-images-that-synchronous-with-canvas-2-ways-b60feb2ba2c4)
+
+#### 问题 2: 缺少强制布局调用 ⚠️
+**当前代码**：
+```swift
+// createArrowView 方法 (第 349-393 行)
+objectLayerView.addSubview(arrowView)
+// 没有后续的布局调用
+```
+
+**问题**：
+- iOS 视图系统是异步布局的
+- 添加子视图后不会立即渲染，需要等到下一个布局周期
+- 用户可能在布局前就释放了手势，导致视图"消失"
+
+**修复**：
+```swift
+arrowView.setNeedsLayout()
+arrowView.layoutIfNeeded()
+objectLayerView.setNeedsLayout()
+objectLayerView.layoutIfNeeded()
+```
+
+**参考资源**：
+- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubviews-b0075b3bb441)
+
+#### 问题 3: clipsToBounds 设置 ⚠️
+**当前代码**：
+- `objectLayerView` 和 `SelectableArrowView` 都没有明确设置 `clipsToBounds`
+
+**问题**：
+- 默认 `clipsToBounds = true`，如果箭头超出父视图边界会被裁剪
+- 箭头的选择边框（`insetBy(dx: -10, dy: -10)`）可能超出视图边界
+
+**修复**：
+```swift
+objectLayerView.clipsToBounds = false
+arrowView.clipsToBounds = false
+```
+
+### 实施的修复
+
+#### 1. 修复视图层级结构
+**文件**: `NativeCanvasView.swift` (第 165-180 行)
+
+**修改**：
+```swift
+// 旧代码（第 163 行）- 已移除
+// pencilCanvas.insertSubview(objectLayerView, at: 0)
+
+// 新代码 - 使用 DispatchQueue 确保 pencilCanvas 布局完成
+DispatchQueue.main.async { [weak self] in
+    guard let self = self else { return }
+
+    // 添加到 pencilCanvas 顶层（而不是索引 0）
+    self.pencilCanvas.addSubview(self.objectLayerView)
+    self.objectLayerView.frame = CGRect(origin: .zero, size: self.canvasSize)
+
+    // ...
+}
+```
+
+**原理**：
+- 等待 `pencilCanvas` 完成初始布局
+- 将 `objectLayerView` 添加到顶层，避免与内部视图冲突
+- 参考 simonbs/InfiniteCanvas 的实现
+
+#### 2. 添加强制布局调用
+**文件**: `NativeCanvasView.swift` (第 400-407 行)
+
+**修改**：
+```swift
+arrowViews[arrow.id] = arrowView
+objectLayerView.addSubview(arrowView)
+
+// 关键修复：强制立即布局，确保视图可见
+arrowView.setNeedsLayout()
+arrowView.layoutIfNeeded()
+objectLayerView.setNeedsLayout()
+objectLayerView.layoutIfNeeded()
+
+print("[Arrow] arrowView added to superview: \(arrowView.superview != nil), frame=\(arrowView.frame)")
+print("[Arrow] objectLayerView subviews count: \(objectLayerView.subviews.count)")
+```
+
+#### 3. 修复 clipsToBounds 设置
+**文件**: `NativeCanvasView.swift` (第 160-161 行)
+```swift
+objectLayerView.clipsToBounds = false // 关键：允许子视图超出边界显示
+objectLayerView.isOpaque = false
+```
+
+**文件**: `SelectableArrowView.swift` (第 62-64 行)
+```swift
+backgroundColor = .clear
+isOpaque = false
+clipsToBounds = false // 关键：允许箭头超出边界显示
+```
+
+### 参考的开源项目与社区资源
+
+**开源项目**：
+- [GitHub - simonbs/InfiniteCanvas](https://github.com/simonbs/InfiniteCanvas) - PKCanvasView 无限画布实现
+- [GitHub - Asana/Drawsana](https://github.com/Asana/Drawsana) - 完整绘图库，SelectionTool 实现
+- [Drawsana Documentation](https://asana.github.io/Drawsana/)
+
+**社区讨论**：
+- [PKCanvasView 手势冲突讨论](https://developer.apple.com/forums/thread/719944)
+- [PKCanvasView 缩放和滚动问题](https://developer.apple.com/forums/thread/698317)
+- [Drawing Over an Image With PencilKit](https://particle41.com/insights/drawing-over-images-pencilekit/)
+
+**技术文档**：
+- [PKCanvasView | Apple Developer Documentation](https://developer.apple.com/documentation/pencilkit/pkcanvasview)
+- [insertSubview vs addSubview 区别](https://bugsdb.com/_en/debug/3163e42f3717b206bceec199a73c909c)
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 修复视图层级和布局调用
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 修复 clipsToBounds 设置
+
+### 验证步骤
+1. 选择箭头工具
+2. 在画布上拖动绘制箭头
+3. 释放手指
+4. **期望**：箭头保持可见，不会消失
+5. 切换到选择工具，点击箭头应该能选中
+
+### 如果问题仍然存在
+如果这次修复仍然不行，建议：
+1. **在真机上测试** - 排除 Simulator 特有问题
+2. **考虑方案 B**：使用独立覆盖层（类似 Drawsana 架构）
+   - 在 `NativeEditorView` 层级添加独立的 `ArrowOverlayView`
+   - 不依赖 PKCanvasView 的子视图层级
+3. **考虑方案 C**：改用 CALayer 而非 UIView
+   - 避免手势冲突
+   - 直接在 `objectLayerView.layer` 上添加 CAShapeLayer
+
+---
+
+## 2025-12-14 - 箭头绘制后消失问题（根因分析完成）⚠️ [已归档]
+
+### 问题描述
+使用箭头工具在画布上拖动可以实时看到箭头，但手指释放后箭头立即消失不见。
+
+### 已尝试的修复
+
+#### 1. 移除 SwiftUI 重复渲染层
+- 移除了 `NativeEditorView` 中的 `ForEach ArrowView` SwiftUI 渲染
+- 只保留 UIKit 的 `SelectableArrowView` 渲染
+
+#### 2. 修复坐标转换
+- 问题：SwiftUI 手势获取的是视图坐标，需要转换为画布内容坐标（5000x5000）
+- 修复：添加坐标转换逻辑
+```swift
+let offset = canvasView.pencilCanvas.contentOffset
+let scale = canvasView.pencilCanvas.zoomScale
+let contentStart = CGPoint(
+    x: (start.x + offset.x) / scale,
+    y: (start.y + offset.y) / scale
+)
+```
+
+#### 3. 调试日志验证
+- SwiftUI 坐标：`(137, 638.5)` → 画布坐标：`(2264.5, 2655.0)`
+- 坐标转换后数值看起来正确（靠近 5000x5000 画布中心）
+- 但箭头仍然消失
+
+### 根因分析（通过研究开源项目得出）
+
+#### 研究的开源项目
+1. **simonbs/InfiniteCanvas** - PKCanvasView 无限画布实现
+2. **Asana/Drawsana** - 完整的绘图库，包含选择工具和可选择对象
+
+#### 关键发现
+
+**问题 1: 视图层级结构错误**
+- 当前实现：`pencilCanvas.insertSubview(objectLayerView, at: 0)` (第 163 行)
+- 问题：直接插入到 PKCanvasView 会与其内部绘图视图冲突
+- 最佳实践：应该插入到 `PKCanvasView.subviews.first` 中
+- 参考：社区实践显示应使用 `canvasView.subviews[0].addSubview(customView)` 模式
+
+**问题 2: 缺少强制布局调用**
+- `createArrowView` (第 349-393 行) 创建视图后直接添加，没有调用布局方法
+- iOS 视图系统需要 `setNeedsLayout()` 和 `layoutIfNeeded()` 来确保视图立即可见
+- 视图可能被添加了但在下一个布局周期前不渲染
+
+**问题 3: objectLayerView.frame 重置问题**
+- `layoutSubviews` (第 188-192 行) 每次都重置 `objectLayerView.frame`
+- 可能导致在滚动/缩放时子视图位置异常
+
+**问题 4: 手势识别冲突（最可能的主因）**
+- PKCanvasView 在 iOS 16+ 有已知 bug：触摸结束后内部会刷新视图层级
+- SelectableArrowView 有自己的手势识别器（tap 和 pan）
+- 这些手势与 PKCanvasView 内部手势冲突
+- PKCanvasView 在触摸事件结束后刷新时可能清除了自定义子视图
+- 社区建议：不应在 PKCanvasView 或其子视图上直接添加手势，应该放在容器视图上
+
+**问题 5: PKCanvasView 特殊性质**
+- PKCanvasView 是 UIScrollView 子类，有复杂的内部视图结构
+- 内部包含多个 sublayers 用于 tiling 渲染
+- 自定义子视图需要特别小心处理滚动和缩放
+
+### 推荐的解决方案
+
+#### 方案 A: 修改视图层级（推荐）
+```swift
+// 在 setupViews() 中
+if let drawingSubview = pencilCanvas.subviews.first {
+    drawingSubview.insertSubview(objectLayerView, at: 0)
+}
+
+// 在 createArrowView() 中添加
+objectLayerView.addSubview(arrowView)
+objectLayerView.setNeedsLayout()
+objectLayerView.layoutIfNeeded()
+```
+
+#### 方案 B: 使用独立的覆盖层
+```swift
+// 不把 objectLayerView 放在 PKCanvasView 内部
+// 而是作为兄弟视图，手动同步滚动和缩放
+// 参考 Drawsana 的架构：独立的渲染层 + 数据模型
+```
+
+#### 方案 C: 改用 CALayer 而非 UIView
+```swift
+// SelectableArrowView 改为 CAShapeLayer
+// 避免手势冲突问题
+// 选择操作通过点击测试（hitTest）实现
+```
+
+### 后续行动计划
+1. 优先尝试方案 A：修改视图层级 + 添加强制布局
+2. 如果方案 A 失败，考虑方案 C：改用 CALayer
+3. 在真机上测试验证（排除 Simulator 特有问题）
+4. 参考 Drawsana 架构，考虑长期重构为独立渲染层
+
+### 修改文件
+- `Views/Editor/NativeEditorView.swift` - 移除 SwiftUI 箭头渲染，添加坐标转换
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 修复工具交互状态
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 修复本地坐标边框
+
+### 参考资源
+- [PKCanvasView 自定义子视图最佳实践](https://www.appsloveworld.com/swift/100/251/sharing-pkcanvasview-with-a-subview-as-an-image)
+- [PKCanvasView 手势冲突问题](https://developer.apple.com/forums/thread/719944)
+- [insertSubview vs addSubview 区别](https://bugsdb.com/_en/debug/3163e42f3717b206bceec199a73c909c)
+- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubviews-b0075b3bb441)
+
+---
+
+## 2025-12-14 - 箭头选择工具修复 v2 (视图层级冲突解决) ✅
+
+### 问题描述
+1. 箭头工具创建的箭头无法被选择工具选中，无法进行拖动或修改操作
+2. 箭头绘制后立即消失
+
+### 根因分析
+经过深入排查，发现了以下关键问题：
+
+1. **SwiftUI/UIKit 双重渲染导致遮挡**：箭头被渲染了两次
+   - `NativeCanvasView.createArrowView()` 创建了 UIKit 版本的 `SelectableArrowView`（支持手势）
+   - `NativeEditorView` 的 SwiftUI `ForEach ArrowView` 又渲染了一层（纯显示）
+   - SwiftUI 层覆盖在 UIKit 层上方，拦截了所有点击事件
+
+2. **父视图交互禁用导致子视图无法响应**：
+   - 选择工具下设置了 `pencilCanvas.isUserInteractionEnabled = false`
+   - 但 `objectLayerView`（包含 `SelectableArrowView`）是 `pencilCanvas` 的子视图
+   - 父视图禁用交互会导致所有子视图也无法接收触摸事件
+
+3. **选择边框使用全局坐标而非本地坐标**：导致选择边框显示位置错误
+
+4. **坐标系统不匹配导致箭头消失**：
+   - `ArrowDrawingView` 在 SwiftUI 层捕获手势，返回的是 SwiftUI 视图坐标（相对于屏幕可见区域）
+   - 箭头需要添加到 `objectLayerView`，它的坐标系是 5000x5000 的画布内容坐标
+   - 缺少坐标转换，导致箭头被创建在画布外部（视口之外），所以"消失"了
+
+### 解决方案
+
+#### 1. 移除 SwiftUI 层的重复箭头渲染
+```swift
+// NativeEditorView.swift - 移除 ForEach 渲染
+// 箭头由 NativeCanvasView 中的 SelectableArrowView 渲染
+// 不再使用 SwiftUI ForEach 渲染，避免遮挡 UIKit 手势
+```
+
+#### 2. 修复选择工具的交互状态
+```swift
+case .select:
+    // 不能设置 pencilCanvas.isUserInteractionEnabled = false
+    // 因为 objectLayerView 是 pencilCanvas 的子视图
+    pencilCanvas.isUserInteractionEnabled = true
+    pencilCanvas.drawingGestureRecognizer.isEnabled = false
+    objectLayerView.isUserInteractionEnabled = true
+```
+
+#### 3. 修复选择边框使用本地坐标
+```swift
+// 使用本地坐标系而非全局坐标
+let localBounds = bounds.insetBy(dx: -10, dy: -10)
+let path = UIBezierPath(rect: localBounds)
+selectionBorder.path = path.cgPath
+```
+
+#### 4. 扩大点击区域
+```swift
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    let expandedBounds = bounds.insetBy(dx: -20, dy: -20)
+    return expandedBounds.contains(point)
+}
+```
+
+#### 5. 坐标转换：SwiftUI 视图坐标 → 画布内容坐标
+```swift
+// 箭头创建时进行坐标转换
+let contentStart = canvasView.contentRect(forViewportRect: CGRect(origin: start, size: .zero)).origin
+let contentEnd = canvasView.contentRect(forViewportRect: CGRect(origin: end, size: .zero)).origin
+
+let arrow = ArrowLayerNode(
+    startPoint: contentStart,
+    endPoint: contentEnd,
+    // ...
+)
+```
+
+**坐标转换原理**：
+- SwiftUI 手势获得的坐标：相对于屏幕可见区域（如 800x600）
+- `pencilCanvas` 有 `contentOffset` 和 `zoomScale`
+- `objectLayerView` 尺寸是 5000x5000
+- `contentRect(forViewportRect:)` 方法考虑了缩放和偏移，将视口坐标转换为画布内容坐标
+
+### 参考资料
+- [Drawsana](https://github.com/Asana/Drawsana) - iOS 绘图库，参考其 SelectionTool 和 ShapeSelectable 实现
+- [SPUserResizableView](https://github.com/spoletto/SPUserResizableView) - 可调整大小的 UIView 实现
+- [DragRotateScaleView](https://github.com/yokurin/DragRotateScaleView) - 支持拖拽、旋转、缩放的视图
+
+### 修改文件
+- `Views/Editor/NativeEditorView.swift` - 移除 SwiftUI 箭头渲染层
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 修复选择/图片工具的交互状态
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 修复选择边框坐标 + 扩大点击区域
+
+### 验证步骤
+1. 选择箭头工具，在画布上拖出一个箭头
+2. 切换到选择工具
+3. 点击箭头，应该显示蓝色虚线选择边框
+4. 拖动箭头，应该可以移动位置
+
+---
+
 ## 2025-12-14 - 选择工具修复与箭头对象选择支持 ✅
 
 ### 问题描述

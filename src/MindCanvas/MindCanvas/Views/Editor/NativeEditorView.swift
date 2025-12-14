@@ -342,15 +342,30 @@ private struct NativeCanvasContainer: View {
                             color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
                             lineWidth: viewModel.stateManager.arrowLineWidth
                         ) { start, end in
+                            // 将 SwiftUI 视图坐标转换为画布内容坐标
+                            guard let canvasView = viewModel.canvasView else { return }
+
+                            // 坐标转换：SwiftUI 坐标 + contentOffset = 画布内容坐标
+                            let offset = canvasView.pencilCanvas.contentOffset
+                            let scale = canvasView.pencilCanvas.zoomScale
+                            let contentStart = CGPoint(
+                                x: (start.x + offset.x) / scale,
+                                y: (start.y + offset.y) / scale
+                            )
+                            let contentEnd = CGPoint(
+                                x: (end.x + offset.x) / scale,
+                                y: (end.y + offset.y) / scale
+                            )
+
                             // 创建箭头图层
                             let arrow = ArrowLayerNode(
-                                startPoint: start,
-                                endPoint: end,
+                                startPoint: contentStart,
+                                endPoint: contentEnd,
                                 color: viewModel.stateManager.arrowColor,
                                 lineWidth: viewModel.stateManager.arrowLineWidth,
-                                zIndex: viewModel.canvasView?.getArrowLayerManager().getNextZIndex() ?? 0
+                                zIndex: canvasView.getArrowLayerManager().getNextZIndex()
                             )
-                            viewModel.canvasView?.addArrow(arrow)
+                            canvasView.addArrow(arrow)
                         }
                     }
                 }
@@ -397,15 +412,8 @@ private struct NativeCanvasContainer: View {
                     }
                 }
                 
-                // 显示所有箭头
-                ForEach(viewModel.canvasView?.getArrowLayerManager().arrows ?? []) { arrow in
-                    ArrowView(
-                        startPoint: arrow.startPoint,
-                        endPoint: arrow.endPoint,
-                        color: Color.fromHex(arrow.color) ?? .black,
-                        lineWidth: arrow.lineWidth
-                    )
-                }
+                // 箭头由 NativeCanvasView 中的 SelectableArrowView 渲染
+                // 不再使用 SwiftUI ForEach 渲染，避免遮挡 UIKit 手势
                 
                 // 文字编辑层
                 if viewModel.stateManager.currentTool == .text {
