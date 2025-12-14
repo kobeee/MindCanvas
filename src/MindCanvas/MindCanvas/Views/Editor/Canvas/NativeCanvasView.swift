@@ -397,15 +397,22 @@ class NativeCanvasView: UIView {
             // 选择工具：禁用绘图，启用对象手势，禁用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
+            pencilCanvas.drawingPolicy = .default  // 选择模式下不需要绘图
             objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
         case .pan:
             // 平移工具：禁用绘图，禁用对象手势，启用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
+            pencilCanvas.drawingPolicy = .default  // 关键修复：设置为default才能启用滚动
             objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = true
+            // 关键修复：启用手势识别器
+            pencilCanvas.panGestureRecognizer.isEnabled = true
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = true
 
         case .pen:
             // 画笔工具：启用绘图，禁用对象手势，禁用画布滚动
@@ -415,6 +422,8 @@ class NativeCanvasView: UIView {
             pencilCanvas.drawingGestureRecognizer.isEnabled = true
             objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
         case .eraser:
             // 橡皮擦工具：启用擦除，禁用对象手势，禁用画布滚动
@@ -424,20 +433,28 @@ class NativeCanvasView: UIView {
             pencilCanvas.drawingGestureRecognizer.isEnabled = true
             objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
         case .image:
             // 图片工具：与选择工具类似
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
+            pencilCanvas.drawingPolicy = .default  // 图片模式下不需要绘图
             objectLayerView.isUserInteractionEnabled = true
             pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
         case .arrow, .rectangle, .text, .annotation:
             // 其他工具：禁用绘图，禁用对象手势，启用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
+            pencilCanvas.drawingPolicy = .default  // 非绘图工具设置为default
             objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = true
+            pencilCanvas.panGestureRecognizer.isEnabled = true
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = true
         }
     }
 
