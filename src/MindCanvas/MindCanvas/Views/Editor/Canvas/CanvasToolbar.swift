@@ -22,7 +22,11 @@ struct CanvasToolbar: View {
                         onShapeSelected: { shape in
                             showShapePicker = false
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                currentTool = .rectangle
+                                if shape.isLineType {
+                                    currentTool = .arrow
+                                } else {
+                                    currentTool = .rectangle
+                                }
                             }
                             onShapeSelected?(shape)
                         }
@@ -102,8 +106,8 @@ private struct ShapeToolButton: View {
         .buttonStyle(.plain)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
         .help(tool.displayName)
-        .popover(isPresented: $showPicker, arrowEdge: .top) {
-            ShapePickerPopover(shapes: ShapeType.primaryShapes) { shape in
+        .popover(isPresented: $showPicker, arrowEdge: .bottom) {
+            ShapePickerPopover(shapes: ShapeType.popoverShapes) { shape in
                 onShapeSelected(shape)
             }
         }

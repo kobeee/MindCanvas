@@ -324,14 +324,23 @@ private struct NativeCanvasContainer: View {
                 // 箭头绘制层
                 if viewModel.stateManager.currentTool == .arrow {
                     ZStack {
-                        // 显示正在绘制的箭头
+                        // 显示正在绘制的箭头或直线
                         if isDrawingArrow, let start = arrowStartPoint, let end = arrowEndPoint {
-                            ArrowView(
-                                startPoint: start,
-                                endPoint: end,
-                                color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
-                                lineWidth: viewModel.stateManager.arrowLineWidth
-                            )
+                            if viewModel.selectedShapeType == .line {
+                                LinePreviewView(
+                                    startPoint: start,
+                                    endPoint: end,
+                                    color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
+                                    lineWidth: viewModel.stateManager.arrowLineWidth
+                                )
+                            } else {
+                                ArrowView(
+                                    startPoint: start,
+                                    endPoint: end,
+                                    color: Color.fromHex(viewModel.stateManager.arrowColor) ?? .blue,
+                                    lineWidth: viewModel.stateManager.arrowLineWidth
+                                )
+                            }
                         }
                         
                         // 箭头绘制手势
@@ -357,13 +366,17 @@ private struct NativeCanvasContainer: View {
                                 y: (end.y + offset.y) / scale
                             )
 
-                            // 创建箭头图层
+                            // 根据选择的形状类型决定是否显示箭头头部
+                            let hasArrowHead = viewModel.selectedShapeType != .line
+                            
+                            // 创建箭头或直线图层
                             let arrow = ArrowLayerNode(
                                 startPoint: contentStart,
                                 endPoint: contentEnd,
                                 color: viewModel.stateManager.arrowColor,
                                 lineWidth: viewModel.stateManager.arrowLineWidth,
-                                zIndex: canvasView.getArrowLayerManager().getNextZIndex()
+                                zIndex: canvasView.getArrowLayerManager().getNextZIndex(),
+                                hasArrowHead: hasArrowHead
                             )
                             canvasView.addArrow(arrow)
                         }
@@ -400,17 +413,28 @@ private struct NativeCanvasContainer: View {
                             color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
                             lineWidth: viewModel.stateManager.rectangleLineWidth,
                             isFilled: viewModel.stateManager.rectangleIsFilled
-                        ) { rect in
-                            // 创建形状图层
+                        ) { viewportRect in
+                            guard let canvasView = viewModel.canvasView else { return }
+
+                            let offset = canvasView.pencilCanvas.contentOffset
+                            let scale = canvasView.pencilCanvas.zoomScale
+
+                            let contentRect = CGRect(
+                                x: (viewportRect.origin.x + offset.x) / scale,
+                                y: (viewportRect.origin.y + offset.y) / scale,
+                                width: viewportRect.width / scale,
+                                height: viewportRect.height / scale
+                            )
+
                             let shape = ShapeLayerNode(
-                                frame: rect,
+                                frame: contentRect,
                                 shapeType: viewModel.selectedShapeType,
                                 color: viewModel.stateManager.rectangleColor,
                                 lineWidth: viewModel.stateManager.rectangleLineWidth,
                                 isFilled: viewModel.stateManager.rectangleIsFilled,
-                                zIndex: viewModel.canvasView?.getShapeLayerManager().getNextZIndex() ?? 0
+                                zIndex: canvasView.getShapeLayerManager().getNextZIndex()
                             )
-                            viewModel.canvasView?.addShape(shape)
+                            canvasView.addShape(shape)
                         }
                     }
                 }

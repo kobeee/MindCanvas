@@ -14,6 +14,9 @@ struct ShapeDrawingView: View {
             case .rectangle:
                 path.addRect(rect)
                 
+            case .roundedRectangle:
+                path.addRoundedRect(in: rect, cornerSize: CGSize(width: 12, height: 12))
+                
             case .circle:
                 let diameter = min(rect.width, rect.height)
                 let circleRect = CGRect(
@@ -42,6 +45,10 @@ struct ShapeDrawingView: View {
                 
             case .hexagon:
                 createPolygonPath(in: rect, sides: 6, path: &path)
+                
+            case .line, .arrow:
+                path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
             }
         }
         .fill(isFilled ? color : Color.clear)
@@ -50,6 +57,9 @@ struct ShapeDrawingView: View {
                 switch shapeType {
                 case .rectangle:
                     path.addRect(rect)
+                    
+                case .roundedRectangle:
+                    path.addRoundedRect(in: rect, cornerSize: CGSize(width: 12, height: 12))
                     
                 case .circle:
                     let diameter = min(rect.width, rect.height)
@@ -79,6 +89,10 @@ struct ShapeDrawingView: View {
                     
                 case .hexagon:
                     createPolygonPath(in: rect, sides: 6, path: &path)
+                    
+                case .line, .arrow:
+                    path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+                    path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
                 }
             }
             .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))

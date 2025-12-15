@@ -24,7 +24,8 @@ open MindCanvas.xcodeproj
 
 ### iOS 客户端
 - **语言**: Swift 5.9+
-- **UI**: SwiftUI (MVVM 架构)
+- **UI**: SwiftUI + UIKit (MVVM 架构)
+- **绘图**: PencilKit (PKCanvasView)
 - **数据**: SwiftData
 - **最低版本**: iPadOS 17.0+
 
@@ -37,12 +38,26 @@ open MindCanvas.xcodeproj
 
 ### 代码结构 (src/MindCanvas/MindCanvas/)
 ```
-Models/          # 数据模型 (User, Project, Asset, Canvas相关)
+Models/          # 数据模型
+  └── Canvas/    # 画布相关模型
+      ├── CanvasTool.swift       # 工具枚举 (select/pan/pen/eraser/arrow/rectangle)
+      ├── ShapeType.swift        # 形状类型 (rectangle/circle/triangle/line/arrow等)
+      ├── ArrowLayerNode.swift   # 箭头/直线数据模型 (hasArrowHead区分)
+      ├── ShapeLayerNode.swift   # 形状数据模型
+      └── CanvasAction.swift     # 撤销/恢复操作 (Command Pattern)
 ViewModels/      # 视图模型 (@Observable + @MainActor)
+  ├── CanvasStateManager.swift   # 画布状态 (工具、缩放、撤销栈)
+  └── NativeEditorViewModel.swift # 编辑器业务逻辑
 Views/           # 视图层
   ├── Auth/      # 登录认证
-  ├── Editor/    # 核心编辑器 (三栏式: 资源库+画布+控制面板)
-  │   └── Canvas/  # 原生画布组件
+  ├── Editor/    # 核心编辑器
+  │   ├── Canvas/  # 原生画布组件
+  │   │   ├── NativeCanvasView.swift      # PKCanvasView封装 (UIKit)
+  │   │   ├── SelectableArrowView.swift   # 箭头/直线视图 (端点控制点)
+  │   │   ├── SelectableShapeView.swift   # 形状视图 (角点+旋转控制点)
+  │   │   ├── CanvasToolbar.swift         # 底部工具栏
+  │   │   └── ShapePickerPopover.swift    # 形状选择弹窗
+  │   └── NativeEditorView.swift  # 主编辑器 (三栏布局)
   ├── Feed/      # 社区流 (MindStream)
   └── ...
 Services/        # Mock 服务层
@@ -53,10 +68,47 @@ Extensions/      # Swift 扩展
 
 ### 核心模块
 
-**NativeEditorView**: 主编辑器视图，集成原生画布、工具栏和控制面板
-**NativeEditorViewModel**: 编辑器状态管理，处理 AI 生成流程
-**CanvasStateManager**: 画布状态管理 (工具、缩放、撤销/重做)
-**NativeCanvasView**: 原生画布实现，支持图层、绘图、箭头、矩形、文字、标注
+**NativeEditorView**: 主编辑器视图，全屏三栏布局 (资源库300pt + 画布 + 控制面板320pt)
+**NativeEditorViewModel**: 编辑器状态管理，处理 AI 生成流程 (文生图/图生图)
+**CanvasStateManager**: 画布状态管理 (工具切换、缩放、撤销/重做栈)
+**NativeCanvasView**: 原生画布实现，直接使用 PKCanvasView 内置缩放功能
+
+### 画布架构 (重要)
+
+```
+NativeCanvasView (UIView)
+├── pencilCanvas (PKCanvasView)    <- 直接作为根滚动容器，5000x5000画布
+│   └── objectLayerView (UIView)   <- 对象层 (箭头/形状)
+└── overlayContainerView (UIView)  <- 覆盖层容器 (与pencilCanvas同步滚动)
+```
+
+**关键设计决策**:
+- PKCanvasView 本身继承自 UIScrollView，直接使用其内置缩放功能
+- 不嵌套额外的 UIScrollView，避免坐标转换错误 (Apple FB15166022)
+- objectLayerView 作为 PKCanvasView 子视图，随画布滚动缩放
+- 形状/箭头使用控制点交互 (Figma风格)，移除双指手势依赖
+
+### 工具系统
+
+当前实现的工具 (CanvasTool):
+- **select**: 选择工具，可选中/移动/缩放/旋转对象
+- **pan**: 平移工具，拖动画布
+- **pen**: 画笔工具，PencilKit 绘图
+- **eraser**: 橡皮擦，擦除笔画
+- **arrow**: 箭头/直线工具，通过 ShapeType 选择具体类型
+- **rectangle**: 形状工具，支持9种形状 (矩形/圆形/三角形/菱形等)
+- **image**: 图片工具，从相册选择或拍照
+
+形状选择器支持的类型 (ShapeType):
+- 线条类: line (直线), arrow (箭头)
+- 基础形状: rectangle, circle, triangle, diamond, star, hexagon, roundedRectangle
+
+### 撤销/恢复系统
+
+采用 Command Pattern，每个操作封装为 CanvasAction:
+- undoStack / redoStack 维护在 CanvasStateManager
+- 支持: 绘图、添加/删除/移动图层、形状操作等
+- PKCanvasView 重建机制解决笔画复活问题
 
 ---
 
@@ -80,6 +132,12 @@ Extensions/      # Swift 扩展
 2. 调用方的参数传递必须与接口定义保持一致
 3. 大幅重构分步进行，每步集成测试
 4. 重构后必须进行端到端集成测试
+
+### PencilKit 开发注意事项
+- PKCanvasView 继承自 UIScrollView，不要再嵌套 UIScrollView
+- 撤销绘图时需重建 PKCanvasView 实例，清除内部缓存状态
+- 绘图模式下冻结 scrollView 的 pan/pinch/scroll，避免坐标漂移
+- `canvasViewDidEndUsingTool` 调用时 drawing 数据可能未更新完成，需延迟处理
 
 ---
 
@@ -202,8 +260,23 @@ final class SomeViewModel {
 
 ## 关键文件
 
+### 核心入口
 - 主入口: [MindCanvasApp.swift](src/MindCanvas/MindCanvas/MindCanvasApp.swift)
 - 编辑器视图: [NativeEditorView.swift](src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift)
 - 编辑器 VM: [NativeEditorViewModel.swift](src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift)
+
+### 画布系统
 - 画布状态: [CanvasStateManager.swift](src/MindCanvas/MindCanvas/ViewModels/CanvasStateManager.swift)
 - 原生画布: [NativeCanvasView.swift](src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift)
+- 箭头视图: [SelectableArrowView.swift](src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableArrowView.swift)
+- 形状视图: [SelectableShapeView.swift](src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableShapeView.swift)
+
+### 数据模型
+- 工具枚举: [CanvasTool.swift](src/MindCanvas/MindCanvas/Models/Canvas/CanvasTool.swift)
+- 形状类型: [ShapeType.swift](src/MindCanvas/MindCanvas/Models/Canvas/ShapeType.swift)
+- 箭头节点: [ArrowLayerNode.swift](src/MindCanvas/MindCanvas/Models/Canvas/ArrowLayerNode.swift)
+- 撤销操作: [CanvasAction.swift](src/MindCanvas/MindCanvas/Models/Canvas/CanvasAction.swift)
+
+### 设计文档
+- 画布工具栏重构: [canvas_toolbar_redesign_v1.0.md](docs/design/ui/canvas_toolbar_redesign_v1.0.md)
+- 形状工具修复v4: [shape_tool_critical_fixes_v4.md](docs/design/fix/shape_tool_critical_fixes_v4.md)

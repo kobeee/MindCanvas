@@ -10,11 +10,14 @@ MindCanvas 是一个基于 AI 的创意绘图应用，专为 iPad 设计，集�
 
 ### iOS 客户端
 - **语言**: Swift 5.9+
-- **UI 框架**: SwiftUI
+- **UI 框架**: SwiftUI + UIKit (混合架构)
 - **最低版本**: iPadOS 17.0+
 - **数据存储**: SwiftData
 - **网络**: URLSession (当前使用 Mock 服务)
-- **画布**: WKWebView (内嵌简易画布，预留 tldraw 集成接口)
+- **画布**: PencilKit (PKCanvasView) + UIKit 自定义对象层
+  - 笔刷绘制: PKCanvasView 原生支持
+  - 图形对象: UIKit 自定义视图 (箭头、形状、图片等)
+  - 控制点交互: 专业级缩放/旋转控制点系统
 
 ### 后端（待开发）
 - **语言**: Python 3.11
@@ -30,12 +33,22 @@ MindCanvas/
 ├── docs/                   # 文档
 │   ├── prd/               # 产品需求文档
 │   ├── design/            # 设计文档
+│   │   ├── backend/       # 后端设计
+│   │   ├── fix/           # 问题修复方案
+│   │   └── ui/            # UI 设计方案
 │   └── archive/           # 归档文档
 ├── src/                   # 源代码
 │   └── MindCanvas/        # iOS 项目
 │       ├── Models/        # 数据模型
+│       │   └── Canvas/    # 画布相关模型
 │       ├── ViewModels/    # 视图模型
 │       ├── Views/         # 视图层
+│       │   ├── Editor/    # 编辑器视图
+│       │   │   ├── Canvas/  # 画布组件
+│       │   │   └── Sheets/  # 弹出表单
+│       │   ├── Feed/      # 社区流
+│       │   ├── Projects/  # 项目列表
+│       │   └── Settings/  # 设置
 │       ├── Services/      # 服务层（Mock）
 │       ├── Managers/      # 管理器
 │       └── Infrastructure/ # 基础设施
@@ -84,11 +97,22 @@ open MindCanvas.xcodeproj
 - 所有核心模块的 UI 和交互
 - Mock 服务层（模拟后端接口）
 - SwiftData 本地数据持久化
-- WebView 画布基础功能
+- **原生画布系统 (PencilKit + UIKit)**
+  - PKCanvasView 架构重构（直接使用内置缩放，解决笔画漂移问题）
+  - 撤销/恢复系统（支持笔画和对象操作）
+  - 多工具支持（笔刷、选择、平移、图片、箭头、形状、文本、标注）
+- **图形工具系统**
+  - 箭头/直线工具（支持区分箭头和纯直线）
+  - 形状工具（矩形、圆形、三角形、菱形、五角星、六边形、圆角矩形）
+  - 形状选择器弹出菜单
+- **专业级控制点交互系统**
+  - 形状对象：4个角点控制点 + 旋转手柄
+  - 箭头对象：起点/终点控制点
+  - 支持旋转状态下的精确缩放
+  - 移除双指手势依赖，符合 Figma/Canva 交互标准
 
 ### 进行中 🚧
 - 真实后端 API 集成
-- tldraw 完整画布集成
 - IAP 订阅功能
 
 ### 待开发 📋
@@ -97,6 +121,7 @@ open MindCanvas.xcodeproj
 - 图片下载功能
 - Remix 完整流程
 - 性能优化
+- 控制点增强功能（等比例缩放、吸附、键盘快捷键）
 
 ## 开发约定
 
@@ -113,19 +138,56 @@ final class EditorViewModel {
 }
 ```
 
-### WebView Bridge 通信
+### 画布架构
 
-**Swift → JavaScript**:
+**核心架构**：直接使用 PKCanvasView 的内置缩放功能
 ```swift
-webView.evaluateJavaScript("insertImage('url', x, y, w, h)")
+NativeCanvasView (UIView)
+└── pencilCanvas (PKCanvasView)    // 直接作为根滚动容器
+    └── overlayContainerView (UIView)  // 滚动同步容器
+        └── objectLayerView (UIView)   // 对象图层（箭头、形状、图片等）
 ```
 
-**JavaScript → Swift**:
-```javascript
-window.webkit.messageHandlers.mindCanvas.postMessage({
-    event: 'canvas_updated',
-    data: base64Image
-})
+**关键技术点**：
+- PKCanvasView 本身继承自 UIScrollView，直接使用其内置缩放
+- overlayContainerView 通过同步机制跟随 PKCanvasView 滚动和缩放
+- 避免嵌套 UIScrollView（已知的 Apple Bug FB15166022）
+
+**坐标系统**：
+- 画布内容尺寸：5000x5000 pt
+- 视口坐标 → 内容坐标转换：`(x + offset.x) / scale`
+- 使用 `contentRect(forViewportRect:)` 进行坐标转换
+
+### 控制点交互系统
+
+**形状对象控制点**：
+```
+        ○ ← 旋转手柄（圆形，12x12）
+        │   连接线（蓝色，1.5pt）
+    ●───┴───●
+    │       │  ← 角点控制点（方形，12x12）
+    │ 形状  │
+    │       │
+    ●───────●
+```
+
+**箭头对象控制点**：
+- 起点控制点：圆形，调整箭头起点
+- 终点控制点：圆形，调整箭头终点
+
+**旋转状态下的缩放计算**：
+```swift
+// 1. 获取锚点在旋转后的实际位置
+let anchorInSuperview = CGPoint(
+    x: centerX + relX * cos(rotation) - relY * sin(rotation),
+    y: centerY + relX * sin(rotation) + relY * cos(rotation)
+)
+
+// 2. 将拖动向量转换到未旋转的坐标系
+let localDx = dx * cos(-rotation) - dy * sin(-rotation)
+let localDy = dx * sin(-rotation) + dy * cos(-rotation)
+
+// 3. 计算新尺寸并保持锚点位置
 ```
 
 ### SwiftData 查询
@@ -136,10 +198,19 @@ private var projects: [Project]
 
 ## 注意事项
 
+### 应用架构
 1. **iPad Only**: 本应用专为 iPad 设计，使用 NavigationSplitView
 2. **无后端依赖**: 当前版本完全独立运行，不需要后端服务
 3. **Mock 延迟**: 所有 Mock 接口都添加了人工延迟以模拟真实网络环境
 4. **审核合规**: 已预置举报、拉黑功能以符合 App Store 审核要求
+
+### 画布系统关键技术点
+1. **PKCanvasView 嵌套问题**: 严禁将 PKCanvasView 嵌套在 UIScrollView 中（Apple Bug FB15166022），会导致坐标转换错误和笔画漂移
+2. **撤销系统**: 使用 PKCanvasView 重建实例来彻底清除内部缓存，避免撤销后笔画复活问题
+3. **视图层级**: objectLayerView 必须作为 overlayContainerView 的子视图，通过同步机制跟随画布滚动
+4. **手势冲突**: 不同工具模式下需要正确配置 `drawingPolicy` 和手势识别器状态
+5. **控制点交互**: 已移除双指手势依赖，使用单指拖动 + 控制点的专业交互方式
+6. **坐标转换**: SwiftUI 手势坐标需要转换为画布内容坐标，考虑 `contentOffset` 和 `zoomScale`
 
 ## 开发规范与约定
 
@@ -210,9 +281,29 @@ private var projects: [Project]
 
 ## 重要文件路径
 
+### 应用核心
 - **主应用入口**: `src/MindCanvas/MindCanvas/MindCanvasApp.swift`
 - **认证管理器**: `src/MindCanvas/MindCanvas/Managers/AuthManager.swift`
-- **编辑器视图模型**: `src/MindCanvas/MindCanvas/ViewModels/EditorViewModel.swift`
-- **核心编辑器视图**: `src/MindCanvas/MindCanvas/Views/Editor/EditorView.swift`
+
+### 编辑器系统
+- **编辑器视图模型**: `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+- **编辑器主视图**: `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+- **画布容器**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+- **画布工具栏**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/CanvasToolbar.swift`
+
+### 画布对象视图
+- **可选择箭头视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableArrowView.swift`
+- **可选择形状视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableShapeView.swift`
+- **形状选择器**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/ShapePickerPopover.swift`
+
+### 数据模型
+- **画布文档**: `src/MindCanvas/MindCanvas/Models/Canvas/CanvasDocument.swift`
+- **图层节点**: `src/MindCanvas/MindCanvas/Models/Canvas/LayerNode.swift`
+- **箭头节点**: `src/MindCanvas/MindCanvas/Models/Canvas/ArrowLayerNode.swift`
+- **形状节点**: `src/MindCanvas/MindCanvas/Models/Canvas/ShapeLayerNode.swift`
+- **画布操作**: `src/MindCanvas/MindCanvas/Models/Canvas/CanvasAction.swift`
+
+### 文档
 - **产品需求文档**: `docs/prd/v1.0.md`
 - **后端架构设计**: `docs/design/backend/backend_architecture.md`
+- **开发记录**: `CHANGELOG.md`

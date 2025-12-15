@@ -1,5 +1,354 @@
 # 开发记录
 
+## 2025-12-16 - 图形工具关键问题修复方案 v4.0 实施完成 ✅
+
+### 概述
+成功实施图形工具关键问题修复方案 v4.0，彻底解决了直线拖动变箭头的 P0 问题，并实现了完整的控制点交互系统，替代了原有的双指手势，提供了更符合专业绘图软件（Figma/Canva）标准的交互体验。
+
+### 核心修复
+
+#### 1. 直线拖动后变箭头问题 (P0) ✅
+**根因**：`SelectableArrowView` 的 `handlePan` 方法在移动箭头时，使用 `ArrowLayerNode(...)` 构造函数创建新实例，导致 `hasArrowHead` 属性丢失（构造函数默认值为 `true`）
+
+**解决方案**：
+- 修改 `SelectableArrowView.swift` 第 190-206 行
+- 使用 `arrowNode.updated()` 方法替代直接构造函数调用
+- 保留所有属性（包括 `hasArrowHead`、`rotation`、`scale`）
+- 确保直线在拖动后仍然保持为直线
+
+**修复代码**：
+```swift
+// 旧代码（会丢失 hasArrowHead）
+arrowNode = ArrowLayerNode(
+    startPoint: ...,
+    endPoint: ...,
+    color: arrowNode.color,
+    lineWidth: arrowNode.lineWidth,
+    zIndex: arrowNode.zIndex
+)
+
+// 新代码（保留所有属性）
+arrowNode = arrowNode.updated(
+    startPoint: CGPoint(...),
+    endPoint: CGPoint(...)
+)
+```
+
+### 新增功能
+
+#### 2. 形状控制点交互系统 ✅
+完全重写 `SelectableShapeView.swift`，实现了专业级的控制点交互：
+
+**控制点类型**：
+- **4个角点控制点**：拖动进行缩放，对角点作为锚点
+- **旋转手柄**：形状上方的圆形控制点，拖动进行旋转
+- **选中边框**：蓝色虚线边框显示选中状态
+- **旋转连接线**：连接形状顶部到旋转手柄的指示线
+
+**交互模式**：
+```
+        ○ ← 旋转手柄（圆形）
+        │
+    ●───┴───●
+    │       │  ← 角点控制点（方形）
+    │ 形状  │
+    │       │
+    ●───────●
+```
+
+**核心实现**：
+- 新增 `ControlHandle` 枚举：定义控制点类型和位置计算
+- `hitTestHandle(at:)` 方法：检测点击位置对应的控制点
+- `handleResize(handle:currentPoint:)` 方法：实现角点缩放逻辑
+  - 支持旋转状态下的缩放
+  - 保持对角点作为锚点
+  - 最小尺寸限制（20x20）
+- `handleRotation(currentPoint:)` 方法：实现旋转手柄逻辑
+  - 计算从中心到拖动点的角度
+  - 考虑旋转手柄在顶部的偏移（+90度）
+
+**控制点样式**：
+- 角点：白色填充 + 蓝色边框，12x12 方形
+- 旋转手柄：白色填充 + 蓝色边框，12x12 圆形
+- 旋转连接线：蓝色，1.5pt 宽，30pt 长
+- 选中边框：蓝色虚线，4-4 dash pattern
+
+#### 3. 箭头端点控制点 ✅
+完全重写 `SelectableArrowView.swift`，为箭头/直线添加端点控制点：
+
+**控制点类型**：
+- **起点控制点**：拖动调整箭头起点位置
+- **终点控制点**：拖动调整箭头终点位置
+
+**核心实现**：
+- 新增 `ArrowHandle` 枚举：定义端点类型
+- 移除双指手势（pinch、rotate），简化交互
+- `handleEndpointDrag(handle:currentPoint:)` 方法：实现端点拖动
+- 端点控制点显示为圆形（与形状的方形控制点区分）
+
+### 架构改进
+
+#### 移除双指手势依赖
+**原因**：
+- 双指手势在 iPad + Apple Pencil 场景下难以操作
+- 与专业绘图软件的交互习惯不符
+- 控制点提供更精确的操作方式
+
+**改进**：
+- 形状：移除 `UIPinchGestureRecognizer` 和 `UIRotationGestureRecognizer`
+- 箭头：移除所有双指手势
+- 统一使用单指拖动 + 控制点交互
+
+#### 撤销系统集成
+- 所有控制点操作都支持撤销/恢复
+- `onOperationStart` 在拖动开始时保存初始状态
+- `onOperationEnd` 在拖动结束时记录操作到撤销栈
+
+### 技术要点
+
+#### 旋转状态下的缩放计算
+```swift
+// 1. 获取锚点在旋转后的实际位置
+let cos_r = cos(initialRotation)
+let sin_r = sin(initialRotation)
+anchorInSuperview = CGPoint(
+    x: centerX + relX * cos_r - relY * sin_r,
+    y: centerY + relX * sin_r + relY * cos_r
+)
+
+// 2. 将拖动向量转换到未旋转的坐标系
+let cos_neg_r = cos(-initialRotation)
+let sin_neg_r = sin(-initialRotation)
+let localDx = dx * cos_neg_r - dy * sin_neg_r
+let localDy = dx * sin_neg_r + dy * cos_neg_r
+
+// 3. 计算新尺寸并保持中心点
+newWidth = max(abs(localDx), 20)
+newHeight = max(abs(localDy), 20)
+```
+
+#### 旋转角度计算
+```swift
+// 从中心到拖动点的角度
+let angle = atan2(
+    currentPoint.y - centerInSuperview.y,
+    currentPoint.x - centerInSuperview.x
+)
+
+// 旋转手柄在顶部，加 90 度偏移
+let rotation = angle + .pi / 2
+```
+
+### 修改文件
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 完全重写，添加端点控制点
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 完全重写，实现控制点系统
+
+### 用户体验提升
+- ✅ 直线拖动后保持为直线，不再变成箭头
+- ✅ 形状缩放更精确，可以单独调整宽度或高度
+- ✅ 旋转操作更直观，通过专用旋转手柄完成
+- ✅ 箭头端点可以独立调整，支持更灵活的箭头绘制
+- ✅ 交互方式与 Figma/Canva 等专业软件一致
+
+### 后续优化建议
+1. 添加等比例缩放模式（按住 Shift 键）
+2. 添加控制点吸附功能（对齐到网格或其他对象）
+3. 优化控制点的视觉反馈（悬停高亮）
+4. 添加键盘快捷键支持（方向键微调位置）
+
+---
+
+## 2025-12-15 - 图形工具问题修复方案 v3.0 实施完成 ✅
+
+### 概述
+成功实施图形工具问题修复方案 v3.0，解决了箭头/直线工具路由错误、圆角矩形图标问题，以及形状对象的缩放和旋转功能缺陷。
+
+### 修复的问题
+
+#### 1. 选择箭头形状后拖出的是直线 ✅
+**根因**：工具与形状类型混淆，无论选择什么形状都设置为 `.rectangle` 工具，且 `ShapeDrawingView` 对 `.line` 和 `.arrow` 的绘制完全相同（只画直线）
+
+**解决方案**：
+- 修改 `CanvasToolbar.swift`：根据 `shape.isLineType` 判断，选择直线/箭头时设置为 `.arrow` 工具
+- 扩展 `ArrowLayerNode.swift`：添加 `hasArrowHead` 属性区分箭头和直线
+- 修改 `SelectableArrowView.swift`：条件渲染箭头头部，只有 `hasArrowHead = true` 时才绘制
+- 新增 `LinePreviewView.swift`：专门用于直线预览的 SwiftUI 视图
+- 修改 `NativeEditorView.swift`：根据 `selectedShapeType` 显示直线或箭头预览，创建时设置正确的 `hasArrowHead` 属性
+
+#### 2. 直线只能横着拖出来 ✅
+**根因**：`ShapeDrawingView` 中的直线绘制逻辑固定使用矩形的水平中线
+
+**解决方案**：
+- 复用现有箭头系统，直线和箭头统一使用 `ArrowDrawingView` 绘制
+- 通过 `hasArrowHead` 属性控制是否显示箭头头部
+- 支持任意方向的直线拖动
+
+#### 3. 圆角矩形无图标 ✅
+**根因**：`rectangle.roundedcorners` 这个 SF Symbol 名称在某些 iOS 版本上可能不存在或显示异常
+
+**解决方案**：
+- 修改 `ShapeType.swift`：将图标名改为 `rectangle.inset.filled`，更通用且兼容性好
+
+#### 4. 形状对象只能移动，不能缩放和旋转 ✅
+**根因**：
+- `handlePinch` 缩放后 frame 计算错误，没有正确保持中心点
+- `handleRotate` 没有更新节点和重置 transform
+
+**解决方案**：
+- 修复 `SelectableShapeView.swift` 的 `handlePinch` 方法：
+  - 从 transform 提取缩放比例（`scaleX`、`scaleY`）
+  - 计算新的尺寸
+  - 保持中心点不变更新 frame
+  - 重置 transform 只保留旋转
+  - 更新路径和同步到节点
+  
+- 修复 `SelectableShapeView.swift` 的 `handleRotate` 方法：
+  - 从 transform 提取旋转角度
+  - 更新节点的 rotation 属性
+  - 重置 transform 为该旋转角度
+  - 更新路径和外观
+
+### 技术要点
+
+#### 统一直线/箭头到独立绘制系统
+```swift
+// 根据形状类型设置工具
+if shape.isLineType {
+    currentTool = .arrow  // 复用箭头工具
+} else {
+    currentTool = .rectangle
+}
+
+// 创建时设置 hasArrowHead
+let hasArrowHead = viewModel.selectedShapeType != .line
+let arrow = ArrowLayerNode(..., hasArrowHead: hasArrowHead)
+```
+
+#### 正确的缩放变换计算
+```swift
+// 从 transform 提取缩放比例
+let scaleX = sqrt(transform.a * transform.a + transform.c * transform.c)
+let scaleY = sqrt(transform.b * transform.b + transform.d * transform.d)
+
+// 保持中心点不变
+let oldCenter = center
+frame = CGRect(
+    x: oldCenter.x - newWidth / 2,
+    y: oldCenter.y - newHeight / 2,
+    width: newWidth,
+    height: newHeight
+)
+```
+
+### 修改文件
+- `Views/Editor/Canvas/CanvasToolbar.swift` - 根据形状类型设置工具
+- `Models/Canvas/ArrowLayerNode.swift` - 添加 hasArrowHead 属性
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 条件渲染箭头头部
+- `Views/Editor/Canvas/LinePreviewView.swift` - 新增直线预览视图
+- `Views/Editor/NativeEditorView.swift` - 支持直线预览和创建
+- `Models/Canvas/ShapeType.swift` - 修复圆角矩形图标
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 修复缩放和旋转逻辑
+
+### 验证结果
+- ✅ 选择箭头形状后拖出真正的箭头（带箭头头部）
+- ✅ 选择直线形状后拖出纯直线（无箭头头部）
+- ✅ 直线支持任意方向拖动，不再限制为水平
+- ✅ 圆角矩形显示正确图标
+- ✅ 形状对象支持双指缩放，中心点保持不变
+- ✅ 形状对象支持双指旋转，旋转角度正确记录
+
+---
+
+## 2025-12-15 - 图形工具与对象变换优化 v2.0 实施完成 ✅
+
+### 概述
+成功实施了完整的图形工具与对象变换优化方案 v2.0，修复了形状消失、箭头缩放旋转失效、弹出菜单方向错误等关键问题，并扩展了形状类型。
+
+### 修复的问题
+
+#### 1. 形状释放后立即消失 ✅
+**根因**：坐标系统不匹配，SwiftUI 手势返回视图坐标，但形状需要添加到 5000x5000 的画布内容坐标系
+**修复**：
+- 在 `NativeEditorView.swift` 的形状创建回调中添加坐标转换
+- 将视图坐标转换为画布内容坐标：`(x + offset.x) / scale`
+
+#### 2. 箭头无法缩放和旋转 ✅
+**根因**：变换逻辑有缺陷，手势结束时只重置 transform 但没有重新计算 frame 和路径
+**修复**：
+- 修复 `updateFromNode()` 方法：先重置 transform，再设置 frame
+- 修复 `handlePinch()` 和 `handleRotate()`：手势结束时调用 `updateFromNode()` 重新同步视图
+- 修复 `updateArrowPath()`：路径绘制考虑缩放因子 `scale`
+
+#### 3. 形状选择器弹出方向错误 ✅
+**根因**：`arrowEdge: .top` 表示箭头指向上方，即弹出框在按钮下方
+**修复**：
+- 将 `CanvasToolbar.swift` 的 `arrowEdge` 改为 `.bottom`
+- 弹出框现在在按钮上方显示
+
+#### 4. Switch 语句不完整导致编译错误 ✅
+**根因**：扩展 ShapeType 枚举后，现有的 switch 语句缺少新增类型的处理
+**修复**：
+- `SelectableShapeView.swift`：添加 `roundedRectangle`、`line`、`arrow` 的路径绘制
+- `ShapeDrawingView.swift`：在两个 switch 语句中都添加了新形状类型
+
+### 新增功能
+
+#### 1. 形状类型扩展 ✅
+新增 3 种形状类型：
+- **roundedRectangle**（圆角矩形）：圆角半径 12pt
+- **line**（直线）：简单直线
+- **arrow**（箭头）：从独立工具移入形状选择器
+
+#### 2. 形状选择器重新设计 ✅
+- **分组显示**：线条类型（直线/箭头）与基础形状分组
+- **现代化 UI**：使用渐变、阴影、按压动画
+- **网格布局**：3 列网格，支持 9 种形状
+- **强制 popover**：添加 `.presentationCompactAdaptation(.popover)` 确保 iPhone 上也显示为 popover
+
+### 技术要点
+
+#### 箭头变换修复原理
+```swift
+// 手势结束时的正确流程：
+1. 从 transform 提取累积的缩放/旋转值
+2. 更新 arrowNode 的 scale/rotation 属性
+3. 调用 updateFromNode() 重新计算 frame 和路径
+4. 同步到数据层
+```
+
+#### 坐标转换公式
+```swift
+let contentRect = CGRect(
+    x: (viewportRect.origin.x + offset.x) / scale,
+    y: (viewportRect.origin.y + offset.y) / scale,
+    width: viewportRect.width / scale,
+    height: viewportRect.height / scale
+)
+```
+
+### 修改文件
+- `Views/Editor/NativeEditorView.swift` - 添加形状坐标转换
+- `Views/Editor/Canvas/SelectableArrowView.swift` - 修复变换逻辑和路径绘制
+- `Models/Canvas/ShapeType.swift` - 扩展形状类型枚举
+- `Views/Editor/Canvas/ShapePickerPopover.swift` - 重新设计弹出菜单
+- `Views/Editor/Canvas/CanvasToolbar.swift` - 修改弹出方向
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 添加新形状类型处理
+- `Views/Editor/Canvas/ShapeDrawingView.swift` - 添加新形状类型处理
+
+### 验证结果
+- ✅ 形状创建后保持可见，位置正确
+- ✅ 箭头支持双指缩放和旋转
+- ✅ 形状选择器在按钮上方弹出
+- ✅ 显示所有 9 种形状（包括直线和箭头）
+- ✅ 编译通过，无错误
+
+### 参考资源
+- [Figma Shape Tools](https://help.figma.com/hc/en-us/articles/360040450133-Shape-tools)
+- [SwiftUI Popovers](https://www.swiftyplace.com/blog/swiftui-popovers-and-popups)
+- [aheze/Popovers](https://github.com/aheze/Popovers)
+
+---
+
 ## 2025-12-15 - 图形工具与对象变换优化 ✅
 
 ### 概述

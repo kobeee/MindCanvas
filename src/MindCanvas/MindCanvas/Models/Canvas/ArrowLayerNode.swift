@@ -19,6 +19,9 @@ struct ArrowLayerNode: Codable, Identifiable {
     // 缩放比例
     var scale: CGFloat = 1.0
     
+    // 是否显示箭头头部（false = 直线）
+    var hasArrowHead: Bool = true
+    
     /// 计算箭头的边界框
     /// 确保边界框有最小尺寸，避免视图大小为 0
     var bounds: CGRect {
@@ -56,7 +59,7 @@ struct ArrowLayerNode: Codable, Identifiable {
     }
     
     /// 创建箭头图层
-    init(startPoint: CGPoint, endPoint: CGPoint, color: String = "#000000", lineWidth: CGFloat = 3, zIndex: Int = 0, rotation: Double = 0.0, scale: CGFloat = 1.0) {
+    init(startPoint: CGPoint, endPoint: CGPoint, color: String = "#000000", lineWidth: CGFloat = 3, zIndex: Int = 0, rotation: Double = 0.0, scale: CGFloat = 1.0, hasArrowHead: Bool = true) {
         self.id = UUID()
         self.startPoint = startPoint
         self.endPoint = endPoint
@@ -65,16 +68,18 @@ struct ArrowLayerNode: Codable, Identifiable {
         self.zIndex = zIndex
         self.rotation = rotation
         self.scale = scale
+        self.hasArrowHead = hasArrowHead
         self.createdAt = Date()
     }
     
     /// 更新箭头属性
-    func updated(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil, color: String? = nil, lineWidth: CGFloat? = nil, zIndex: Int? = nil, rotation: Double? = nil, scale: CGFloat? = nil) -> ArrowLayerNode {
+    func updated(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil, color: String? = nil, lineWidth: CGFloat? = nil, zIndex: Int? = nil, rotation: Double? = nil, scale: CGFloat? = nil, hasArrowHead: Bool? = nil) -> ArrowLayerNode {
         var node = self
         if let startPoint = startPoint { node.startPoint = startPoint }
         if let endPoint = endPoint { node.endPoint = endPoint }
         if let rotation = rotation { node.rotation = rotation }
         if let scale = scale { node.scale = scale }
+        if let hasArrowHead = hasArrowHead { node.hasArrowHead = hasArrowHead }
         // 其他属性由于是 let，需要创建新实例
         return ArrowLayerNode(
             startPoint: node.startPoint,
@@ -83,7 +88,8 @@ struct ArrowLayerNode: Codable, Identifiable {
             lineWidth: lineWidth ?? self.lineWidth,
             zIndex: zIndex ?? self.zIndex,
             rotation: node.rotation,
-            scale: node.scale
+            scale: node.scale,
+            hasArrowHead: node.hasArrowHead
         )
     }
 }
