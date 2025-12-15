@@ -370,10 +370,10 @@ private struct NativeCanvasContainer: View {
                     }
                 }
                 
-                // 矩形绘制层
+                // 形状绘制层
                 if viewModel.stateManager.currentTool == .rectangle {
                     ZStack {
-                        // 显示正在绘制的矩形
+                        // 显示正在绘制的形状
                         if isDrawingRectangle, let start = rectangleStartPoint, let end = rectangleEndPoint {
                             let rect = CGRect(
                                 x: min(start.x, end.x),
@@ -382,32 +382,35 @@ private struct NativeCanvasContainer: View {
                                 height: abs(end.y - start.y)
                             )
                             
-                            RectangleShapeView(
+                            ShapeDrawingView(
                                 rect: rect,
+                                shapeType: viewModel.selectedShapeType,
                                 color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
                                 lineWidth: viewModel.stateManager.rectangleLineWidth,
                                 isFilled: viewModel.stateManager.rectangleIsFilled
                             )
                         }
                         
-                        // 矩形绘制手势
-                        RectangleDrawingView(
+                        // 形状绘制手势
+                        ShapeDrawingGestureView(
                             isDrawing: $isDrawingRectangle,
                             startPoint: $rectangleStartPoint,
                             endPoint: $rectangleEndPoint,
+                            shapeType: viewModel.selectedShapeType,
                             color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
                             lineWidth: viewModel.stateManager.rectangleLineWidth,
                             isFilled: viewModel.stateManager.rectangleIsFilled
                         ) { rect in
-                            // 创建矩形图层
-                            let rectangle = RectangleLayerNode(
-                                rect: rect,
+                            // 创建形状图层
+                            let shape = ShapeLayerNode(
+                                frame: rect,
+                                shapeType: viewModel.selectedShapeType,
                                 color: viewModel.stateManager.rectangleColor,
                                 lineWidth: viewModel.stateManager.rectangleLineWidth,
                                 isFilled: viewModel.stateManager.rectangleIsFilled,
-                                zIndex: viewModel.canvasView?.getRectangleLayerManager().getNextZIndex() ?? 0
+                                zIndex: viewModel.canvasView?.getShapeLayerManager().getNextZIndex() ?? 0
                             )
-                            viewModel.canvasView?.addRectangle(rectangle)
+                            viewModel.canvasView?.addShape(shape)
                         }
                     }
                 }
@@ -556,7 +559,10 @@ private struct NativeCanvasContainer: View {
                     Spacer()
                     CanvasToolbar(
                         currentTool: $viewModel.stateManager.currentTool,
-                        onImageImport: onImageImport
+                        onImageImport: onImageImport,
+                        onShapeSelected: { shapeType in
+                            viewModel.selectedShapeType = shapeType
+                        }
                     )
                     .padding(.bottom, Theme.Spacing.xl)
                 }

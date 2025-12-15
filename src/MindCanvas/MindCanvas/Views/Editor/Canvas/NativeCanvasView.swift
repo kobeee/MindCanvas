@@ -68,6 +68,12 @@ class NativeCanvasView: UIView {
 
     /// 箭头图层管理器
     private let arrowLayerManager = ArrowLayerManager()
+    
+    /// 形状视图字典 (nodeID -> SelectableShapeView)
+    var shapeViews: [UUID: SelectableShapeView] = [:]
+    
+    /// 形状图层管理器
+    private let shapeLayerManager = ShapeLayerManager()
 
     /// 矩形图层管理器
     private let rectangleLayerManager = RectangleLayerManager()
@@ -402,9 +408,29 @@ class NativeCanvasView: UIView {
         arrowView.onOperationEnd = { [weak self] _, endArrow in
             guard let self = self, let startArrow = operationStartArrow else { return }
             
-            // 记录箭头移动操作
+            // 检查是否移动
             if startArrow.startPoint != endArrow.startPoint || startArrow.endPoint != endArrow.endPoint {
                 let action = MoveArrowAction(
+                    arrowID: startArrow.id,
+                    fromArrow: startArrow,
+                    toArrow: endArrow,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否缩放
+            else if abs(startArrow.scale - endArrow.scale) > 0.01 {
+                let action = ScaleArrowAction(
+                    arrowID: startArrow.id,
+                    fromArrow: startArrow,
+                    toArrow: endArrow,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否旋转
+            else if abs(startArrow.rotation - endArrow.rotation) > 0.001 {
+                let action = RotateArrowAction(
                     arrowID: startArrow.id,
                     fromArrow: startArrow,
                     toArrow: endArrow,
@@ -444,6 +470,11 @@ class NativeCanvasView: UIView {
         // 更新箭头视图选中状态
         for (id, arrowView) in arrowViews {
             arrowView.isSelected = (id == selectedNodeID)
+        }
+        
+        // 更新形状视图选中状态
+        for (id, shapeView) in shapeViews {
+            shapeView.isSelected = (id == selectedNodeID)
         }
         
         onSelectionChanged?(selectedNodeID != nil)
@@ -517,6 +548,11 @@ class NativeCanvasView: UIView {
             // 确保所有箭头的手势都能正常工作
             for arrowView in arrowViews.values {
                 arrowView.enableArrowGestures()
+            }
+            
+            // 确保所有形状的手势都能正常工作
+            for shapeView in shapeViews.values {
+                shapeView.enableShapeGestures()
             }
 
         case .pan:
@@ -830,12 +866,120 @@ class NativeCanvasView: UIView {
 
     func updateArrow(_ arrow: ArrowLayerNode) {
         arrowLayerManager.updateArrow(arrow)
+        if let arrowView = arrowViews[arrow.id] {
+            arrowView.arrowNode = arrow
+        }
         onCanvasUpdated?()
     }
 
     func clearArrows() {
         arrowLayerManager.clearAll()
         onCanvasUpdated?()
+    }
+
+    // MARK: - 形状管理
+
+    func getShapeLayerManager() -> ShapeLayerManager { shapeLayerManager }
+
+    func addShape(_ shape: ShapeLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            let action = AddShapeAction(shape: shape, canvasView: self)
+            NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+        }
+        shapeLayerManager.addShape(shape)
+        createShapeView(for: shape)
+        onCanvasUpdated?()
+    }
+
+    func removeShape(id: UUID) {
+        shapeLayerManager.removeShape(id: id)
+        if let shapeView = shapeViews[id] {
+            shapeView.removeFromSuperview()
+            shapeViews.removeValue(forKey: id)
+        }
+        onCanvasUpdated?()
+    }
+
+    func updateShape(_ shape: ShapeLayerNode) {
+        shapeLayerManager.updateShape(shape)
+        if let shapeView = shapeViews[shape.id] {
+            shapeView.shapeNode = shape
+        }
+        onCanvasUpdated?()
+    }
+
+    func clearShapes() {
+        shapeLayerManager.clearAll()
+        shapeViews.values.forEach { $0.removeFromSuperview() }
+        shapeViews.removeAll()
+        onCanvasUpdated?()
+    }
+
+    /// 创建形状视图
+    private func createShapeView(for shape: ShapeLayerNode) {
+        let shapeView = SelectableShapeView(shapeNode: shape)
+        
+        // 设置选中回调
+        shapeView.onSelected = { [weak self] id in
+            self?.selectedNodeID = id
+        }
+        
+        // 设置节点更新回调
+        shapeView.onNodeUpdated = { [weak self] updatedShape in
+            self?.shapeLayerManager.updateShape(updatedShape)
+        }
+        
+        // 设置操作回调（用于撤销）
+        var operationStartShape: ShapeLayerNode?
+        shapeView.onOperationStart = { shape in
+            operationStartShape = shape
+        }
+        
+        shapeView.onOperationEnd = { [weak self] _, endShape in
+            guard let self = self, let startShape = operationStartShape else { return }
+            
+            // 检查是否移动
+            if startShape.frame != endShape.frame {
+                let action = MoveShapeAction(
+                    shapeID: startShape.id,
+                    fromShape: startShape,
+                    toShape: endShape,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否缩放
+            else if abs(startShape.frame.width - endShape.frame.width) > 1 || 
+                    abs(startShape.frame.height - endShape.frame.height) > 1 {
+                let action = ScaleShapeAction(
+                    shapeID: startShape.id,
+                    fromShape: startShape,
+                    toShape: endShape,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否旋转
+            else if abs(startShape.rotation - endShape.rotation) > 0.001 {
+                let action = RotateShapeAction(
+                    shapeID: startShape.id,
+                    fromShape: startShape,
+                    toShape: endShape,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            
+            operationStartShape = nil
+        }
+        
+        shapeViews[shape.id] = shapeView
+        objectLayerView.addSubview(shapeView)
+        
+        // 根据当前工具状态设置手势
+        if currentTool == .select {
+            shapeView.enableShapeGestures()
+        }
     }
 
     // MARK: - 矩形管理

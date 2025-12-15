@@ -302,6 +302,154 @@ struct ModifyArrowAction: CanvasAction {
     }
 }
 
+// MARK: - 箭头缩放操作
+class ScaleArrowAction: CanvasAction {
+    let arrowID: UUID
+    let fromArrow: ArrowLayerNode
+    let toArrow: ArrowLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "缩放箭头: \(arrowID)" }
+    
+    init(arrowID: UUID, fromArrow: ArrowLayerNode, toArrow: ArrowLayerNode, canvasView: NativeCanvasView) {
+        self.arrowID = arrowID
+        self.fromArrow = fromArrow
+        self.toArrow = toArrow
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.updateArrow(toArrow)
+    }
+    
+    func undo() {
+        canvasView?.updateArrow(fromArrow)
+    }
+}
+
+// MARK: - 箭头旋转操作
+class RotateArrowAction: CanvasAction {
+    let arrowID: UUID
+    let fromArrow: ArrowLayerNode
+    let toArrow: ArrowLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "旋转箭头: \(arrowID)" }
+    
+    init(arrowID: UUID, fromArrow: ArrowLayerNode, toArrow: ArrowLayerNode, canvasView: NativeCanvasView) {
+        self.arrowID = arrowID
+        self.fromArrow = fromArrow
+        self.toArrow = toArrow
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.updateArrow(toArrow)
+    }
+    
+    func undo() {
+        canvasView?.updateArrow(fromArrow)
+    }
+}
+
+// MARK: - 形状操作
+
+/// 添加形状操作
+class AddShapeAction: CanvasAction {
+    let shape: ShapeLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "添加形状: \(shape.id)" }
+    
+    init(shape: ShapeLayerNode, canvasView: NativeCanvasView) {
+        self.shape = shape
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.addShape(shape, recordUndo: false)
+    }
+    
+    func undo() {
+        canvasView?.removeShape(id: shape.id)
+    }
+}
+
+/// 移动形状操作
+class MoveShapeAction: CanvasAction {
+    let shapeID: UUID
+    let fromShape: ShapeLayerNode
+    let toShape: ShapeLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "移动形状: \(shapeID)" }
+    
+    init(shapeID: UUID, fromShape: ShapeLayerNode, toShape: ShapeLayerNode, canvasView: NativeCanvasView) {
+        self.shapeID = shapeID
+        self.fromShape = fromShape
+        self.toShape = toShape
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.updateShape(toShape)
+    }
+    
+    func undo() {
+        canvasView?.updateShape(fromShape)
+    }
+}
+
+/// 缩放形状操作
+class ScaleShapeAction: CanvasAction {
+    let shapeID: UUID
+    let fromShape: ShapeLayerNode
+    let toShape: ShapeLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "缩放形状: \(shapeID)" }
+    
+    init(shapeID: UUID, fromShape: ShapeLayerNode, toShape: ShapeLayerNode, canvasView: NativeCanvasView) {
+        self.shapeID = shapeID
+        self.fromShape = fromShape
+        self.toShape = toShape
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.updateShape(toShape)
+    }
+    
+    func undo() {
+        canvasView?.updateShape(fromShape)
+    }
+}
+
+/// 旋转形状操作
+class RotateShapeAction: CanvasAction {
+    let shapeID: UUID
+    let fromShape: ShapeLayerNode
+    let toShape: ShapeLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "旋转形状: \(shapeID)" }
+    
+    init(shapeID: UUID, fromShape: ShapeLayerNode, toShape: ShapeLayerNode, canvasView: NativeCanvasView) {
+        self.shapeID = shapeID
+        self.fromShape = fromShape
+        self.toShape = toShape
+        self.canvasView = canvasView
+    }
+    
+    func execute() {
+        canvasView?.updateShape(toShape)
+    }
+    
+    func undo() {
+        canvasView?.updateShape(fromShape)
+    }
+}
+
 // MARK: - 矩形操作
 
 /// 添加矩形操作

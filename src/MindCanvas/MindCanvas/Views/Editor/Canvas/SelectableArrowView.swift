@@ -29,6 +29,8 @@ class SelectableArrowView: UIView {
     /// 手势识别器
     private var panGesture: UIPanGestureRecognizer!
     private var tapGesture: UITapGestureRecognizer!
+    private var pinchGesture: UIPinchGestureRecognizer!     // 缩放手势
+    private var rotateGesture: UIRotationGestureRecognizer! // 旋转手势
     
     /// 节点更新回调
     var onNodeUpdated: ((ArrowLayerNode) -> Void)?
@@ -89,8 +91,18 @@ class SelectableArrowView: UIView {
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         addGestureRecognizer(panGesture)
         
-        // 允许多个手势同时识别
+        // 缩放
+        pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        addGestureRecognizer(pinchGesture)
+        
+        // 旋转
+        rotateGesture = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate))
+        addGestureRecognizer(rotateGesture)
+        
+        // 设置手势代理
         panGesture.delegate = self
+        pinchGesture.delegate = self
+        rotateGesture.delegate = self
     }
     
     // MARK: - Node Sync
@@ -98,6 +110,7 @@ class SelectableArrowView: UIView {
     /// 从节点更新视图
     func updateFromNode() {
         frame = arrowNode.bounds
+        transform = CGAffineTransform(rotationAngle: arrowNode.rotation) // 应用旋转
         updateArrowPath()
         updateSelectionAppearance()
     }
@@ -192,6 +205,55 @@ class SelectableArrowView: UIView {
         }
     }
     
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            onOperationStart?(arrowNode)
+            
+        case .changed:
+            // 应用缩放变换
+            transform = transform.scaledBy(x: gesture.scale, y: gesture.scale)
+            gesture.scale = 1.0 // 重置以累积变换
+            
+        case .ended:
+            // 更新节点的缩放值
+            let currentScale = sqrt(transform.a * transform.a + transform.c * transform.c)
+            arrowNode = arrowNode.updated(scale: arrowNode.scale * currentScale)
+            
+            // 重置变换，只保留旋转
+            transform = CGAffineTransform(rotationAngle: arrowNode.rotation)
+            
+            syncToNode()
+            onOperationEnd?(arrowNode, arrowNode)
+            
+        default:
+            break
+        }
+    }
+    
+    @objc private func handleRotate(_ gesture: UIRotationGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            onOperationStart?(arrowNode)
+            
+        case .changed:
+            // 应用旋转变换
+            transform = transform.rotated(by: gesture.rotation)
+            gesture.rotation = 0 // 重置以累积变换
+            
+        case .ended:
+            // 从变换矩阵提取旋转角度
+            let currentRotation = atan2(transform.b, transform.a)
+            arrowNode = arrowNode.updated(rotation: currentRotation)
+            
+            syncToNode()
+            onOperationEnd?(arrowNode, arrowNode)
+            
+        default:
+            break
+        }
+    }
+    
     // MARK: - Appearance
 
     private func updateSelectionAppearance() {
@@ -210,6 +272,8 @@ class SelectableArrowView: UIView {
         isUserInteractionEnabled = true
         panGesture.isEnabled = true
         tapGesture.isEnabled = true
+        pinchGesture.isEnabled = true   // 启用缩放手势
+        rotateGesture.isEnabled = true  // 启用旋转手势
     }
     
     override func layoutSubviews() {
@@ -248,6 +312,11 @@ extension SelectableArrowView: UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
+        // 允许缩放和旋转同时进行
+        if (gestureRecognizer == pinchGesture && otherGestureRecognizer == rotateGesture) ||
+           (gestureRecognizer == rotateGesture && otherGestureRecognizer == pinchGesture) {
+            return true
+        }
         return false
     }
 }

@@ -47,6 +47,11 @@ final class NativeEditorViewModel {
     
     weak var canvasView: NativeCanvasView?
     
+    // MARK: - 形状工具
+    
+    /// 当前选中的形状类型
+    var selectedShapeType: ShapeType = .rectangle
+    
     // MARK: - Initialization
     
     init(project: Project) {

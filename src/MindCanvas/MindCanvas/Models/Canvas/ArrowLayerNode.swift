@@ -6,12 +6,18 @@ import Combine
 /// 表示画布上的一个箭头对象
 struct ArrowLayerNode: Codable, Identifiable {
     let id: UUID
-    let startPoint: CGPoint
-    let endPoint: CGPoint
+    var startPoint: CGPoint
+    var endPoint: CGPoint
     let color: String // 十六进制颜色值
     let lineWidth: CGFloat
     let zIndex: Int
     let createdAt: Date
+    
+    // 旋转角度（弧度）
+    var rotation: Double = 0.0
+    
+    // 缩放比例
+    var scale: CGFloat = 1.0
     
     /// 计算箭头的边界框
     /// 确保边界框有最小尺寸，避免视图大小为 0
@@ -22,40 +28,62 @@ struct ArrowLayerNode: Codable, Identifiable {
         let maxY = max(startPoint.y, endPoint.y)
 
         // 确保最小尺寸为 40x40，避免边界框太小无法点击或显示
-        let width = max(maxX - minX, 40)
-        let height = max(maxY - minY, 40)
+        let baseWidth = max(maxX - minX, 40)
+        let baseHeight = max(maxY - minY, 40)
 
-        // 如果原始尺寸太小，需要调整原点使箭头居中
-        let adjustedMinX = (maxX - minX < 40) ? minX - (40 - (maxX - minX)) / 2 : minX
-        let adjustedMinY = (maxY - minY < 40) ? minY - (40 - (maxY - minY)) / 2 : minY
+        // 应用缩放
+        let scaledWidth = baseWidth * scale
+        let scaledHeight = baseHeight * scale
+
+        // 计算中心点
+        let centerX = (startPoint.x + endPoint.x) / 2
+        let centerY = (startPoint.y + endPoint.y) / 2
 
         return CGRect(
-            x: adjustedMinX,
-            y: adjustedMinY,
-            width: width,
-            height: height
+            x: centerX - scaledWidth / 2,
+            y: centerY - scaledHeight / 2,
+            width: scaledWidth,
+            height: scaledHeight
+        )
+    }
+    
+    /// 获取箭头中心点
+    var center: CGPoint {
+        CGPoint(
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2
         )
     }
     
     /// 创建箭头图层
-    init(startPoint: CGPoint, endPoint: CGPoint, color: String = "#000000", lineWidth: CGFloat = 3, zIndex: Int = 0) {
+    init(startPoint: CGPoint, endPoint: CGPoint, color: String = "#000000", lineWidth: CGFloat = 3, zIndex: Int = 0, rotation: Double = 0.0, scale: CGFloat = 1.0) {
         self.id = UUID()
         self.startPoint = startPoint
         self.endPoint = endPoint
         self.color = color
         self.lineWidth = lineWidth
         self.zIndex = zIndex
+        self.rotation = rotation
+        self.scale = scale
         self.createdAt = Date()
     }
     
-    /// 更新箭头位置
-    func updated(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil, color: String? = nil, lineWidth: CGFloat? = nil, zIndex: Int? = nil) -> ArrowLayerNode {
-        ArrowLayerNode(
-            startPoint: startPoint ?? self.startPoint,
-            endPoint: endPoint ?? self.endPoint,
+    /// 更新箭头属性
+    func updated(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil, color: String? = nil, lineWidth: CGFloat? = nil, zIndex: Int? = nil, rotation: Double? = nil, scale: CGFloat? = nil) -> ArrowLayerNode {
+        var node = self
+        if let startPoint = startPoint { node.startPoint = startPoint }
+        if let endPoint = endPoint { node.endPoint = endPoint }
+        if let rotation = rotation { node.rotation = rotation }
+        if let scale = scale { node.scale = scale }
+        // 其他属性由于是 let，需要创建新实例
+        return ArrowLayerNode(
+            startPoint: node.startPoint,
+            endPoint: node.endPoint,
             color: color ?? self.color,
             lineWidth: lineWidth ?? self.lineWidth,
-            zIndex: zIndex ?? self.zIndex
+            zIndex: zIndex ?? self.zIndex,
+            rotation: node.rotation,
+            scale: node.scale
         )
     }
 }

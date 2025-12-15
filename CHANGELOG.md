@@ -1,5 +1,77 @@
 # 开发记录
 
+## 2025-12-15 - 图形工具与对象变换优化 ✅
+
+### 概述
+实现了完整的图形工具系统，支持多种形状的创建、选择、移动、缩放和旋转操作。优化了箭头工具，添加了缩放和旋转支持。
+
+### 主要功能
+
+#### 1. 箭头工具增强 ✅
+- **新增缩放功能**：双指捏合可以缩放箭头大小
+- **新增旋转功能**：双指旋转可以调整箭头角度
+- **数据模型扩展**：ArrowLayerNode 添加了 rotation 和 scale 属性
+- **撤销支持**：缩放和旋转操作都支持撤销/恢复
+
+#### 2. 图形工具系统 ✅
+- **形状类型支持**：矩形、圆形、三角形、菱形、五角星、六边形
+- **弹出选择器**：点击图形工具弹出形状选择菜单
+- **统一架构**：使用 ShapeLayerNode 通用数据模型
+- **完整交互**：支持选择、移动、缩放、旋转
+
+#### 3. 通用形状视图 ✅
+- **SelectableShapeView**：统一的可选择形状视图
+- **手势支持**：点击、拖拽、缩放、旋转
+- **视觉反馈**：选中时显示蓝色虚线边框
+- **性能优化**：使用 CAShapeLayer 高效渲染
+
+### 技术实现
+
+#### 架构设计
+```
+Models/Canvas/
+├── ShapeType.swift          [新增] 形状类型枚举
+├── ShapeLayerNode.swift     [新增] 通用形状数据模型
+└── ArrowLayerNode.swift     [修改] 添加 rotation/scale
+
+Views/Editor/Canvas/
+├── ShapePickerPopover.swift     [新增] 形状选择弹出框
+├── SelectableShapeView.swift    [新增] 可选择形状视图
+├── ShapeDrawingView.swift       [新增] 形状绘制预览
+├── SelectableArrowView.swift    [修改] 添加缩放/旋转手势
+└── CanvasToolbar.swift          [修改] 添加弹出菜单支持
+
+Models/Canvas/CanvasAction.swift  [修改] 添加形状操作类
+```
+
+#### 关键技术点
+1. **手势同时识别**：缩放和旋转手势可以同时进行
+2. **坐标变换**：正确处理视图坐标和画布坐标的转换
+3. **撤销系统**：每种操作都有对应的撤销操作类
+4. **状态同步**：视图和数据模型之间的双向同步
+
+### 用户体验
+- **直观操作**：所有形状都支持相同的手势操作
+- **视觉反馈**：选中状态清晰可见
+- **流畅动画**：工具切换和形状选择都有平滑动画
+- **撤销友好**：所有操作都可以撤销
+
+### 修改文件
+- 新增：ShapeType.swift, ShapeLayerNode.swift, ShapePickerPopover.swift
+- 新增：SelectableShapeView.swift, ShapeDrawingView.swift
+- 修改：ArrowLayerNode.swift, SelectableArrowView.swift
+- 修改：CanvasToolbar.swift, NativeEditorView.swift
+- 修改：NativeCanvasView.swift, CanvasAction.swift
+- 修改：NativeEditorViewModel.swift
+
+### 后续优化建议
+1. 添加更多形状类型（心形、云朵等）
+2. 支持形状的颜色和样式编辑
+3. 实现形状的组合和布尔运算
+4. 添加形状的对齐和分布工具
+
+---
+
 ## 2025-12-15 - 箭头撤销问题修复（视图层级重构）✅
 
 ### 问题描述
