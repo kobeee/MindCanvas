@@ -1,5 +1,135 @@
 # 开发记录
 
+## 2025-12-15 - 箭头撤销问题修复（视图层级重构）✅
+
+### 问题描述
+用户操作序列：
+1. 先绘制一个箭头
+2. 然后用画笔绘制数字 1、2、3
+3. 撤销操作：数字 3 和箭头一起消失（错误！应该只撤销数字 3）
+4. 恢复操作：只有数字 3 被恢复，箭头彻底消失
+
+### 根因分析
+PKCanvasView 重建导致视图层次混乱：
+1. 撤销笔画时调用 `recreateCanvasViewWithDrawing()` 重建 PKCanvasView
+2. `objectLayerView`（包含箭头视图）是 PKCanvasView 的子视图
+3. 重建过程中 `objectLayerView` 的父视图关系被破坏
+4. 箭头视图虽然存在于 `arrowViews` 字典中，但 superview 链已断裂
+
+### 解决方案：视图层级重构
+将 `objectLayerView` 从 PKCanvasView 内部提升出来，作为其兄弟视图：
+
+**新架构**：
+```
+NativeCanvasView (UIView)
+├── pencilCanvas (PKCanvasView)       <- 只负责绘图
+└── overlayContainerView (UIView)     <- 滚动同步容器
+    └── objectLayerView (UIView)      <- 不受 PKCanvasView 重建影响
+        └── SelectableArrowView...
+```
+
+### 核心修改
+
+#### 1. 新增覆盖层容器
+- 添加 `overlayContainerView` 属性，与 `pencilCanvas` 同级
+- `objectLayerView` 作为 `overlayContainerView` 的子视图
+
+#### 2. 滚动同步机制
+- 新增 `syncOverlayTransform()` 方法
+- 在 `scrollViewDidScroll` 和 `scrollViewDidZoom` 中同步覆盖层变换
+- 确保 `objectLayerView` 随画布滚动和缩放同步移动
+
+#### 3. 重建流程优化
+- 修改 `recreateCanvasViewWithDrawing()` 不再需要恢复箭头视图
+- 新增 `setupPencilCanvasOnly()` 方法，不涉及 `objectLayerView`
+- PKCanvasView 重建不影响箭头视图的显示
+
+#### 4. 工具交互处理
+- 修改 `updateForTool()` 方法，添加 `overlayContainerView` 的交互控制
+- 平移工具时禁用覆盖层交互，让手势穿透到 PKCanvasView
+- 选择工具时启用覆盖层交互，允许操作箭头对象
+
+### 技术要点
+
+#### 坐标变换同步
+```swift
+private func syncOverlayTransform() {
+    let offset = pencilCanvas.contentOffset
+    let scale = pencilCanvas.zoomScale
+    
+    objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
+    objectLayerView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
+}
+```
+
+#### 视图层级分离
+- PKCanvasView 专注于绘图功能
+- overlayContainerView 专门承载对象视图
+- 两者通过同步机制保持视觉一致性
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 视图层级重构
+
+### 验证结果
+- ✅ 箭头绘制后保持可见
+- ✅ 撤销笔画时箭头不会消失
+- ✅ 恢复操作正确恢复所有内容
+- ✅ 缩放和平移时箭头同步移动
+- ✅ 选择工具可以正常选中箭头
+
+### 后续建议
+1. 在真机上测试验证，排除 Simulator 特有问题
+2. 考虑将其他对象（图片、矩形等）也迁移到 overlayContainerView
+3. 优化滚动同步性能，避免频繁的 transform 计算
+
+---
+
+## 2025-12-15 - 箭头撤销问题修复尝试 ⚠️ [未解决]
+
+### 问题描述
+用户操作序列：
+1. 先绘制一个箭头
+2. 然后用画笔绘制数字 1、2、3
+3. 撤销操作：数字 3 和箭头一起消失（错误！应该只撤销数字 3）
+4. 恢复操作：只有数字 3 被恢复，箭头彻底消失
+
+### 预期行为
+- 每个操作（箭头、笔画1、笔画2、笔画3）应该独立记录在撤销栈中
+- 撤销时应该按照 LIFO（后进先出）顺序逐个撤销
+- 箭头应该最先被撤销（最后被创建）
+
+### 已尝试的修复
+
+#### 1. 移除错误的复合操作机制
+**问题**：之前添加的复合操作机制在绘图开始时将所有操作组合在一起
+**修复**：
+- 删除了 `beginCompoundAction`、`endCompoundAction` 和 `addToCompoundAction` 方法
+- 恢复独立操作记录方式
+- 确保每个操作都是独立记录的
+
+#### 2. 修复 PKCanvasView 重建时的视图恢复
+**问题**：`DrawingAction` 的 `undo` 方法调用 `recreateCanvasViewWithDrawing` 重建 PKCanvasView 时，箭头视图丢失
+**修复**：
+- 在重建前保存 `arrowViews` 字典
+- 重建后将箭头视图重新添加到新的 `objectLayerView` 中
+- 确保撤销绘图操作时不会丢失箭头视图
+
+### 根因分析
+虽然进行了上述修复，但问题仍然存在。可能的原因：
+1. **PKCanvasView 的内部状态问题**：重建 PKCanvasView 可能导致视图层次结构不一致
+2. **撤销栈的记录时机**：箭头和笔画的记录时机可能存在交叉
+3. **PencilKit 的已知限制**：PKCanvasView 与自定义子视图的交互存在已知问题
+
+### 后续建议
+1. **考虑替代方案**：使用 CALayer 而非 UIView 来渲染箭头
+2. **独立视图层次**：将箭头视图放在 PKCanvasView 之外，作为兄弟视图
+3. **参考成熟方案**：研究 Drawsana 等开源绘图库的实现方式
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 移除复合操作，修复视图恢复
+
+---
+
 ## 2025-12-14 - 箭头消失问题修复尝试 v2（基于开源项目实践）🔧
 
 ### 问题描述

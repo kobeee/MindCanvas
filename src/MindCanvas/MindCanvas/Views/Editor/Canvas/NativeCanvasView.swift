@@ -11,6 +11,9 @@ class NativeCanvasView: UIView {
     /// Layer 1: 对象图层容器 (图片节点) - 放在 PKCanvasView 下面
     private let objectLayerView = UIView()
 
+    /// Layer 1.5: 覆盖层容器视图（与 pencilCanvas 同级，用于承载箭头等对象）
+    private let overlayContainerView = UIView()
+
     /// Layer 2: PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
     var pencilCanvas = PKCanvasView()
 
@@ -153,40 +156,48 @@ class NativeCanvasView: UIView {
         pencilCanvas.bounces = true
         pencilCanvas.bouncesZoom = true
 
-        // 配置对象图层 - 作为 PKCanvasView 的子视图
+        // 配置覆盖层容器视图
+        overlayContainerView.backgroundColor = .clear
+        overlayContainerView.isUserInteractionEnabled = true
+        overlayContainerView.clipsToBounds = true  // 裁剪超出部分
+
+        // 配置对象图层 - 作为 overlayContainerView 的子视图
         objectLayerView.backgroundColor = .clear
         objectLayerView.isUserInteractionEnabled = true
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
-        objectLayerView.clipsToBounds = false // 关键：允许子视图超出边界显示
+        objectLayerView.clipsToBounds = false
         objectLayerView.isOpaque = false
 
+        // 添加视图层级
         addSubview(pencilCanvas)
+        addSubview(overlayContainerView)  // 覆盖在 pencilCanvas 上方
+        overlayContainerView.addSubview(objectLayerView)
 
-        // 关键修复：将 objectLayerView 添加到 pencilCanvas 内部
-        // 参考 simonbs/InfiniteCanvas 和社区最佳实践
-        // 使用 DispatchQueue 确保 pencilCanvas 布局完成后再添加
+        // 初始化完成后设置状态
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-
-            // 添加到 pencilCanvas 顶层（而不是索引 0）
-            self.pencilCanvas.addSubview(self.objectLayerView)
-            self.objectLayerView.frame = CGRect(origin: .zero, size: self.canvasSize)
-
             self.centerCanvas()
             self.updateForTool(self.currentTool)
-            // zoomScale 是非可选值 CGFloat，不需要可选绑定
             self.onZoomChanged?(self.pencilCanvas.zoomScale)
         }
     }
 
     private func setupConstraints() {
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
+        overlayContainerView.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
+            // pencilCanvas 填满整个视图
             pencilCanvas.topAnchor.constraint(equalTo: topAnchor),
             pencilCanvas.leadingAnchor.constraint(equalTo: leadingAnchor),
             pencilCanvas.trailingAnchor.constraint(equalTo: trailingAnchor),
-            pencilCanvas.bottomAnchor.constraint(equalTo: bottomAnchor)
+            pencilCanvas.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // overlayContainerView 与 pencilCanvas 完全重叠
+            overlayContainerView.topAnchor.constraint(equalTo: topAnchor),
+            overlayContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlayContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -194,6 +205,23 @@ class NativeCanvasView: UIView {
         super.layoutSubviews()
         // 对象图层始终保持画布大小
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
+        // 同步覆盖层变换
+        syncOverlayTransform()
+    }
+
+    /// 同步覆盖层的变换（位置和缩放）
+    private func syncOverlayTransform() {
+        let offset = pencilCanvas.contentOffset
+        let scale = pencilCanvas.zoomScale
+
+        // 计算 objectLayerView 应该的变换
+        // 原点移动 = -contentOffset
+        // 缩放 = zoomScale
+        objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        objectLayerView.frame.origin = CGPoint(
+            x: -offset.x,
+            y: -offset.y
+        )
     }
 
     // MARK: - Canvas Control
@@ -470,15 +498,15 @@ class NativeCanvasView: UIView {
     func updateForTool(_ tool: CanvasTool) {
         switch tool {
         case .select:
-            // 选择工具：禁用绘图手势，启用对象层手势
-            // 注意：不能设置 pencilCanvas.isUserInteractionEnabled = false
-            // 因为 objectLayerView 是 pencilCanvas 的子视图，父视图禁用交互会导致子视图也无法接收事件
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+
+            // 关键：启用覆盖层交互
+            overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
 
             // 确保所有对象的手势都能正常工作
@@ -492,58 +520,63 @@ class NativeCanvasView: UIView {
             }
 
         case .pan:
-            // 平移工具：禁用绘图，禁用对象手势，启用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
-            pencilCanvas.drawingPolicy = .default  // 关键修复：设置为default才能启用滚动
-            objectLayerView.isUserInteractionEnabled = false
+            pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = true
-            // 关键修复：启用手势识别器
             pencilCanvas.panGestureRecognizer.isEnabled = true
             pencilCanvas.pinchGestureRecognizer?.isEnabled = true
 
+            // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
+            overlayContainerView.isUserInteractionEnabled = false
+
         case .pen:
-            // 画笔工具：启用绘图，禁用对象手势，禁用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.tool = inkingTool
             pencilCanvas.drawingPolicy = .anyInput
             pencilCanvas.drawingGestureRecognizer.isEnabled = true
-            objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
+            // 关键：禁用覆盖层交互
+            overlayContainerView.isUserInteractionEnabled = false
+
         case .eraser:
-            // 橡皮擦工具：启用擦除，禁用对象手势，禁用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.tool = eraserTool
             pencilCanvas.drawingPolicy = .anyInput
             pencilCanvas.drawingGestureRecognizer.isEnabled = true
-            objectLayerView.isUserInteractionEnabled = false
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
+            // 关键：禁用覆盖层交互
+            overlayContainerView.isUserInteractionEnabled = false
+
         case .image:
-            // 图片工具：与选择工具类似，允许操作对象
-            // 同样不能禁用 pencilCanvas 交互，否则子视图 objectLayerView 也无法接收事件
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+
+            // 这些工具可能需要与覆盖层交互
+            overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
 
         case .arrow, .rectangle, .text, .annotation:
-            // 其他工具：禁用绘图，禁用对象手势，启用画布滚动
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
-            pencilCanvas.drawingPolicy = .default  // 非绘图工具设置为default
-            objectLayerView.isUserInteractionEnabled = false
-            pencilCanvas.isScrollEnabled = true
-            pencilCanvas.panGestureRecognizer.isEnabled = true
-            pencilCanvas.pinchGestureRecognizer?.isEnabled = true
+            pencilCanvas.drawingPolicy = .default
+            pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+
+            // 这些工具可能需要与覆盖层交互
+            overlayContainerView.isUserInteractionEnabled = true
+            objectLayerView.isUserInteractionEnabled = true
         }
     }
 
@@ -584,19 +617,22 @@ class NativeCanvasView: UIView {
         let oldZoomScale = pencilCanvas.zoomScale
         let oldContentOffset = pencilCanvas.contentOffset
         let oldDelegate = pencilCanvas.delegate
-        
+
+        // 注意：不再需要保存和恢复箭头视图，因为它们现在在 overlayContainerView 中
+        // 与 PKCanvasView 完全独立
+
         // 从父视图中移除旧的canvas
         pencilCanvas.removeFromSuperview()
-        
+
         // 创建新的PKCanvasView实例
         pencilCanvas = PKCanvasView()
-        setupPencilCanvas()
-        
+        setupPencilCanvasOnly()  // 使用新方法，不涉及 objectLayerView
+
         // 恢复状态
         pencilCanvas.delegate = oldDelegate
         pencilCanvas.zoomScale = oldZoomScale
         pencilCanvas.contentOffset = oldContentOffset
-        
+
         // 设置绘图数据
         if !data.isEmpty {
             do {
@@ -606,11 +642,46 @@ class NativeCanvasView: UIView {
                 // 静默处理错误，避免日志输出
             }
         }
-        
+
+        // 同步覆盖层位置
+        syncOverlayTransform()
+
         // 同步更新撤销基准数据
         strokeStartDrawingData = getDrawingData()
     }
     
+    /// 仅设置 PKCanvasView 的基本属性（不涉及 objectLayerView）
+    private func setupPencilCanvasOnly() {
+        pencilCanvas.backgroundColor = .white
+        pencilCanvas.isOpaque = true
+        pencilCanvas.tool = inkingTool
+        pencilCanvas.delegate = self
+
+        pencilCanvas.contentSize = canvasSize
+        pencilCanvas.minimumZoomScale = minZoomScale
+        pencilCanvas.maximumZoomScale = maxZoomScale
+
+        pencilCanvas.showsVerticalScrollIndicator = false
+        pencilCanvas.showsHorizontalScrollIndicator = false
+        pencilCanvas.bounces = true
+        pencilCanvas.bouncesZoom = true
+
+        // 插入到 overlayContainerView 下方
+        insertSubview(pencilCanvas, belowSubview: overlayContainerView)
+
+        // 更新约束
+        pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            pencilCanvas.topAnchor.constraint(equalTo: topAnchor),
+            pencilCanvas.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pencilCanvas.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pencilCanvas.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        // 更新工具状态
+        updateForTool(currentTool)
+    }
+
     /// 设置PKCanvasView的基本属性
     private func setupPencilCanvas() {
         pencilCanvas.backgroundColor = .white
@@ -630,10 +701,9 @@ class NativeCanvasView: UIView {
         pencilCanvas.showsHorizontalScrollIndicator = false
         pencilCanvas.bounces = true
         pencilCanvas.bouncesZoom = true
-        
-        // 重新插入到视图层次中
-        pencilCanvas.insertSubview(objectLayerView, at: 0)
-        addSubview(pencilCanvas)
+
+        // 插入到 overlayContainerView 下方
+        insertSubview(pencilCanvas, belowSubview: overlayContainerView)
         
         // 更新约束
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
@@ -888,8 +958,17 @@ extension NativeCanvasView: PKCanvasViewDelegate {
         }
     }
 
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // 同步覆盖层的位置
+        syncOverlayTransform()
+    }
+
     // PKCanvasViewDelegate 继承自 UIScrollViewDelegate，所以可以监听缩放
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        // 同步覆盖层的缩放
+        syncOverlayTransform()
+
+        // 回调缩放变化
         onZoomChanged?(scrollView.zoomScale)
     }
 
