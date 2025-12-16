@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import Foundation
 
 /// 控制点类型
 enum ControlHandle: Int, CaseIterable {
@@ -69,9 +70,16 @@ class SelectableShapeView: UIView {
     // 当前拖动的控制点
     private var activeHandle: ControlHandle?
     private var dragStartPoint: CGPoint = .zero
-    private var initialFrame: CGRect = .zero
-    private var initialRotation: Double = 0
+    
+    // 初始状态 (手势开始时保存)
+    private var initialBounds: CGRect = .zero
+    private var initialCenter: CGPoint = .zero
+    private var initialRotation: CGFloat = 0
+    private var initialTouchAngle: CGFloat = 0  // 旋转手势: 初始触摸角度
     private var initialNode: ShapeLayerNode?
+    
+    // 拖动开始时的角点实际位置（不是触摸点，是角点本身的位置）
+    private var initialHandlePosition: CGPoint = .zero
 
     // 手势
     private var panGesture: UIPanGestureRecognizer!
@@ -100,116 +108,171 @@ class SelectableShapeView: UIView {
     // MARK: - Setup
 
     private func setupViews() {
+        // 设置视图属性
         backgroundColor = .clear
+        isOpaque = false
         clipsToBounds = false
 
-        // 形状图层
-        shapeLayer.fillColor = shapeNode.isFilled
-            ? UIColor(Color.fromHex(shapeNode.color) ?? .black).cgColor
-            : UIColor.clear.cgColor
-        shapeLayer.strokeColor = UIColor(Color.fromHex(shapeNode.color) ?? .black).cgColor
-        shapeLayer.lineWidth = shapeNode.lineWidth
+        // 添加形状图层
         layer.addSublayer(shapeLayer)
-
-        // 选中边框
-        selectionBorder.strokeColor = UIColor.systemBlue.cgColor
-        selectionBorder.fillColor = UIColor.clear.cgColor
-        selectionBorder.lineWidth = 1.5
-        selectionBorder.lineDashPattern = [4, 4]
-        selectionBorder.isHidden = true
+        
+        // 添加选中边框
         layer.addSublayer(selectionBorder)
-
-        // 旋转手柄连接线
-        rotationLineLayer.strokeColor = UIColor.systemBlue.cgColor
-        rotationLineLayer.fillColor = UIColor.clear.cgColor
-        rotationLineLayer.lineWidth = 1.5
-        rotationLineLayer.isHidden = true
-        layer.addSublayer(rotationLineLayer)
-
-        // 4个角点控制点
+        
+        // 添加控制点
         for _ in 0..<4 {
             let handleLayer = CAShapeLayer()
-            handleLayer.fillColor = UIColor.white.cgColor
-            handleLayer.strokeColor = UIColor.systemBlue.cgColor
-            handleLayer.lineWidth = 2
-            handleLayer.isHidden = true
             layer.addSublayer(handleLayer)
             cornerHandleLayers.append(handleLayer)
         }
-
-        // 旋转手柄（圆形）
-        rotationHandleLayer.fillColor = UIColor.white.cgColor
-        rotationHandleLayer.strokeColor = UIColor.systemBlue.cgColor
-        rotationHandleLayer.lineWidth = 2
-        rotationHandleLayer.isHidden = true
+        
+        // 添加旋转连接线
+        layer.addSublayer(rotationLineLayer)
+        
+        // 添加旋转手柄
         layer.addSublayer(rotationHandleLayer)
+        
+        // 设置默认样式
+        updateShapeStyle()
+        updateSelectionStyle()
     }
 
     private func setupGestures() {
+        // 点击手势
         tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tapGesture)
-
+        
+        // 拖拽手势
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        panGesture.delegate = self
         addGestureRecognizer(panGesture)
     }
 
-    // MARK: - Node Sync
+    // MARK: - Style Updates
 
+    private func updateShapeStyle() {
+        shapeLayer.fillColor = shapeNode.isFilled ? UIColor_fromHex(shapeNode.color).cgColor : UIColor.clear.cgColor
+        shapeLayer.strokeColor = UIColor_fromHex(shapeNode.color).cgColor
+        shapeLayer.lineWidth = shapeNode.lineWidth
+        shapeLayer.lineCap = .round
+        shapeLayer.lineJoin = .round
+    }
+
+    private func updateSelectionStyle() {
+        // 选中边框样式
+        selectionBorder.fillColor = UIColor.clear.cgColor
+        selectionBorder.strokeColor = UIColor.systemBlue.cgColor
+        selectionBorder.lineWidth = 1.5
+        selectionBorder.lineDashPattern = [4, 4]
+        
+        // 控制点样式
+        for handleLayer in cornerHandleLayers {
+            handleLayer.fillColor = UIColor.white.cgColor
+            handleLayer.strokeColor = UIColor.systemBlue.cgColor
+            handleLayer.lineWidth = 2
+        }
+        
+        // 旋转连接线样式
+        rotationLineLayer.fillColor = UIColor.clear.cgColor
+        rotationLineLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationLineLayer.lineWidth = 1.5
+        
+        // 旋转手柄样式
+        rotationHandleLayer.fillColor = UIColor.white.cgColor
+        rotationHandleLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationHandleLayer.lineWidth = 2
+    }
+
+    // MARK: - Shape Path
+
+    private func updateShapePath() {
+        let path = createShapePath(for: shapeNode.shapeType, in: bounds)
+        shapeLayer.path = path.cgPath
+    }
+
+    private func createShapePath(for shapeType: ShapeType, in rect: CGRect) -> UIBezierPath {
+        switch shapeType {
+        case .rectangle:
+            return UIBezierPath(rect: rect)
+            
+        case .circle:
+            return UIBezierPath(ovalIn: rect)
+            
+        case .triangle:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.close()
+            return path
+            
+        case .diamond:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.close()
+            return path
+            
+        case .pentagon:
+            return createPolygonPath(in: rect, sides: 5)
+            
+        case .hexagon:
+            return createPolygonPath(in: rect, sides: 6)
+            
+        case .star:
+            return createStarPath(in: rect, points: 5)
+            
+        case .roundedRectangle:
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+            return path
+            
+        case .line:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: 0, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            return path
+            
+        case .arrow:
+            // Arrow is handled by SelectableArrowView, not SelectableShapeView
+            return UIBezierPath()
+        }
+    }
+
+    // MARK: - Sync Methods
+
+    /// 从数据模型更新视图
     func updateFromNode() {
-        frame = shapeNode.frame
+        // 重置 transform 为 identity
+        transform = .identity
+
+        // 设置 bounds 和 center
+        bounds = CGRect(x: 0, y: 0, width: shapeNode.frame.width, height: shapeNode.frame.height)
+        center = CGPoint(x: shapeNode.frame.midX, y: shapeNode.frame.midY)
+
+        // 应用旋转
         transform = CGAffineTransform(rotationAngle: shapeNode.rotation)
+
         updateShapePath()
         updateSelectionAppearance()
     }
 
-    private func updateShapePath() {
-        let rect = bounds
-        let path: UIBezierPath
-
-        switch shapeNode.shapeType {
-        case .rectangle:
-            path = UIBezierPath(roundedRect: rect, cornerRadius: 4)
-        case .roundedRectangle:
-            path = UIBezierPath(roundedRect: rect, cornerRadius: 12)
-        case .circle:
-            let diameter = min(rect.width, rect.height)
-            let circleRect = CGRect(
-                x: (rect.width - diameter) / 2,
-                y: (rect.height - diameter) / 2,
-                width: diameter,
-                height: diameter
-            )
-            path = UIBezierPath(ovalIn: circleRect)
-        case .triangle:
-            path = UIBezierPath()
-            path.move(to: CGPoint(x: rect.midX, y: 0))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: 0, y: rect.maxY))
-            path.close()
-        case .diamond:
-            path = UIBezierPath()
-            path.move(to: CGPoint(x: rect.midX, y: 0))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: 0, y: rect.midY))
-            path.close()
-        case .star:
-            path = createStarPath(in: rect, points: 5)
-        case .hexagon:
-            path = createPolygonPath(in: rect, sides: 6)
-        case .line, .arrow:
-            path = UIBezierPath()
-            path.move(to: CGPoint(x: 0, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        }
-
-        shapeLayer.path = path.cgPath
-    }
-
+    /// 同步到数据模型
     private func syncToNode() {
+        let currentRotation = atan2(transform.b, transform.a)
+
+        // 从 center 和 bounds 重建 frame
+        let newFrame = CGRect(
+            x: center.x - bounds.width / 2,
+            y: center.y - bounds.height / 2,
+            width: bounds.width,
+            height: bounds.height
+        )
+
         shapeNode = shapeNode.updated(
-            frame: frame,
-            rotation: atan2(transform.b, transform.a)
+            frame: newFrame,
+            rotation: currentRotation
         )
         onNodeUpdated?(shapeNode)
     }
@@ -304,17 +367,43 @@ class SelectableShapeView: UIView {
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        let location = gesture.location(in: self)
+        let locationInSelf = gesture.location(in: self)
 
         switch gesture.state {
         case .began:
+            // 保存初始状态
             initialNode = shapeNode
             onOperationStart?(shapeNode)
 
-            activeHandle = hitTestHandle(at: location)
-            dragStartPoint = gesture.location(in: superview)
-            initialFrame = frame
+            activeHandle = hitTestHandle(at: locationInSelf)
+
+            // 关键: 保存 center 和 bounds，而非 frame
+            initialCenter = center
+            initialBounds = bounds
             initialRotation = atan2(transform.b, transform.a)
+
+            // 如果是缩放，保存被拖动角点的实际位置（不是触摸点）
+            if let handle = activeHandle, handle != .rotation {
+                // 计算角点在 superview 坐标系中的位置
+                let handleLocalOffset = handleOffset(for: handle)
+                let cosR = cos(initialRotation)
+                let sinR = sin(initialRotation)
+                initialHandlePosition = CGPoint(
+                    x: initialCenter.x + handleLocalOffset.x * cosR - handleLocalOffset.y * sinR,
+                    y: initialCenter.y + handleLocalOffset.x * sinR + handleLocalOffset.y * cosR
+                )
+            }
+
+            // 如果是旋转，计算初始触摸角度
+            if activeHandle == .rotation {
+                let touchInSuperview = gesture.location(in: superview)
+                initialTouchAngle = atan2(
+                    touchInSuperview.y - initialCenter.y,
+                    touchInSuperview.x - initialCenter.x
+                )
+            }
+
+            dragStartPoint = gesture.location(in: superview)
 
         case .changed:
             let currentPoint = gesture.location(in: superview)
@@ -322,12 +411,12 @@ class SelectableShapeView: UIView {
             if let handle = activeHandle {
                 switch handle {
                 case .rotation:
-                    handleRotation(currentPoint: currentPoint)
+                    handleRotationImproved(currentPoint: currentPoint)
                 default:
-                    handleResize(handle: handle, currentPoint: currentPoint)
+                    handleResizeFixed(handle: handle, currentPoint: currentPoint)
                 }
             } else {
-                handleMove(currentPoint: currentPoint)
+                handleMoveImproved(currentPoint: currentPoint)
             }
 
         case .ended, .cancelled:
@@ -343,98 +432,162 @@ class SelectableShapeView: UIView {
         }
     }
 
-    // MARK: - Transform Operations
+    // MARK: - Transform Operations (Improved)
 
-    private func handleMove(currentPoint: CGPoint) {
+    /// 改进的移动方法
+    private func handleMoveImproved(currentPoint: CGPoint) {
         let dx = currentPoint.x - dragStartPoint.x
         let dy = currentPoint.y - dragStartPoint.y
 
-        frame = CGRect(
-            x: initialFrame.origin.x + dx,
-            y: initialFrame.origin.y + dy,
-            width: initialFrame.width,
-            height: initialFrame.height
+        // 直接修改 center，保持 bounds 不变
+        center = CGPoint(
+            x: initialCenter.x + dx,
+            y: initialCenter.y + dy
         )
     }
 
-    private func handleResize(handle: ControlHandle, currentPoint: CGPoint) {
+    
+
+    /// 修复后的缩放方法 - 使用增量计算，避免第一帧跳变
+    private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
         guard let oppositeCorner = handle.oppositeCorner else { return }
 
-        // 获取锚点位置（在 superview 坐标系中）
-        let anchorInLocal = oppositeCorner.position(in: CGRect(origin: .zero, size: initialFrame.size))
-        var anchorInSuperview = CGPoint(
-            x: initialFrame.origin.x + anchorInLocal.x,
-            y: initialFrame.origin.y + anchorInLocal.y
+        // Step 1: 计算锚点位置（对角点）
+        let anchorLocalOffset = anchorOffset(for: oppositeCorner)
+        let cosR = cos(initialRotation)
+        let sinR = sin(initialRotation)
+
+        let anchorInSuperview = CGPoint(
+            x: initialCenter.x + anchorLocalOffset.x * cosR - anchorLocalOffset.y * sinR,
+            y: initialCenter.y + anchorLocalOffset.x * sinR + anchorLocalOffset.y * cosR
         )
 
-        // 如果有旋转，需要考虑旋转后的锚点位置
-        if initialRotation != 0 {
-            let centerX = initialFrame.midX
-            let centerY = initialFrame.midY
-            let cos_r = cos(initialRotation)
-            let sin_r = sin(initialRotation)
+        // Step 2: 计算拖动增量（关键修复：使用 dragStartPoint 而非 anchorInSuperview）
+        let dragDeltaX = currentPoint.x - dragStartPoint.x
+        let dragDeltaY = currentPoint.y - dragStartPoint.y
 
-            let relX = anchorInSuperview.x - centerX
-            let relY = anchorInSuperview.y - centerY
+        // Step 3: 将拖动增量逆旋转到本地坐标系
+        let cosNegR = cos(-initialRotation)
+        let sinNegR = sin(-initialRotation)
+        let localDeltaX = dragDeltaX * cosNegR - dragDeltaY * sinNegR
+        let localDeltaY = dragDeltaX * sinNegR + dragDeltaY * cosNegR
 
-            anchorInSuperview = CGPoint(
-                x: centerX + relX * cos_r - relY * sin_r,
-                y: centerY + relX * sin_r + relY * cos_r
-            )
+        // Step 4: 计算新尺寸（增量计算，不是绝对计算）
+        // 根据拖动方向决定符号
+        let widthSign: CGFloat = (handle == .topLeft || handle == .bottomLeft) ? -1 : 1
+        let heightSign: CGFloat = (handle == .topLeft || handle == .topRight) ? -1 : 1
+
+        var newWidth = initialBounds.width + localDeltaX * widthSign
+        var newHeight = initialBounds.height + localDeltaY * heightSign
+
+        // 最小尺寸限制
+        let minSize: CGFloat = 20
+        newWidth = max(newWidth, minSize)
+        newHeight = max(newHeight, minSize)
+
+        // Step 5: 计算新中心点
+        // 锚点固定不动，中心点根据新尺寸移动
+        let newHalfWidth = newWidth / 2
+        let newHalfHeight = newHeight / 2
+
+        // 新中心相对于锚点的本地偏移（注意符号与锚点相反）
+        let newCenterLocalOffsetX = newHalfWidth * (-anchorLocalOffset.x / abs(anchorLocalOffset.x + 0.001))
+        let newCenterLocalOffsetY = newHalfHeight * (-anchorLocalOffset.y / abs(anchorLocalOffset.y + 0.001))
+
+        // 安全处理：如果锚点偏移接近0，使用默认方向
+        let safeCenterOffsetX: CGFloat
+        let safeCenterOffsetY: CGFloat
+
+        if abs(anchorLocalOffset.x) < 0.001 {
+            safeCenterOffsetX = 0
+        } else {
+            safeCenterOffsetX = anchorLocalOffset.x < 0 ? newHalfWidth : -newHalfWidth
         }
 
-        // 计算新的对角线向量
-        let dx = currentPoint.x - anchorInSuperview.x
-        let dy = currentPoint.y - anchorInSuperview.y
+        if abs(anchorLocalOffset.y) < 0.001 {
+            safeCenterOffsetY = 0
+        } else {
+            safeCenterOffsetY = anchorLocalOffset.y < 0 ? newHalfHeight : -newHalfHeight
+        }
 
-        // 考虑旋转的影响，将拖动向量转换到未旋转的坐标系
-        let cos_neg_r = cos(-initialRotation)
-        let sin_neg_r = sin(-initialRotation)
-        let localDx = dx * cos_neg_r - dy * sin_neg_r
-        let localDy = dx * sin_neg_r + dy * cos_neg_r
-
-        // 计算新尺寸（保持最小尺寸）
-        var newWidth = abs(localDx)
-        var newHeight = abs(localDy)
-        newWidth = max(newWidth, 20)
-        newHeight = max(newHeight, 20)
-
-        // 计算新的中心点
-        let newCenterX = anchorInSuperview.x + (currentPoint.x - anchorInSuperview.x) / 2
-        let newCenterY = anchorInSuperview.y + (currentPoint.y - anchorInSuperview.y) / 2
-
-        // 更新 frame
-        frame = CGRect(
-            x: newCenterX - newWidth / 2,
-            y: newCenterY - newHeight / 2,
-            width: newWidth,
-            height: newHeight
+        // 将新中心偏移旋转回世界坐标系
+        let newCenter = CGPoint(
+            x: anchorInSuperview.x + safeCenterOffsetX * cosR - safeCenterOffsetY * sinR,
+            y: anchorInSuperview.y + safeCenterOffsetX * sinR + safeCenterOffsetY * cosR
         )
 
-        // 保持旋转角度不变
+        // Step 6: 更新视图（使用 bounds + center）
+        bounds = CGRect(x: 0, y: 0, width: newWidth, height: newHeight)
+        center = newCenter
+
+        // Step 7: 保持旋转角度不变
         transform = CGAffineTransform(rotationAngle: initialRotation)
 
-        // 更新路径和控制点
+        // Step 8: 更新内容
         updateShapePath()
         updateSelectionAppearance()
     }
 
-    private func handleRotation(currentPoint: CGPoint) {
-        let centerInSuperview = CGPoint(
-            x: frame.midX,
-            y: frame.midY
+    /// 改进的旋转方法
+    private func handleRotationImproved(currentPoint: CGPoint) {
+        // 关键: 使用 initialCenter 而非 frame.mid
+        // 因为 frame 在有 transform 时是不可靠的
+
+        // 计算当前触摸角度
+        let currentTouchAngle = atan2(
+            currentPoint.y - initialCenter.y,
+            currentPoint.x - initialCenter.x
         )
 
-        let angle = atan2(
-            currentPoint.y - centerInSuperview.y,
-            currentPoint.x - centerInSuperview.x
-        )
+        // 计算角度增量
+        let deltaAngle = currentTouchAngle - initialTouchAngle
 
-        // 旋转手柄在顶部，所以需要加 90 度偏移
-        let rotation = angle + .pi / 2
+        // 新旋转角度 = 初始旋转 + 增量
+        let newRotation = initialRotation + deltaAngle
 
-        transform = CGAffineTransform(rotationAngle: rotation)
+        // 只修改 transform，不改变 bounds 和 center
+        transform = CGAffineTransform(rotationAngle: newRotation)
+
+        // 更新选中外观 (控制点位置需要随旋转更新)
         updateSelectionAppearance()
+    }
+
+    /// 计算锚点相对于中心的偏移量
+    private func anchorOffset(for corner: ControlHandle) -> CGPoint {
+        let halfWidth = initialBounds.width / 2
+        let halfHeight = initialBounds.height / 2
+
+        switch corner {
+        case .topLeft:
+            return CGPoint(x: -halfWidth, y: -halfHeight)
+        case .topRight:
+            return CGPoint(x: halfWidth, y: -halfHeight)
+        case .bottomRight:
+            return CGPoint(x: halfWidth, y: halfHeight)
+        case .bottomLeft:
+            return CGPoint(x: -halfWidth, y: halfHeight)
+        case .rotation:
+            return .zero
+        }
+    }
+
+    /// 计算控制点（拖动的那个角）相对于中心的偏移量
+    private func handleOffset(for handle: ControlHandle) -> CGPoint {
+        let halfWidth = initialBounds.width / 2
+        let halfHeight = initialBounds.height / 2
+
+        switch handle {
+        case .topLeft:
+            return CGPoint(x: -halfWidth, y: -halfHeight)
+        case .topRight:
+            return CGPoint(x: halfWidth, y: -halfHeight)
+        case .bottomRight:
+            return CGPoint(x: halfWidth, y: halfHeight)
+        case .bottomLeft:
+            return CGPoint(x: -halfWidth, y: halfHeight)
+        case .rotation:
+            return .zero
+        }
     }
 
     // MARK: - Public Methods
@@ -498,4 +651,42 @@ class SelectableShapeView: UIView {
             updateSelectionAppearance()
         }
     }
+    
+    // MARK: - Private Helper Functions
+    
+    /// Convert hex string to UIColor
+    private func UIColor_fromHex(_ hex: String) -> UIColor {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        
+        return UIColor(
+            red: CGFloat(r) / 255,
+            green: CGFloat(g) / 255,
+            blue: CGFloat(b) / 255,
+            alpha: CGFloat(a) / 255
+        )
+    }
+    
+    // MARK: - UIGestureRecognizerDelegate
+    
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension SelectableShapeView: UIGestureRecognizerDelegate {
 }

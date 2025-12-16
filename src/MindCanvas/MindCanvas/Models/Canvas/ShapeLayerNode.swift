@@ -49,18 +49,14 @@ struct ShapeLayerNode: Codable, Identifiable {
         isFilled: Bool? = nil,
         zIndex: Int? = nil
     ) -> ShapeLayerNode {
-        var node = self
-        if let frame = frame { node.frame = frame }
-        if let rotation = rotation { node.rotation = rotation }
-        // 其他属性由于是 let，需要创建新实例
         return ShapeLayerNode(
-            frame: node.frame,
-            shapeType: node.shapeType,
-            color: color ?? node.color,
-            lineWidth: lineWidth ?? node.lineWidth,
-            isFilled: isFilled ?? node.isFilled,
-            rotation: node.rotation,
-            zIndex: zIndex ?? node.zIndex
+            frame: frame ?? self.frame,
+            shapeType: self.shapeType,
+            color: color ?? self.color,
+            lineWidth: lineWidth ?? self.lineWidth,
+            isFilled: isFilled ?? self.isFilled,
+            rotation: rotation ?? self.rotation,
+            zIndex: zIndex ?? self.zIndex
         )
     }
 }

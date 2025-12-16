@@ -9,14 +9,16 @@ struct ShapeDrawingView: View {
     let isFilled: Bool
     
     var body: some View {
-        Path { path in
+        Canvas { context, size in
+            var path = Path()
+
             switch shapeType {
             case .rectangle:
                 path.addRect(rect)
-                
+
             case .roundedRectangle:
                 path.addRoundedRect(in: rect, cornerSize: CGSize(width: 12, height: 12))
-                
+
             case .circle:
                 let diameter = min(rect.width, rect.height)
                 let circleRect = CGRect(
@@ -26,85 +28,55 @@ struct ShapeDrawingView: View {
                     height: diameter
                 )
                 path.addEllipse(in: circleRect)
-                
+
             case .triangle:
                 path.move(to: CGPoint(x: rect.midX, y: rect.minY))
                 path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
                 path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
                 path.closeSubpath()
-                
+
             case .diamond:
                 path.move(to: CGPoint(x: rect.midX, y: rect.minY))
                 path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
                 path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
                 path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
                 path.closeSubpath()
-                
+
             case .star:
-                createStarPath(in: rect, points: 5, path: &path)
-                
+                addStarPath(to: &path, in: rect, points: 5)
+
+            case .pentagon:
+                addPolygonPath(to: &path, in: rect, sides: 5)
+
             case .hexagon:
-                createPolygonPath(in: rect, sides: 6, path: &path)
-                
+                addPolygonPath(to: &path, in: rect, sides: 6)
+
             case .line, .arrow:
                 path.move(to: CGPoint(x: rect.minX, y: rect.midY))
                 path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
             }
-        }
-        .fill(isFilled ? color : Color.clear)
-        .overlay(
-            Path { path in
-                switch shapeType {
-                case .rectangle:
-                    path.addRect(rect)
-                    
-                case .roundedRectangle:
-                    path.addRoundedRect(in: rect, cornerSize: CGSize(width: 12, height: 12))
-                    
-                case .circle:
-                    let diameter = min(rect.width, rect.height)
-                    let circleRect = CGRect(
-                        x: rect.midX - diameter/2,
-                        y: rect.midY - diameter/2,
-                        width: diameter,
-                        height: diameter
-                    )
-                    path.addEllipse(in: circleRect)
-                    
-                case .triangle:
-                    path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-                    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-                    path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-                    path.closeSubpath()
-                    
-                case .diamond:
-                    path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-                    path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-                    path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-                    path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-                    path.closeSubpath()
-                    
-                case .star:
-                    createStarPath(in: rect, points: 5, path: &path)
-                    
-                case .hexagon:
-                    createPolygonPath(in: rect, sides: 6, path: &path)
-                    
-                case .line, .arrow:
-                    path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-                    path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-                }
+
+            // 填充（如果需要）
+            if isFilled {
+                context.fill(path, with: .color(color))
             }
-            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-        )
-        .position(x: rect.midX, y: rect.midY)
+
+            // 描边
+            context.stroke(
+                path,
+                with: .color(color),
+                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+            )
+        }
+        // 关键: 不使用 .position()，Canvas 默认覆盖整个父视图
+        // rect 参数已经包含了正确的位置信息
     }
     
-    private func createStarPath(in rect: CGRect, points: Int, path: inout Path) {
+    private func addStarPath(to path: inout Path, in rect: CGRect, points: Int) {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let outerRadius = min(rect.width, rect.height) / 2
         let innerRadius = outerRadius * 0.4
-        
+
         for i in 0..<(points * 2) {
             let radius = i % 2 == 0 ? outerRadius : innerRadius
             let angle = CGFloat(i) * .pi / CGFloat(points) - .pi / 2
@@ -120,11 +92,11 @@ struct ShapeDrawingView: View {
         }
         path.closeSubpath()
     }
-    
-    private func createPolygonPath(in rect: CGRect, sides: Int, path: inout Path) {
+
+    private func addPolygonPath(to path: inout Path, in rect: CGRect, sides: Int) {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let radius = min(rect.width, rect.height) / 2
-        
+
         for i in 0..<sides {
             let angle = CGFloat(i) * 2 * .pi / CGFloat(sides) - .pi / 2
             let point = CGPoint(

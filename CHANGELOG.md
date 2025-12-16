@@ -1,5 +1,259 @@
 # 开发记录
 
+## 2025-12-16 - 图形绘制偏移与缩放跳变修复方案 v6.0 实施完成 ✅
+
+### 概述
+成功实施图形绘制偏移与缩放跳变修复方案 v6.0，解决了形状预览位置偏移和缩放操作第一帧跳变的问题，显著提升了图形工具的用户体验。
+
+### 核心修复
+
+#### 1. 形状预览偏移问题 ✅
+**问题**：用户选择图形工具（如矩形）在画布上拖动绘制时，绘制过程中图形预览位置与手指位置存在偏移，手指释放后图形回到正确位置
+
+**根因**：
+- SwiftUI `.position()` 修饰符将视图的**中心点**放置在指定坐标
+- `ShapeDrawingView` 内部的 Path 已经基于 `rect` 的原点绘制
+- 造成了双重定位：Path 自身有位置 + position 又将中心移动
+
+**解决方案**：
+- 重写 `ShapeDrawingView.swift`，使用 `Canvas` 替代 `Path` + `.position()`
+- Canvas 视图覆盖整个父视图区域，Path 在其中按绝对坐标绘制
+- 移除 `.position(x: rect.midX, y: rect.midY)` 修饰符
+
+**代码变更**：
+```swift
+// 旧代码 - 使用 Path + .position()
+Path { path in ... }
+.position(x: rect.midX, y: rect.midY)
+
+// 新代码 - 使用 Canvas
+Canvas { context, size in
+    var path = Path()
+    // 直接在 rect 位置绘制
+    context.stroke(path, with: .color(color))
+}
+```
+
+#### 2. 缩放跳变问题 ✅
+**问题**：用户选中形状后点击任意角点控制点开始拖动，形状会先突然放大一定比例，然后才开始跟随手指缩放
+
+**根因**：
+- 缩放逻辑使用 `currentPoint - anchorInSuperview` 计算新尺寸
+- 第一帧时，`currentPoint` 就是 `dragStartPoint`（手指刚触碰角点的位置）
+- 角点位置和锚点位置之间的距离就是初始尺寸的一半
+- 如果触摸点不在角点的精确中心，会导致计算出的尺寸偏大
+
+**解决方案**：
+- 添加 `initialHandlePosition` 属性保存拖动开始时的角点实际位置
+- 实现增量式缩放计算：`新尺寸 = 初始尺寸 + 拖动增量`
+- 使用 `currentPoint - dragStartPoint` 计算拖动增量，避免第一帧跳变
+
+**代码变更**：
+```swift
+// 新增属性
+private var initialHandlePosition: CGPoint = .zero
+
+// 修复后的缩放方法
+private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
+    // Step 2: 计算拖动增量（关键修复：使用 dragStartPoint 而非 anchorInSuperview）
+    let dragDeltaX = currentPoint.x - dragStartPoint.x
+    let dragDeltaY = currentPoint.y - dragStartPoint.y
+    
+    // Step 4: 计算新尺寸（增量计算，不是绝对计算）
+    var newWidth = initialBounds.width + localDeltaX * widthSign
+    var newHeight = initialBounds.height + localDeltaY * heightSign
+}
+```
+
+#### 3. 箭头默认颜色统一 ✅
+**问题**：箭头默认颜色为蓝色（#007AFF），与形状工具的黑色不一致
+
+**解决方案**：
+- 修改 `CanvasStateManager.swift` 中的 `arrowColor` 默认值
+- 从蓝色改为黑色（#000000），与形状工具保持一致
+
+### 修改文件
+- `Views/Editor/Canvas/ShapeDrawingView.swift` - 重写为使用 Canvas
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 实现增量式缩放计算
+- `ViewModels/CanvasStateManager.swift` - 统一箭头默认颜色
+
+### 用户体验提升
+- ✅ 形状绘制过程中预览位置与手指位置精确一致
+- ✅ 释放手指后形状无跳动，保持在预期位置
+- ✅ 缩放操作平滑，第一帧无跳变
+- ✅ 箭头默认颜色与形状工具统一
+
+### 技术要点总结
+
+#### Canvas vs Path + Position
+```swift
+// 旧方案：双重定位导致偏移
+Path { ... }
+.position(x: rect.midX, y: rect.midY)
+
+// 新方案：Canvas 直接绘制
+Canvas { context, size in
+    // Path 直接在 rect 位置绘制，无需额外定位
+}
+```
+
+#### 增量式缩放计算
+```swift
+// 保存初始状态
+initialBounds = bounds
+dragStartPoint = gesture.location(in: superview)
+
+// 增量计算避免跳变
+let dragDeltaX = currentPoint.x - dragStartPoint.x
+let newWidth = initialBounds.width + localDeltaX * widthSign
+```
+
+---
+
+## 2025-12-16 - 图形工具清理与交互优化方案 v5.0 实施完成 ✅
+
+### 概述
+成功实施图形工具清理与交互优化方案 v5.0，解决了工具栏冗余、图形颜色不一致、控制点交互不流畅等问题，显著提升了用户体验。
+
+### 核心修复
+
+#### 1. 工具栏清理 ✅
+**问题**：底部工具栏显示了 9 个工具，存在冗余和未实现的工具
+
+**解决方案**：
+- 修改 `CanvasTool.swift` 的 `isMainToolbarTool` 属性
+- 移除 `arrow` 工具（已整合到图形工具选择器）
+- 暂时隐藏 `text` 和 `annotation` 工具（功能未完整实现）
+- 工具栏现在只显示 6 个核心工具：选择、平移、画笔、橡皮擦、图形、图片
+
+**修改前后对比**：
+```
+修改前：[选择] [平移] [画笔] [橡皮擦] [箭头] [矩形] [文字] [标注] [图片]
+修改后：[选择] [平移] [画笔] [橡皮擦] [图形] [图片]
+```
+
+#### 2. 统一图形线条颜色 ✅
+**问题**：形状默认颜色为 `#007AFF` (系统蓝色)，与画笔默认颜色 (黑色) 不一致
+
+**解决方案**：
+- 修改 `CanvasStateManager.swift` 中的默认颜色值
+- 将 `rectangleColor` 重命名为 `shapeStrokeColor`，更准确
+- 将默认值从蓝色改为黑色 (`#000000`)
+- 调整默认线宽从 3pt 到 2pt，更细腻
+
+**代码变更**：
+```swift
+// 旧代码
+var rectangleColor: String = "#007AFF"
+var rectangleLineWidth: CGFloat = 3
+
+// 新代码
+var shapeStrokeColor: String = "#000000"
+var shapeLineWidth: CGFloat = 2
+```
+
+#### 3. 重构控制点交互系统 ✅
+**问题**：
+- 缩放不丝滑：拖动角点时，形状尺寸变化跳跃，难以精准控制
+- 旋转改变尺寸：旋转时形状尺寸会意外改变
+
+**解决方案**：
+完全重写 `SelectableShapeView.swift` 的核心交互方法：
+
+**技术改进**：
+- 使用 `center` + `bounds` 替代 `frame`，避免 transform 时的不可靠性
+- 实现增量计算：基于初始状态做差值，避免累积误差
+- 改进旋转逻辑：使用初始角度 + 增量，而非绝对角度
+- 优化锚点计算：清晰的偏移量 + 旋转矩阵变换
+
+**核心方法重构**：
+```swift
+// 改进的缩放方法
+private func handleResizeImproved(handle: ControlHandle, currentPoint: CGPoint) {
+    // Step 1: 计算初始状态下锚点的位置 (考虑旋转)
+    // Step 2: 计算拖动向量
+    // Step 3: 将拖动向量逆旋转，得到在未旋转坐标系中的位移
+    // Step 4: 计算新尺寸 (保持符号，根据拖动方向确定)
+    // Step 5: 计算新的中心点 (锚点固定，中心点移动)
+    // Step 6: 更新视图 (使用 bounds + center，不改变 transform)
+    // Step 7: 保持旋转角度不变
+    // Step 8: 更新内容
+}
+
+// 改进的旋转方法
+private func handleRotationImproved(currentPoint: CGPoint) {
+    // 计算当前触摸角度
+    // 计算角度增量
+    // 新旋转角度 = 初始旋转 + 增量
+    // 只修改 transform，不改变 bounds 和 center
+}
+```
+
+#### 4. 添加 pentagon 形状支持 ✅
+**问题**：Switch 语句不完整导致编译错误
+
+**解决方案**：
+- 在 `ShapeType.swift` 中添加 `pentagon` 枚举值
+- 更新 `displayName` 和 `iconName`
+- 修复 `ShapeDrawingView.swift` 中的两个 switch 语句，添加 pentagon 处理
+
+### 修复的编译错误
+
+1. **Type 'ShapeType' has no member 'pentagon'**
+   - 在 `ShapeType` 枚举中添加了 `pentagon` 案例
+
+2. **Missing arguments for parameters 'x', 'y' in call**
+   - 修复 `CGRect(origin: .zero)` 语法为 `CGRect(x: 0, y: 0, width: ..., height: ...)`
+
+3. **Overriding declaration requires an 'override' keyword**
+   - 修复文件结构，将 `UIColor_fromHex` 函数移到类内部
+   - 将 `gestureRecognizerShouldBegin` 方法移到主类中
+
+### 修改文件
+- `Models/Canvas/CanvasTool.swift` - 工具栏清理
+- `Models/Canvas/ShapeType.swift` - 添加 pentagon 形状
+- `ViewModels/CanvasStateManager.swift` - 统一颜色配置
+- `Views/Editor/NativeEditorView.swift` - 更新变量名引用
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 完全重构控制点交互
+- `Views/Editor/Canvas/ShapeDrawingView.swift` - 添加 pentagon 支持
+- `Models/Canvas/ShapeLayerNode.swift` - 修复 updated 方法
+
+### 用户体验提升
+- ✅ 工具栏更简洁，只显示 6 个核心工具
+- ✅ 新建形状默认为黑色边框，与画笔颜色一致
+- ✅ 形状缩放更平滑，无跳跃或抖动
+- ✅ 旋转时形状尺寸保持不变
+- ✅ 支持 pentagon（五边形）形状绘制
+- ✅ 所有交互操作支持撤销/恢复
+
+### 技术要点总结
+
+#### 视图状态管理改进
+```swift
+// 之前：使用 frame（有 transform 时不可靠）
+frame = CGRect(x: ..., y: ..., width: ..., height: ...)
+
+// 现在：使用 center + bounds（更可靠）
+bounds = CGRect(x: 0, y: 0, width: newWidth, height: newHeight)
+center = newCenter
+transform = CGAffineTransform(rotationAngle: rotation)
+```
+
+#### 增量计算避免累积误差
+```swift
+// 保存初始状态
+initialCenter = center
+initialBounds = bounds
+initialRotation = atan2(transform.b, transform.a)
+
+// 基于增量计算
+let dx = currentPoint.x - dragStartPoint.x
+let dy = currentPoint.y - dragStartPoint.y
+center = CGPoint(x: initialCenter.x + dx, y: initialCenter.y + dy)
+```
+
+---
+
 ## 2025-12-16 - 图形工具关键问题修复方案 v4.0 实施完成 ✅
 
 ### 概述
@@ -605,7 +859,7 @@ objectLayerView.layoutIfNeeded()
 ```
 
 **参考资源**：
-- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubviews-b0075b3bb441)
+- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubpaths-b0075b3bb441)
 
 #### 问题 3: clipsToBounds 设置 ⚠️
 **当前代码**：
@@ -826,7 +1080,7 @@ objectLayerView.layoutIfNeeded()
 - [PKCanvasView 自定义子视图最佳实践](https://www.appsloveworld.com/swift/100/251/sharing-pkcanvasview-with-a-subview-as-an-image)
 - [PKCanvasView 手势冲突问题](https://developer.apple.com/forums/thread/719944)
 - [insertSubview vs addSubview 区别](https://bugsdb.com/_en/debug/3163e42f3717b206bceec199a73c909c)
-- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubviews-b0075b3bb441)
+- [iOS 视图布局生命周期](https://sabapathy7.medium.com/uikit-setneedslayout-vs-layoutifneeded-vs-layoutsubpaths-b0075b3bb441)
 
 ---
 
@@ -1070,7 +1324,6 @@ case .pan:
 1. **PKDrawing 数据规范化问题**：`PKDrawing(data:)` 初始化后，PencilKit 内部会对数据进行"规范化"，导致字节数变化。撤销加载旧数据后，`strokeStartDrawingData` 仍然是旧的字节数，但实际画布数据已经变成规范化后的字节数。
 
 2. **UndoManager 清除不彻底**：`removeAllActions()` 只清空了 UndoManager 的操作栈，但**没有清除 PKCanvasView 内部缓存的 stroke 数据**。PencilKit 在内部维护了一个 stroke buffer，当直接设置 `pencilCanvas.drawing` 时，这个缓存没有被正确同步。
-
 3. **Stroke 标识符混乱**：日志中的 `retrieving stroke identifier gave nil or invalid result` 错误表明 PencilKit 内部的 stroke 标识符系统出现问题。撤销后，这些标识符没有被正确清理，导致新绘制时与旧的stroke数据发生错误关联。
 
 ### 解决方案

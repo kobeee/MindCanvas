@@ -81,8 +81,12 @@ enum CanvasTool: String, CaseIterable, Identifiable {
     /// 是否在主工具栏显示（过滤预留工具）
     var isMainToolbarTool: Bool {
         switch self {
-        case .select, .pan, .pen, .eraser, .arrow, .rectangle, .text, .annotation, .image:
+        case .select, .pan, .pen, .eraser, .rectangle, .image:
             return true
+        case .arrow:  // arrow 作为 rectangle 的子类型，不独立显示
+            return false
+        case .text, .annotation:  // 功能未完整实现，暂不显示
+            return false
         }
     }
     

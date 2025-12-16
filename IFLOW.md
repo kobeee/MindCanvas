@@ -276,7 +276,7 @@ private var projects: [Project]
 - 所有文档使用Markdown格式
 - 使用简洁、清晰的语言，文档内容应保持最新
 - 使用中文作为主要语言
-- 开发记录使用 `CHANGELOG.md`，每次以换行追加到文件头部
+- 开发记录使用 `CHANGELOG.md`，每次以换行追加到文件头部，**除非明确要求整合CHANGELOG的内容，否则不允许以修改的方式覆盖CHANGELOG，CHANGELOG就是要记录过程的**
 - 在 Plan 模式下产出的方案需保存到 `docs/design/` 目录
 
 ## 重要文件路径

@@ -398,9 +398,9 @@ private struct NativeCanvasContainer: View {
                             ShapeDrawingView(
                                 rect: rect,
                                 shapeType: viewModel.selectedShapeType,
-                                color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
-                                lineWidth: viewModel.stateManager.rectangleLineWidth,
-                                isFilled: viewModel.stateManager.rectangleIsFilled
+                                color: Color.fromHex(viewModel.stateManager.shapeStrokeColor) ?? .blue,
+                                lineWidth: viewModel.stateManager.shapeLineWidth,
+                                isFilled: viewModel.stateManager.shapeIsFilled
                             )
                         }
                         
@@ -410,9 +410,9 @@ private struct NativeCanvasContainer: View {
                             startPoint: $rectangleStartPoint,
                             endPoint: $rectangleEndPoint,
                             shapeType: viewModel.selectedShapeType,
-                            color: Color.fromHex(viewModel.stateManager.rectangleColor) ?? .blue,
-                            lineWidth: viewModel.stateManager.rectangleLineWidth,
-                            isFilled: viewModel.stateManager.rectangleIsFilled
+                            color: Color.fromHex(viewModel.stateManager.shapeStrokeColor) ?? .blue,
+                            lineWidth: viewModel.stateManager.shapeLineWidth,
+                            isFilled: viewModel.stateManager.shapeIsFilled
                         ) { viewportRect in
                             guard let canvasView = viewModel.canvasView else { return }
 
@@ -429,9 +429,9 @@ private struct NativeCanvasContainer: View {
                             let shape = ShapeLayerNode(
                                 frame: contentRect,
                                 shapeType: viewModel.selectedShapeType,
-                                color: viewModel.stateManager.rectangleColor,
-                                lineWidth: viewModel.stateManager.rectangleLineWidth,
-                                isFilled: viewModel.stateManager.rectangleIsFilled,
+                                color: viewModel.stateManager.shapeStrokeColor,
+                                lineWidth: viewModel.stateManager.shapeLineWidth,
+                                isFilled: viewModel.stateManager.shapeIsFilled,
                                 zIndex: canvasView.getShapeLayerManager().getNextZIndex()
                             )
                             canvasView.addShape(shape)

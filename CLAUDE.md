@@ -247,6 +247,7 @@ final class SomeViewModel {
 ### 开发记录
 - 使用 `CHANGELOG.md` 记录开发内容
 - **每次以换行追加到文件头部**（最新记录在最上面）
+- **除非明确要求整合CHANGELOG的内容，否则不允许以修改的方式覆盖CHANGELOG，CHANGELOG就是要记录过程的**
 - 结构脉络清晰，区分模块功能，记录上下文背景和思考过程
 
 ### Mermaid 图表规则

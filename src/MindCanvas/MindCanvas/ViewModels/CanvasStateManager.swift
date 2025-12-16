@@ -243,7 +243,7 @@ class CanvasStateManager {
     // MARK: - 箭头工具
     
     /// 箭头颜色
-    var arrowColor: String = "#007AFF"
+    var arrowColor: String = "#000000"
     
     /// 箭头线宽
     var arrowLineWidth: CGFloat = 3
@@ -263,35 +263,35 @@ class CanvasStateManager {
         // TODO: 实现删除所有箭头的撤销支持
     }
     
-    // MARK: - 矩形工具
+    // MARK: - 图形工具
     
-    /// 矩形颜色
-    var rectangleColor: String = "#007AFF"
+    /// 图形描边颜色 - 与画笔保持一致，默认黑色
+    var shapeStrokeColor: String = "#000000"
     
-    /// 矩形线宽
-    var rectangleLineWidth: CGFloat = 3
+    /// 图形线宽
+    var shapeLineWidth: CGFloat = 2
     
-    /// 矩形是否填充
-    var rectangleIsFilled: Bool = false
+    /// 图形是否填充
+    var shapeIsFilled: Bool = false
     
-    /// 设置矩形颜色
-    func setRectangleColor(_ color: String) {
-        rectangleColor = color
+    /// 设置图形颜色
+    func setShapeStrokeColor(_ color: String) {
+        shapeStrokeColor = color
     }
     
-    /// 设置矩形线宽
-    func setRectangleLineWidth(_ width: CGFloat) {
-        rectangleLineWidth = width
+    /// 设置图形线宽
+    func setShapeLineWidth(_ width: CGFloat) {
+        shapeLineWidth = width
     }
     
-    /// 设置矩形是否填充
-    func setRectangleIsFilled(_ filled: Bool) {
-        rectangleIsFilled = filled
+    /// 设置图形是否填充
+    func setShapeIsFilled(_ filled: Bool) {
+        shapeIsFilled = filled
     }
     
-    /// 删除所有矩形（支持撤销）
-    func clearAllRectangles() {
-        // TODO: 实现删除所有矩形的撤销支持
+    /// 删除所有图形（支持撤销）
+    func clearAllShapes() {
+        // TODO: 实现删除所有图形的撤销支持
     }
     
     // MARK: - 文字工具
