@@ -16,7 +16,7 @@ struct NativeEditorView: View {
     // 图片选择器
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showPhotoPicker = false
-    @State private var showImageSourceMenu = false
+    @State private var showImageSourcePicker = false
     @State private var showCamera = false
     
     init(project: Project) {
@@ -74,7 +74,7 @@ struct NativeEditorView: View {
             NativeCanvasContainer(
                 viewModel: viewModel,
                 onImageImport: {
-                    showImageSourceMenu = true
+                    showImageSourcePicker = true
                 }
             )
             
@@ -176,23 +176,131 @@ struct NativeEditorView: View {
                 }
             }
         }
-        // 图片来源选择菜单
-        .confirmationDialog("选择图片来源", isPresented: $showImageSourceMenu) {
-            Button("从相册选择") {
-                showPhotoPicker = true
-            }
-            if CameraImagePicker.isCameraAvailable {
-                Button("拍照") {
-                    showCamera = true
-                }
-            }
-            Button("取消", role: .cancel) { }
-        }
+        // 图片选择器（只支持图片，自动过滤视频）
         .photosPicker(
             isPresented: $showPhotoPicker,
             selection: $selectedPhotoItem,
-            matching: .images
+            matching: .images,
+            photoLibrary: .shared()
         )
+        // 自定义图片来源选择浮窗
+        .sheet(isPresented: $showImageSourcePicker) {
+            NavigationView {
+                VStack(spacing: 0) {
+                    // 标题栏
+                    HStack {
+                        Button("取消") {
+                            showImageSourcePicker = false
+                        }
+                        Spacer()
+                        Text("选择图片来源")
+                            .font(.headline)
+                        Spacer()
+                        Color.clear.frame(width: 60) // 平衡布局
+                    }
+                    .padding()
+                    .background(.regularMaterial)
+                    
+                    // 内容区域
+                    VStack(spacing: 20) {
+                        Spacer()
+                        
+                        // 选项按钮
+                        HStack(spacing: 20) {
+                            // 相册按钮
+                            Button {
+                                showImageSourcePicker = false
+                                showPhotoPicker = true
+                            } label: {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "photo.on.rectangle")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 80, height: 80)
+                                        .background(.blue.opacity(0.1))
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    
+                                    Text("从相册选择")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    
+                                    Text("选择已有照片")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            // 拍照按钮（开发阶段强制显示，实际设备会检查相机可用性）
+                            #if DEBUG
+                            Button {
+                                showImageSourcePicker = false
+                                showCamera = true
+                            } label: {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "camera")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(.green)
+                                        .frame(width: 80, height: 80)
+                                        .background(.green.opacity(0.1))
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    
+                                    Text("拍照")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    
+                                    Text("使用相机拍摄")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                            #else
+                            if CameraImagePicker.isCameraAvailable {
+                                Button {
+                                    showImageSourcePicker = false
+                                    showCamera = true
+                                } label: {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "camera")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(.green)
+                                            .frame(width: 80, height: 80)
+                                            .background(.green.opacity(0.1))
+                                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        
+                                        Text("拍照")
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        
+                                        Text("使用相机拍摄")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            #endif
+                        }
+                        .padding(.horizontal, 40)
+                        
+                        Spacer()
+                        
+                        // 提示信息
+                        Text("仅支持图片格式，视频文件将被自动过滤")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 30)
+                    }
+                }
+                .background(Color(.systemGroupedBackground))
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let item = newItem else { return }
             Task {

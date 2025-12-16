@@ -181,6 +181,36 @@ private struct PenToolButton: View {
     }
 }
 
+// MARK: - 图片工具按钮（带弹出选择器）
+
+private struct ImageToolButton: View {
+    let tool: CanvasTool
+    let isSelected: Bool
+    @Binding var showPicker: Bool
+    let onSelect: () -> Void
+    let onImageImport: () -> Void
+
+    var body: some View {
+        Button {
+            // 直接触发图片导入
+            onImageImport()
+        } label: {
+            Image(systemName: tool.iconName)
+                .font(.system(size: 22))
+                .foregroundColor(isSelected ? .white : Theme.Colors.secondaryText)
+                .frame(width: 40, height: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                        .fill(isSelected ? Theme.Colors.brandBlue : Color.clear)
+                )
+                .scaleEffect(isSelected ? 1.05 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
+        .help(tool.displayName)
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
