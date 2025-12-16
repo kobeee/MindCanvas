@@ -23,7 +23,7 @@ enum CanvasTool: String, CaseIterable, Identifiable {
         case .pan:
             return "hand.raised"
         case .pen:
-            return "pencil"
+            return "paintbrush.pointed"
         case .eraser:
             return "eraser"
         case .arrow:

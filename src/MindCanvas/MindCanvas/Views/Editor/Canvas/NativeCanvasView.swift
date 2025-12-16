@@ -51,8 +51,9 @@ class NativeCanvasView: UIView {
         }
     }
 
-    /// 绘图工具 (画笔)
-    private let inkingTool = PKInkingTool(.pen, color: .black, width: 2)
+    // 画笔颜色和线宽（支持动态设置）
+    var penColor: UIColor = .black
+    var penLineWidth: CGFloat = 4
 
     /// 橡皮擦工具
     private let eraserTool = PKEraserTool(.vector)
@@ -146,7 +147,7 @@ class NativeCanvasView: UIView {
         // 配置 PKCanvasView - 关键：直接使用其内置的缩放功能
         pencilCanvas.backgroundColor = .white
         pencilCanvas.isOpaque = true
-        pencilCanvas.tool = inkingTool
+        pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
 
         // 设置画布大小 - PKCanvasView 本身就是 UIScrollView
@@ -261,6 +262,17 @@ class NativeCanvasView: UIView {
         removeAllLayers()
         onCanvasUpdated?()
     }
+    
+    /// 更新画笔设置
+    func updatePenSettings(color: UIColor, width: CGFloat) {
+        penColor = color
+        penLineWidth = width
+
+        // 如果当前是画笔工具，立即更新
+        if currentTool == .pen {
+            pencilCanvas.tool = PKInkingTool(.pen, color: color, width: width)
+        }
+    }
 
     // MARK: - Layer Management
 
@@ -302,12 +314,27 @@ class NativeCanvasView: UIView {
         }
     }
 
-    /// 移除所有图层
+    /// 移除所有图层（包括图片、箭头、形状）
     func removeAllLayers() {
+        // 1. 清空图层数据
         layers.removeAll()
+
+        // 2. 清理图片视图
         imageViews.values.forEach { $0.removeFromSuperview() }
         imageViews.removeAll()
+
+        // 3. 清理箭头视图
+        arrowViews.values.forEach { $0.removeFromSuperview() }
+        arrowViews.removeAll()
+
+        // 4. 清理形状视图
+        shapeViews.values.forEach { $0.removeFromSuperview() }
+        shapeViews.removeAll()
+
+        // 5. 清空选中状态
         selectedNodeID = nil
+
+        // 6. 通知更新
         onLayersUpdated?(layers)
     }
 
@@ -568,7 +595,7 @@ class NativeCanvasView: UIView {
 
         case .pen:
             pencilCanvas.isUserInteractionEnabled = true
-            pencilCanvas.tool = inkingTool
+            pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
             pencilCanvas.drawingPolicy = .anyInput
             pencilCanvas.drawingGestureRecognizer.isEnabled = true
             pencilCanvas.isScrollEnabled = false
@@ -690,7 +717,7 @@ class NativeCanvasView: UIView {
     private func setupPencilCanvasOnly() {
         pencilCanvas.backgroundColor = .white
         pencilCanvas.isOpaque = true
-        pencilCanvas.tool = inkingTool
+        pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
 
         pencilCanvas.contentSize = canvasSize
@@ -722,7 +749,7 @@ class NativeCanvasView: UIView {
     private func setupPencilCanvas() {
         pencilCanvas.backgroundColor = .white
         pencilCanvas.isOpaque = true
-        pencilCanvas.tool = inkingTool
+        pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
         
         // 设置画布大小

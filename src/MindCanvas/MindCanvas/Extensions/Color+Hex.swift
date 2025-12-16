@@ -27,4 +27,15 @@ extension Color {
             opacity: Double(a) / 255
         )
     }
+    
+    /// 将 Color 转换为十六进制字符串
+    func toHex() -> String? {
+        guard let components = UIColor(self).cgColor.components else { return nil }
+
+        let r = Int(components[0] * 255)
+        let g = Int(components[1] * 255)
+        let b = Int(components[2] * 255)
+
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
 }

@@ -1,5 +1,129 @@
 # 开发记录
 
+## 2025-12-16 - 画布工具优化方案 v1.0 实施完成 ✅
+
+### 概述
+成功实施画布工具优化方案 v1.0，解决了清屏操作不清理图形对象、画笔工具体验缺失等问题，显著提升了用户体验。
+
+### 核心修复
+
+#### 1. 清屏功能修复 ✅
+**问题**：清屏操作只清理了图片视图，箭头和形状视图仍然残留
+**根因**：`removeAllLayers()` 方法只处理了 `imageViews` 字典，遗漏了 `arrowViews` 和 `shapeViews`
+
+**解决方案**：
+- 重写 `removeAllLayers()` 方法，添加完整的清理逻辑
+- 清理所有视图字典：`imageViews`、`arrowViews`、`shapeViews`
+- 确保清屏后画布完全空白
+
+**代码变更**：
+```swift
+func removeAllLayers() {
+    // 1. 清空图层数据
+    layers.removeAll()
+    
+    // 2. 清理图片视图
+    imageViews.values.forEach { $0.removeFromSuperview() }
+    imageViews.removeAll()
+    
+    // 3. 清理箭头视图
+    arrowViews.values.forEach { $0.removeFromSuperview() }
+    arrowViews.removeAll()
+    
+    // 4. 清理形状视图
+    shapeViews.values.forEach { $0.removeFromSuperview() }
+    shapeViews.removeAll()
+    
+    // 5. 清空选中状态
+    selectedNodeID = nil
+    
+    // 6. 通知更新
+    onLayersUpdated?(layers)
+}
+```
+
+#### 2. 画笔工具交互优化 ✅
+**问题**：画笔工具缺少笔触大小和颜色选择功能，图标不够直观
+
+**解决方案**：
+- 创建 `PenSettingsPopover.swift` 画笔设置弹出框
+- 支持线宽调节（1-20pt）和颜色选择
+- 实现实时预览效果
+- 更新画笔图标为 `paintbrush.pointed`
+
+**交互设计**：
+- 首次点击画笔工具：切换到画笔模式
+- 再次点击已选中的画笔工具：弹出设置面板
+- 设置变更立即生效，无需确认按钮
+
+#### 3. 动态画笔设置支持 ✅
+**技术改进**：
+- 移除硬编码的 `inkingTool` 属性
+- 添加 `penColor` 和 `penLineWidth` 动态属性
+- 实现 `updatePenSettings()` 方法支持实时更新
+- 所有初始化路径都使用动态创建的 `PKInkingTool`
+
+**数据流设计**：
+```
+PenSettingsPopover → CanvasToolbar → NativeEditorView → CanvasStateManager
+                                                              ↓
+NativeCanvasView ← 绑定更新 ← 设置变更 ← 用户操作
+```
+
+### 新增文件
+- `Views/Editor/Canvas/PenSettingsPopover.swift` - 画笔设置弹出框 UI 组件
+
+### 修改文件
+- `Views/Editor/Canvas/NativeCanvasView.swift` - 清屏修复 + 动态画笔
+- `ViewModels/CanvasStateManager.swift` - 新增画笔属性
+- `Models/Canvas/CanvasTool.swift` - 更新画笔图标
+- `Views/Editor/Canvas/CanvasToolbar.swift` - 添加 PenToolButton
+- `Views/Editor/NativeEditorView.swift` - 数据流绑定
+- `Extensions/Color+Hex.swift` - 添加 toHex 方法
+
+### 用户体验提升
+- ✅ 清屏操作现在会清除所有对象类型（箭头、形状、图片、笔画）
+- ✅ 画笔工具有了专业的设置面板
+- ✅ 支持预设颜色（8种）和自定义颜色选择
+- ✅ 线宽调节带有实时预览
+- ✅ 设置在工具切换后保持
+
+### 技术要点总结
+
+#### 动态画笔工具创建
+```swift
+// 初始化时
+pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
+
+// 设置更新时
+func updatePenSettings(color: UIColor, width: CGFloat) {
+    penColor = color
+    penLineWidth = width
+    if currentTool == .pen {
+        pencilCanvas.tool = PKInkingTool(.pen, color: color, width: width)
+    }
+}
+```
+
+#### 颜色转换支持
+```swift
+// SwiftUI Color → 十六进制字符串
+func toHex() -> String? {
+    guard let components = UIColor(self).cgColor.components else { return nil }
+    let r = Int(components[0] * 255)
+    let g = Int(components[1] * 255)
+    let b = Int(components[2] * 255)
+    return String(format: "#%02X%02X%02X", r, g, b)
+}
+
+// 十六进制字符串 → SwiftUI Color
+static func fromHex(_ hex: String) -> Color? {
+    // 解析并创建 Color
+}
+```
+
+---
+
 ## 2025-12-16 - 图形绘制偏移与缩放跳变修复方案 v6.0 实施完成 ✅
 
 ### 概述

@@ -586,7 +586,28 @@ private struct NativeCanvasContainer: View {
                         onImageImport: onImageImport,
                         onShapeSelected: { shapeType in
                             viewModel.selectedShapeType = shapeType
-                        }
+                        },
+                        penColor: Binding(
+                            get: { Color(hex: viewModel.stateManager.penColor) },
+                            set: { newColor in
+                                viewModel.stateManager.setPenColor(newColor.toHex() ?? "#000000")
+                                // 同步更新 NativeCanvasView
+                                viewModel.canvasView?.updatePenSettings(
+                                    color: UIColor(newColor),
+                                    width: viewModel.stateManager.penLineWidth
+                                )
+                            }
+                        ),
+                        penWidth: Binding(
+                            get: { viewModel.stateManager.penLineWidth },
+                            set: { newWidth in
+                                viewModel.stateManager.setPenLineWidth(newWidth)
+                                viewModel.canvasView?.updatePenSettings(
+                                    color: UIColor(Color(hex: viewModel.stateManager.penColor)),
+                                    width: newWidth
+                                )
+                            }
+                        )
                     )
                     .padding(.bottom, Theme.Spacing.xl)
                 }

@@ -240,6 +240,24 @@ class CanvasStateManager {
         clearUndoRedoStacks()
     }
     
+    // MARK: - 画笔工具
+    
+    /// 画笔颜色（十六进制）
+    var penColor: String = "#000000"
+    
+    /// 画笔线宽
+    var penLineWidth: CGFloat = 4
+    
+    /// 设置画笔颜色
+    func setPenColor(_ color: String) {
+        penColor = color
+    }
+    
+    /// 设置画笔线宽
+    func setPenLineWidth(_ width: CGFloat) {
+        penLineWidth = max(1, min(20, width))  // 限制范围 1-20
+    }
+    
     // MARK: - 箭头工具
     
     /// 箭头颜色
