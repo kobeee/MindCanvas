@@ -178,7 +178,7 @@ extension View {
     
     func primaryButtonStyle() -> some View {
         self
-            .frame(height: Theme.Sizes.buttonHeight)
+            .frame(maxWidth: .infinity, minHeight: Theme.Sizes.buttonHeight)
             .background(Theme.Colors.brandBlue)
             .foregroundColor(.white)
             .cornerRadius(Theme.Shapes.buttonCornerRadius)
@@ -187,7 +187,7 @@ extension View {
     
     func secondaryButtonStyle() -> some View {
         self
-            .frame(height: Theme.Sizes.buttonHeight)
+            .frame(maxWidth: .infinity, minHeight: Theme.Sizes.buttonHeight)
             .background(Theme.Colors.cardBackground)
             .foregroundColor(Theme.Colors.brandBlue)
             .cornerRadius(Theme.Shapes.buttonCornerRadius)

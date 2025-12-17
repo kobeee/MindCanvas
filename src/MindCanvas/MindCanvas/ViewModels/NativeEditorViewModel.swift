@@ -186,33 +186,44 @@ final class NativeEditorViewModel {
     /// 图生图：准备预览（立即截取选框内容，然后弹出确认浮窗）
     @discardableResult
     func prepareImageToImageFlow() -> Bool {
-        guard !isGenerating else { return false }
+        guard !isGenerating else {
+            print("[ImageToImage] Error: Already generating")
+            return false
+        }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            print("[ImageToImage] Error: Prompt is empty")
             flowHintMessage = "请输入生成描述"
             return false
         }
         guard let canvasView else {
+            print("[ImageToImage] Error: canvasView is nil")
             flowHintMessage = "画布尚未就绪"
             return false
         }
         guard stateManager.isMagicFrameVisible else {
+            print("[ImageToImage] Error: Magic frame not visible")
             flowHintMessage = "请先显示选框并框选区域"
             return false
         }
 
         // 视口坐标（magicFrame）-> 画布内容坐标（截图使用 contentRect）
         let viewportRect = stateManager.magicFrame
+        print("[ImageToImage] viewportRect (magicFrame): \(viewportRect)")
+        
         let contentRect = canvasView.contentRect(forViewportRect: viewportRect)
+        print("[ImageToImage] contentRect (after conversion): \(contentRect)")
 
         guard let snapshot = canvasView.captureContentSnapshot(rect: contentRect),
               let imageData = snapshot.pngData() else {
+            print("[ImageToImage] Error: Failed to capture snapshot")
             pendingImageToImagePreview = nil
             pendingImageToImageBase64 = nil
             flowHintMessage = "预览准备失败：选框无效或截图失败（区域过小/越界/渲染失败）"
             return false
         }
 
+        print("[ImageToImage] Snapshot captured: size=\(snapshot.size)")
         pendingImageToImagePreview = snapshot
         pendingImageToImageBase64 = imageData.base64EncodedString()
         flowHintMessage = nil

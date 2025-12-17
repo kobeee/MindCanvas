@@ -64,6 +64,9 @@ struct NativeEditorView: View {
                     Task {
                         await viewModel.publishAsset(asset, title: title)
                     }
+                },
+                onClose: {
+                    dismiss()
                 }
             )
             .frame(width: 300)
@@ -95,21 +98,6 @@ struct NativeEditorView: View {
                 }
             )
             .frame(width: 320)
-        }
-        .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .background(
-                        Circle()
-                            .fill(.black.opacity(0.3))
-                            .frame(width: 32, height: 32)
-                    )
-            }
-            .padding()
         }
         .onAppear {
             viewModel.loadCanvasDocument()
@@ -931,28 +919,45 @@ private struct NativeAssetLibraryView: View {
     let onDelete: (Asset) -> Void
     let onDownload: (Asset) -> Void
     let onPublish: (Asset, String) -> Void
+    let onClose: () -> Void
     
     @State private var showingPublishSheet = false
     @State private var publishTitle = ""
     @State private var assetToPublish: Asset?
-    @State private var selectedPhotoItem: PhotosPickerItem?
     
     var body: some View {
         VStack(spacing: 0) {
-            // 头部工具栏
-            HStack {
+            // 头部导航栏
+            HStack(spacing: Theme.Spacing.md) {
+                // 返回按钮
+                Button {
+                    onClose()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("返回")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.Colors.brandBlue)
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
                 Text("资源库")
                     .font(.headline)
+                    .foregroundStyle(Theme.Colors.primaryText)
+                
                 Spacer()
-                PhotosPicker(
-                    selection: $selectedPhotoItem,
-                    matching: .images
-                ) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                }
+                
+                // 占位符保持标题居中
+                Color.clear
+                    .frame(width: 60)
             }
-            .padding()
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(.regularMaterial)
             
             Divider()
             
@@ -984,15 +989,6 @@ private struct NativeAssetLibraryView: View {
                 }
                 .padding()
             }
-        }
-        .onChange(of: selectedPhotoItem) { _, newItem in
-            guard let item = newItem else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    onImport(data)
-                }
-            }
-            selectedPhotoItem = nil
         }
         .sheet(isPresented: $showingPublishSheet) {
             if let asset = assetToPublish {

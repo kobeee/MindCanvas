@@ -818,8 +818,19 @@ class NativeCanvasView: UIView {
 
     /// 捕获内容坐标系中的指定区域快照
     func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
-        let bounded = contentRect.intersection(CGRect(origin: .zero, size: canvasSize))
-        guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else { return nil }
+        // 扩大边界容差
+        let expandedCanvas = CGRect(
+            x: -10,
+            y: -10,
+            width: canvasSize.width + 20,
+            height: canvasSize.height + 20
+        )
+        let bounded = contentRect.intersection(expandedCanvas)
+        
+        guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else {
+            print("[Snapshot] Invalid rect: contentRect=\(contentRect), bounded=\(bounded)")
+            return nil
+        }
 
         let scale = UIScreen.main.scale
         let format = UIGraphicsImageRendererFormat()
@@ -833,11 +844,20 @@ class NativeCanvasView: UIView {
         let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
         return renderer.image { rendererContext in
             let ctx = rendererContext.cgContext
+            
+            // 白色背景（确保可见性）
+            ctx.setFillColor(UIColor.white.cgColor)
+            ctx.fill(CGRect(origin: .zero, size: bounded.size))
+            
             ctx.saveGState()
-            ctx.clip(to: CGRect(origin: .zero, size: bounded.size))
             ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
+            
+            // 渲染对象层
             objectLayerView.layer.render(in: ctx)
+            
             ctx.restoreGState()
+            
+            // 渲染 PencilKit 笔画
             drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
     }
@@ -848,12 +868,14 @@ class NativeCanvasView: UIView {
         // 考虑缩放
         let scale = pencilCanvas.zoomScale
         let offset = pencilCanvas.contentOffset
-        return CGRect(
+        let result = CGRect(
             x: (rectInCanvas.origin.x + offset.x) / scale,
             y: (rectInCanvas.origin.y + offset.y) / scale,
             width: rectInCanvas.width / scale,
             height: rectInCanvas.height / scale
         )
+        print("[Coordinate] viewportRect=\(viewportRect) -> contentRect=\(result), scale=\(scale), offset=\(offset)")
+        return result
     }
 
     /// 捕获视口坐标区域的快照

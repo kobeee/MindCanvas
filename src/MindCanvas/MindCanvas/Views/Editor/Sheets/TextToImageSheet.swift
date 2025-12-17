@@ -2,26 +2,34 @@ import SwiftUI
 
 struct TextToImageSheet: View {
     @State private var prompt: String = ""
-    @State private var selectedRatio: ImageAspectRatio = .square
-
     let onGenerate: (String, ImageAspectRatio) -> Void
     let onCancel: () -> Void
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: Theme.Spacing.xl) {
-                header
-                promptEditor
-                ratioPicker
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: Theme.Spacing.xl) {
+                        header
+                        tipsSection
+                        promptEditor
+                    }
+                    .padding(Theme.Spacing.xxl)
+                }
+
+                Divider()
+
                 actions
-                Spacer(minLength: 0)
+                    .padding(Theme.Spacing.xxl)
+                    .padding(.bottom, Theme.Spacing.lg)
             }
-            .padding(Theme.Spacing.xxl)
             .navigationBarHidden(true)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 
+    // MARK: - Header
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
@@ -31,19 +39,45 @@ struct TextToImageSheet: View {
                 Spacer()
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("关闭")
             }
 
-            Text("生成独立的图片素材，可拖入画布使用")
+            Text("输入提示词直接生成图片素材")
                 .font(Theme.Fonts.subheadline)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
     }
 
+    // MARK: - Tips Section
+    private var tipsSection: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.Colors.brandBlue)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text("快速提示")
+                    .font(Theme.Fonts.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.Colors.primaryText)
+
+                Text("默认生成 1:1 正方形图片。可在提示词中指定尺寸，如\"1920x1080 宽屏\"或\"竖屏手机壁纸\"")
+                    .font(Theme.Fonts.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Theme.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Colors.brandBlue.opacity(0.08))
+        .cornerRadius(Theme.Shapes.buttonCornerRadius)
+    }
+
+    // MARK: - Prompt Editor
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("提示词")
@@ -53,59 +87,17 @@ struct TextToImageSheet: View {
             TextEditor(text: $prompt)
                 .frame(height: 120)
                 .padding(Theme.Spacing.md)
+                .scrollContentBackground(.hidden)
                 .background(Theme.Colors.appBackground)
                 .cornerRadius(Theme.Shapes.buttonCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
                 )
         }
     }
 
-    private var ratioPicker: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text("尺寸")
-                .font(Theme.Fonts.caption)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: Theme.Spacing.md),
-                GridItem(.flexible(), spacing: Theme.Spacing.md),
-                GridItem(.flexible(), spacing: Theme.Spacing.md)
-            ], spacing: Theme.Spacing.md) {
-                ForEach(ImageAspectRatio.allCases) { ratio in
-                    ratioButton(ratio)
-                }
-            }
-        }
-    }
-
-    private func ratioButton(_ ratio: ImageAspectRatio) -> some View {
-        Button {
-            selectedRatio = ratio
-        } label: {
-            VStack(spacing: 6) {
-                Text(ratio.rawValue)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                Text(ratio.displayName)
-                    .font(Theme.Fonts.caption)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                    .fill(selectedRatio == ratio ? Theme.Colors.brandBlue.opacity(0.12) : Theme.Colors.cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                    .stroke(selectedRatio == ratio ? Theme.Colors.brandBlue.opacity(0.6) : Color.black.opacity(0.08), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .hoverEffect(.lift)
-    }
-
+    // MARK: - Actions
     private var actions: some View {
         HStack(spacing: Theme.Spacing.lg) {
             Button("取消", action: onCancel)
@@ -113,19 +105,33 @@ struct TextToImageSheet: View {
 
             Button {
                 let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                onGenerate(trimmed, selectedRatio)
+                onGenerate(trimmed, .square)
             } label: {
-                Label("生成资源", systemImage: "wand.and.stars")
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "wand.and.stars")
+                    Text("确定生成")
+                }
             }
             .primaryButtonStyle()
-            .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1.0)
+            .disabled(isGenerateDisabled)
+            .opacity(isGenerateDisabled ? 0.5 : 1.0)
         }
+    }
+
+    private var isGenerateDisabled: Bool {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
 #Preview {
-    TextToImageSheet(onGenerate: { _, _ in }, onCancel: {})
+    TextToImageSheet(
+        onGenerate: { prompt, ratio in
+            print("Generate: \(prompt), ratio: \(ratio)")
+        },
+        onCancel: {
+            print("Cancel")
+        }
+    )
 }
 
 

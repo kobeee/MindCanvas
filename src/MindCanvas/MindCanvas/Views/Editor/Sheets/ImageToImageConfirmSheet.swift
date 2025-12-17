@@ -8,19 +8,29 @@ struct ImageToImageConfirmSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: Theme.Spacing.xl) {
-                header
-                preview
-                promptBlock
-                actions
-                Spacer(minLength: 0)
+            GeometryReader { proxy in
+                VStack(spacing: Theme.Spacing.xl) {
+                    header
+
+                    Divider()
+
+                    preview(availableHeight: proxy.size.height)
+
+                    promptBlock
+
+                    Spacer(minLength: Theme.Spacing.lg)
+
+                    actions
+                }
+                .padding(Theme.Spacing.xxl)
             }
-            .padding(Theme.Spacing.xxl)
             .navigationBarHidden(true)
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
+    // MARK: - Header
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
@@ -30,52 +40,64 @@ struct ImageToImageConfirmSheet: View {
                 Spacer()
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("关闭")
             }
-
             Text("请确认将作为参考的画布内容")
                 .font(Theme.Fonts.subheadline)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
     }
 
-    private var preview: some View {
-        Image(uiImage: previewImage)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(maxHeight: 320)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Shapes.cardCornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Shapes.cardCornerRadius)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
+    // MARK: - Preview (动态高度)
+    private func preview(availableHeight: CGFloat) -> some View {
+        let previewHeight = min(450, max(240, availableHeight * 0.35))
+
+        return VStack(spacing: Theme.Spacing.sm) {
+            Text("选区预览")
+                .font(Theme.Fonts.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(uiImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxHeight: previewHeight)
+                .frame(maxWidth: .infinity)
+                .background(Color.gray.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Shapes.cardCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Shapes.cardCornerRadius)
+                        .stroke(Color.gray.opacity(0.15), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+        }
     }
 
+    // MARK: - Prompt Block
     private var promptBlock: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("提示词")
                 .font(Theme.Fonts.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
 
-            Text(prompt)
+            Text(prompt.isEmpty ? "无提示词" : prompt)
                 .font(Theme.Fonts.body)
-                .foregroundStyle(Theme.Colors.primaryText)
+                .foregroundStyle(prompt.isEmpty ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Spacing.lg)
                 .background(Theme.Colors.appBackground)
                 .cornerRadius(Theme.Shapes.buttonCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                        .stroke(Color.gray.opacity(0.15), lineWidth: 1)
                 )
         }
     }
 
+    // MARK: - Actions
     private var actions: some View {
         HStack(spacing: Theme.Spacing.lg) {
             Button("取消", action: onCancel)
@@ -84,7 +106,10 @@ struct ImageToImageConfirmSheet: View {
             Button {
                 onConfirm()
             } label: {
-                Label("确认生成", systemImage: "wand.and.stars")
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "wand.and.stars")
+                    Text("确认生成")
+                }
             }
             .primaryButtonStyle()
         }
@@ -93,10 +118,10 @@ struct ImageToImageConfirmSheet: View {
 
 #Preview {
     ImageToImageConfirmSheet(
-        previewImage: UIImage(systemName: "photo") ?? UIImage(),
-        prompt: "一个极简的未来主义画面，柔和光影，银灰配色",
-        onConfirm: {},
-        onCancel: {}
+        previewImage: UIImage(systemName: "photo")!,
+        prompt: "a beautiful sunset",
+        onConfirm: { print("Confirm") },
+        onCancel: { print("Cancel") }
     )
 }
 
