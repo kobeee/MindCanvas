@@ -18,7 +18,7 @@ class NativeCanvasView: UIView {
     var pencilCanvas = PKCanvasView()
 
     /// 画布尺寸 (超大虚拟画布)
-    private let canvasSize = CGSize(width: 5000, height: 5000)
+    let canvasSize = CGSize(width: 5000, height: 5000)
 
     /// 缩放范围
     private let minZoomScale: CGFloat = 0.5
@@ -166,7 +166,7 @@ class NativeCanvasView: UIView {
         // 配置覆盖层容器视图
         overlayContainerView.backgroundColor = .clear
         overlayContainerView.isUserInteractionEnabled = true
-        overlayContainerView.clipsToBounds = true  // 裁剪超出部分
+        overlayContainerView.clipsToBounds = false  // 修改为 false，确保截图时对象层完整渲染
 
         // 配置对象图层 - 作为 overlayContainerView 的子视图
         objectLayerView.backgroundColor = .clear
@@ -818,17 +818,30 @@ class NativeCanvasView: UIView {
 
     /// 捕获内容坐标系中的指定区域快照
     func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
-        // 扩大边界容差
+        print("[Snapshot] ===== Begin captureContentSnapshot =====")
+        print("[Snapshot] Input contentRect: \(contentRect)")
+        print("[Snapshot] Canvas size: \(canvasSize)")
+        print("[Snapshot] objectLayerView.subviews.count: \(objectLayerView.subviews.count)")
+        
+        // 扩大边界容差（从+-10扩大到+-100）
         let expandedCanvas = CGRect(
-            x: -10,
-            y: -10,
-            width: canvasSize.width + 20,
-            height: canvasSize.height + 20
+            x: -100,
+            y: -100,
+            width: canvasSize.width + 200,
+            height: canvasSize.height + 200
         )
         let bounded = contentRect.intersection(expandedCanvas)
         
-        guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else {
-            print("[Snapshot] Invalid rect: contentRect=\(contentRect), bounded=\(bounded)")
+        print("[Snapshot] Expanded canvas bounds: \(expandedCanvas)")
+        print("[Snapshot] Bounded rect (intersection): \(bounded)")
+        
+        // 放宽最小尺寸检查（从1pt放宽到10pt）
+        guard !bounded.isNull, bounded.width >= 10, bounded.height >= 10 else {
+            print("[Snapshot] Error: Invalid or too small rect")
+            print("[Snapshot] bounded.isNull: \(bounded.isNull)")
+            if !bounded.isNull {
+                print("[Snapshot] bounded size: \(bounded.width) x \(bounded.height)")
+            }
             return nil
         }
 
@@ -836,13 +849,17 @@ class NativeCanvasView: UIView {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = false
+        
+        print("[Snapshot] Rendering with scale: \(scale)")
+        print("[Snapshot] Final render size: \(bounded.size)")
 
         // PencilKit 导出
         let drawingImage = pencilCanvas.drawing.image(from: bounded, scale: scale)
+        print("[Snapshot] Drawing image size: \(drawingImage.size)")
 
         // 对象层渲染
         let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
-        return renderer.image { rendererContext in
+        let result = renderer.image { rendererContext in
             let ctx = rendererContext.cgContext
             
             // 白色背景（确保可见性）
@@ -853,6 +870,7 @@ class NativeCanvasView: UIView {
             ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
             
             // 渲染对象层
+            print("[Snapshot] Rendering objectLayerView at origin: \(-bounded.origin.x), \(-bounded.origin.y)")
             objectLayerView.layer.render(in: ctx)
             
             ctx.restoreGState()
@@ -860,21 +878,36 @@ class NativeCanvasView: UIView {
             // 渲染 PencilKit 笔画
             drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
+        
+        print("[Snapshot] ===== End captureContentSnapshot (success) =====")
+        print("[Snapshot] Result image size: \(result.size)")
+        return result
     }
 
     /// 将视口坐标映射到画布内容坐标
     func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
+        print("[Coordinate] ===== Begin contentRect conversion =====")
+        print("[Coordinate] Input viewportRect: \(viewportRect)")
+        
+        // 从视口坐标转换到Canvas坐标
         let rectInCanvas = pencilCanvas.convert(viewportRect, from: self)
-        // 考虑缩放
+        print("[Coordinate] After convert (rectInCanvas): \(rectInCanvas)")
+        
+        // 获取缩放和偏移
         let scale = pencilCanvas.zoomScale
         let offset = pencilCanvas.contentOffset
+        print("[Coordinate] zoomScale: \(scale), contentOffset: \(offset)")
+        
+        // 应用缩放和偏移
         let result = CGRect(
             x: (rectInCanvas.origin.x + offset.x) / scale,
             y: (rectInCanvas.origin.y + offset.y) / scale,
             width: rectInCanvas.width / scale,
             height: rectInCanvas.height / scale
         )
-        print("[Coordinate] viewportRect=\(viewportRect) -> contentRect=\(result), scale=\(scale), offset=\(offset)")
+        
+        print("[Coordinate] Result contentRect: \(result)")
+        print("[Coordinate] ===== End contentRect conversion =====")
         return result
     }
 
@@ -887,6 +920,153 @@ class NativeCanvasView: UIView {
     /// 捕获整个画布快照
     func captureFullSnapshot() -> UIImage? {
         captureContentSnapshot(rect: CGRect(origin: .zero, size: canvasSize))
+    }
+
+    /// 直接截取视口区域的快照（简化版）
+    func captureViewportSnapshotSimple(rect viewportRect: CGRect) -> UIImage? {
+        print("[Snapshot-Simple] ===== Begin =====")
+        print("[Snapshot-Simple] viewportRect: \(viewportRect)")
+
+        guard viewportRect.width >= 10, viewportRect.height >= 10 else {
+            print("[Snapshot-Simple] Error: rect too small")
+            return nil
+        }
+
+        let scale = UIScreen.main.scale
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(size: viewportRect.size, format: format)
+
+        let result = renderer.image { context in
+            context.cgContext.translateBy(x: -viewportRect.origin.x, y: -viewportRect.origin.y)
+
+            pencilCanvas.layer.render(in: context.cgContext)
+
+            overlayContainerView.layer.render(in: context.cgContext)
+        }
+
+        print("[Snapshot-Simple] Result size: \(result.size)")
+        print("[Snapshot-Simple] ===== End =====")
+        return result
+    }
+
+    /// 截取指定视口区域的快照（推荐使用）
+    /// - Parameter viewportRect: 视口坐标（相对于 NativeCanvasView）
+    /// - Returns: 截取的图片，失败返回 nil
+    func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
+        print("[Snapshot] ===== Begin captureVisibleAreaSnapshot =====")
+        print("[Snapshot] Input viewportRect: \(viewportRect)")
+        print("[Snapshot] NativeCanvasView bounds: \(bounds)")
+        print("[Snapshot] pencilCanvas.bounds: \(pencilCanvas.bounds)")
+        print("[Snapshot] pencilCanvas.contentOffset: \(pencilCanvas.contentOffset)")
+        print("[Snapshot] pencilCanvas.zoomScale: \(pencilCanvas.zoomScale)")
+        print("[Snapshot] objectLayerView.frame: \(objectLayerView.frame)")
+        print("[Snapshot] objectLayerView.transform: \(objectLayerView.transform)")
+
+        // 验证尺寸
+        guard viewportRect.width >= 10, viewportRect.height >= 10 else {
+            print("[Snapshot] Error: viewportRect too small (< 10pt)")
+            return nil
+        }
+
+        // 确保区域在视图范围内
+        let clippedRect = viewportRect.intersection(bounds)
+        guard !clippedRect.isEmpty else {
+            print("[Snapshot] Error: viewportRect does not intersect bounds")
+            return nil
+        }
+
+        print("[Snapshot] Clipped rect: \(clippedRect)")
+
+        // 确保布局完成
+        layoutIfNeeded()
+        syncOverlayTransform()
+
+        // 配置渲染器
+        let scale = UIScreen.main.scale
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(size: clippedRect.size, format: format)
+
+        let result = renderer.image { context in
+            let ctx = context.cgContext
+
+            // 平移坐标系：使 clippedRect 的左上角对应图片的 (0, 0)
+            ctx.translateBy(x: -clippedRect.origin.x, y: -clippedRect.origin.y)
+
+            // 渲染整个视图层级
+            // 这会自动包含 pencilCanvas 和 overlayContainerView 及其所有子视图
+            self.layer.render(in: ctx)
+        }
+
+        print("[Snapshot] Result image size: \(result.size)")
+        print("[Snapshot] Result image scale: \(result.scale)")
+        print("[Snapshot] ===== End captureVisibleAreaSnapshot (success) =====")
+
+        return result
+    }
+
+    /// 备用方法：截取整个可见区域后裁剪
+    /// - Parameter cropRect: 裁剪区域（相对于 NativeCanvasView）
+    /// - Returns: 裁剪后的图片
+    func captureAndCropSnapshot(cropRect: CGRect) -> UIImage? {
+        print("[Snapshot-Crop] ===== Begin =====")
+        print("[Snapshot-Crop] cropRect: \(cropRect)")
+
+        // 验证
+        guard cropRect.width >= 10, cropRect.height >= 10 else {
+            print("[Snapshot-Crop] Error: cropRect too small")
+            return nil
+        }
+
+        let fullSize = bounds.size
+        guard fullSize.width > 0, fullSize.height > 0 else {
+            print("[Snapshot-Crop] Error: bounds is empty")
+            return nil
+        }
+
+        // 确保布局完成
+        layoutIfNeeded()
+        syncOverlayTransform()
+
+        // 配置渲染器
+        let scale = UIScreen.main.scale
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        // 第一步：截取整个可见区域
+        let renderer = UIGraphicsImageRenderer(size: fullSize, format: format)
+        let fullImage = renderer.image { context in
+            self.layer.render(in: context.cgContext)
+        }
+
+        print("[Snapshot-Crop] Full image captured: \(fullImage.size)")
+
+        // 第二步：裁剪
+        // 注意：CGImage 使用像素坐标，需要乘以 scale
+        let pixelCropRect = CGRect(
+            x: cropRect.origin.x * scale,
+            y: cropRect.origin.y * scale,
+            width: cropRect.width * scale,
+            height: cropRect.height * scale
+        )
+
+        guard let cgImage = fullImage.cgImage,
+              let croppedCGImage = cgImage.cropping(to: pixelCropRect) else {
+            print("[Snapshot-Crop] Error: Failed to crop")
+            return nil
+        }
+
+        let croppedImage = UIImage(cgImage: croppedCGImage, scale: scale, orientation: .up)
+        print("[Snapshot-Crop] Cropped image: \(croppedImage.size)")
+        print("[Snapshot-Crop] ===== End =====")
+
+        return croppedImage
     }
 
     // MARK: - 箭头管理

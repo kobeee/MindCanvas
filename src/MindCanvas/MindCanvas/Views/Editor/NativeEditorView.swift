@@ -927,37 +927,54 @@ private struct NativeAssetLibraryView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // 头部导航栏
-            HStack(spacing: Theme.Spacing.md) {
-                // 返回按钮
+            // 精致的头部导航栏
+            HStack(spacing: Theme.Spacing.lg) {
+                // 返回按钮 - 轻量级设计，有微妙背景
                 Button {
                     onClose()
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                         Text("返回")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 15, weight: .regular))
                     }
                     .foregroundStyle(Theme.Colors.brandBlue)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Theme.Colors.brandBlue.opacity(0.08))
+                    .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
                 
                 Spacer()
                 
+                // 标题 - 突出但不侵入
                 Text("资源库")
-                    .font(.headline)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.Colors.primaryText)
                 
                 Spacer()
                 
-                // 占位符保持标题居中
-                Color.clear
-                    .frame(width: 60)
+                // 功能菜单 - 替代空白占位符
+                Menu {
+                    Button("刷新", systemImage: "arrow.clockwise") {
+                        // 预留：刷新资源列表
+                    }
+                    Divider()
+                    Button("清空资源库", systemImage: "trash", role: .destructive) {
+                        // 预留：清空资源库
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md)
-            .background(.regularMaterial)
+            .background(.ultraThinMaterial)
             
             Divider()
             

@@ -2,30 +2,43 @@ import SwiftUI
 
 struct TextToImageSheet: View {
     @State private var prompt: String = ""
+    @FocusState private var isPromptFocused: Bool
     let onGenerate: (String, ImageAspectRatio) -> Void
     let onCancel: () -> Void
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: Theme.Spacing.xl) {
-                        header
-                        tipsSection
-                        promptEditor
-                    }
-                    .padding(Theme.Spacing.xxl)
-                }
+                // 顶部：Header（固定）
+                header
+                    .padding(.horizontal, Theme.Spacing.xxl)
+                    .padding(.top, Theme.Spacing.xxl)
+                    .padding(.bottom, Theme.Spacing.lg)
 
                 Divider()
 
+                // 中部：Tips卡片（可滚动，高度受限）
+                ScrollView {
+                    tipsSection
+                        .padding(.horizontal, Theme.Spacing.xxl)
+                        .padding(.vertical, Theme.Spacing.lg)
+                }
+                .frame(maxHeight: 120)
+
+                // 提示词输入区域（独立，不在ScrollView中）
+                promptEditor
+                    .padding(.horizontal, Theme.Spacing.xxl)
+                    .padding(.vertical, Theme.Spacing.lg)
+
+                Divider()
+
+                // 底部：按钮（固定）
                 actions
                     .padding(Theme.Spacing.xxl)
-                    .padding(.bottom, Theme.Spacing.lg)
             }
             .navigationBarHidden(true)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -77,7 +90,7 @@ struct TextToImageSheet: View {
         .cornerRadius(Theme.Shapes.buttonCornerRadius)
     }
 
-    // MARK: - Prompt Editor
+    // MARK: - Prompt Editor（独立于ScrollView）
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("提示词")
@@ -85,15 +98,21 @@ struct TextToImageSheet: View {
                 .foregroundStyle(Theme.Colors.secondaryText)
 
             TextEditor(text: $prompt)
+                .focused($isPromptFocused)
                 .frame(height: 120)
+                .frame(minHeight: 120)
                 .padding(Theme.Spacing.md)
                 .scrollContentBackground(.hidden)
                 .background(Theme.Colors.appBackground)
                 .cornerRadius(Theme.Shapes.buttonCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        .stroke(
+                            isPromptFocused ? Theme.Colors.brandBlue : Color.gray.opacity(0.2),
+                            lineWidth: isPromptFocused ? 2 : 1
+                        )
                 )
+                .animation(.easeInOut(duration: 0.2), value: isPromptFocused)
         }
     }
 

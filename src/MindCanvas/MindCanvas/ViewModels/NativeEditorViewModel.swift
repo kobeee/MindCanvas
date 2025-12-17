@@ -186,47 +186,58 @@ final class NativeEditorViewModel {
     /// 图生图：准备预览（立即截取选框内容，然后弹出确认浮窗）
     @discardableResult
     func prepareImageToImageFlow() -> Bool {
+        print("[ImageToImage] ===== Begin prepareImageToImageFlow =====")
+        
         guard !isGenerating else {
             print("[ImageToImage] Error: Already generating")
             return false
         }
+        
+        // 验证提示词
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[ImageToImage] prompt: \(trimmed.isEmpty ? "(empty)" : trimmed)")
         guard !trimmed.isEmpty else {
             print("[ImageToImage] Error: Prompt is empty")
             flowHintMessage = "请输入生成描述"
             return false
         }
+        
+        // 验证画布视图
         guard let canvasView else {
             print("[ImageToImage] Error: canvasView is nil")
             flowHintMessage = "画布尚未就绪"
             return false
         }
+        
+        // 验证 Magic Frame 可见性
         guard stateManager.isMagicFrameVisible else {
-            print("[ImageToImage] Error: Magic frame not visible")
+            print("[ImageToImage] Error: Magic Frame not visible")
             flowHintMessage = "请先显示选框并框选区域"
             return false
         }
 
-        // 视口坐标（magicFrame）-> 画布内容坐标（截图使用 contentRect）
+        // 获取选框区域（视口坐标，相对于 NativeCanvasView）
         let viewportRect = stateManager.magicFrame
-        print("[ImageToImage] viewportRect (magicFrame): \(viewportRect)")
+        print("[ImageToImage] magicFrame: \(viewportRect)")
+        print("[ImageToImage] canvasView.bounds: \(canvasView.bounds)")
         
-        let contentRect = canvasView.contentRect(forViewportRect: viewportRect)
-        print("[ImageToImage] contentRect (after conversion): \(contentRect)")
-
-        guard let snapshot = canvasView.captureContentSnapshot(rect: contentRect),
+        // 使用新的截图方法（更健壮的坐标处理）
+        guard let snapshot = canvasView.captureVisibleAreaSnapshot(viewportRect: viewportRect),
               let imageData = snapshot.pngData() else {
             print("[ImageToImage] Error: Failed to capture snapshot")
             pendingImageToImagePreview = nil
             pendingImageToImageBase64 = nil
-            flowHintMessage = "预览准备失败：选框无效或截图失败（区域过小/越界/渲染失败）"
+            flowHintMessage = "预览准备失败：截图失败"
             return false
         }
 
-        print("[ImageToImage] Snapshot captured: size=\(snapshot.size)")
+        print("[ImageToImage] Snapshot captured successfully!")
+        print("[ImageToImage] Snapshot size: \(snapshot.size)")
         pendingImageToImagePreview = snapshot
         pendingImageToImageBase64 = imageData.base64EncodedString()
         flowHintMessage = nil
+        
+        print("[ImageToImage] ===== End prepareImageToImageFlow (success) =====")
         return true
     }
 
