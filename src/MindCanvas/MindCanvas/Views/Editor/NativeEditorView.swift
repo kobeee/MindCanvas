@@ -539,26 +539,27 @@ private struct NativeCanvasContainer: View {
                 // 不再使用 SwiftUI ForEach 渲染，避免遮挡 UIKit 手势
                 
                 // 文字编辑层
-                if viewModel.stateManager.currentTool == .text {
-                    TextEditingView(
-                        isEditing: $isEditingText,
-                        position: $textPosition,
-                        text: $editingText,
-                        fontSize: viewModel.stateManager.textFontSize,
-                        color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
-                    ) { position, text in
-                        // 创建文字图层
-                        let textLayer = TextLayerNode(
-                            position: position,
-                            text: text,
-                            fontSize: viewModel.stateManager.textFontSize,
-                            color: viewModel.stateManager.textColor,
-                            fontName: viewModel.stateManager.textFontName,
-                            zIndex: viewModel.canvasView?.getTextLayerManager().getNextZIndex() ?? 0
-                        )
-                        viewModel.canvasView?.addText(textLayer)
-                    }
-                }
+                // TODO: 待文本工具完整实现后启用
+                // if viewModel.stateManager.currentTool == .text {
+                //     TextEditingView(
+                //         isEditing: $isEditingText,
+                //         position: $textPosition,
+                //         text: $editingText,
+                //         fontSize: viewModel.stateManager.textFontSize,
+                //         color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
+                //     ) { position, text in
+                //         // 创建文字图层
+                //         let textLayer = TextLayerNode(
+                //             position: position,
+                //             text: text,
+                //             fontSize: viewModel.stateManager.textFontSize,
+                //             color: viewModel.stateManager.textColor,
+                //             fontName: viewModel.stateManager.textFontName,
+                //             zIndex: 0
+                //         )
+                //         // viewModel.canvasView?.addText(textLayer)
+                //     }
+                // }
                 
                 // 显示所有矩形
                 ForEach(viewModel.canvasView?.getRectangleLayerManager().rectangles ?? []) { rectangle in
@@ -612,9 +613,10 @@ private struct NativeCanvasContainer: View {
                 }
                 
                 // 显示所有文字
-                ForEach(viewModel.canvasView?.getTextLayerManager().textLayers ?? []) { textLayer in
-                    TextDisplayView(textLayer: textLayer)
-                }
+                // TODO: 待文本工具完整实现后启用
+                // ForEach(viewModel.canvasView?.getTextLayerManager().textLayers ?? []) { textLayer in
+                //     TextDisplayView(textLayer: textLayer)
+                // }
                 
                 // 显示所有标注
                 ForEach(viewModel.canvasView?.getAnnotationLayerManager().annotations ?? []) { annotation in

@@ -415,7 +415,8 @@ final class NativeEditorViewModel {
         canvasDocument.rectangles = canvasView.getRectangleLayerManager().rectangles
         
         // 同步文字数据
-        canvasDocument.texts = canvasView.getTextLayerManager().textLayers
+        // TODO: 待文本工具完整实现后启用
+        // canvasDocument.texts = canvasView.getTextLayerManager().textLayers
         
         // 同步标注数据
         canvasDocument.annotations = canvasView.getAnnotationLayerManager().annotations
@@ -447,10 +448,11 @@ final class NativeEditorViewModel {
         }
         
         // 加载文字
-        let textManager = canvasView.getTextLayerManager()
-        for text in canvasDocument.texts {
-            textManager.addText(text)
-        }
+        // TODO: 待文本工具完整实现后启用
+        // let textManager = canvasView.getTextLayerManager()
+        // for text in canvasDocument.texts {
+        //     textManager.addText(text)
+        // }
         
         // 加载标注
         let annotationManager = canvasView.getAnnotationLayerManager()

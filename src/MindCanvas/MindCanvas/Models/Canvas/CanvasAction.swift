@@ -505,6 +505,7 @@ struct ModifyRectangleAction: CanvasAction {
 // MARK: - 文字操作
 
 /// 添加文字操作
+/// TODO: 待文本工具完整实现后启用
 struct AddTextAction: CanvasAction {
     let text: TextLayerNode
     weak var canvasView: NativeCanvasView?
@@ -512,15 +513,18 @@ struct AddTextAction: CanvasAction {
     var description: String { "添加文字: \(text.id)" }
     
     func execute() {
-        canvasView?.addText(text, recordUndo: false)
+        // TODO: 实现文本添加逻辑
+        // canvasView?.addText(text, recordUndo: false)
     }
     
     func undo() {
-        canvasView?.removeText(id: text.id)
+        // TODO: 实现文本移除逻辑
+        // canvasView?.removeText(id: text.id)
     }
 }
 
 /// 移除文字操作
+/// TODO: 待文本工具完整实现后启用
 struct RemoveTextAction: CanvasAction {
     let text: TextLayerNode
     weak var canvasView: NativeCanvasView?
@@ -528,15 +532,18 @@ struct RemoveTextAction: CanvasAction {
     var description: String { "移除文字: \(text.id)" }
     
     func execute() {
-        canvasView?.removeText(id: text.id)
+        // TODO: 实现文本移除逻辑
+        // canvasView?.removeText(id: text.id)
     }
     
     func undo() {
-        canvasView?.addText(text)
+        // TODO: 实现文本添加逻辑
+        // canvasView?.addText(text)
     }
 }
 
 /// 修改文字操作
+/// TODO: 待文本工具完整实现后启用
 struct ModifyTextAction: CanvasAction {
     let textID: UUID
     let fromText: TextLayerNode
@@ -546,11 +553,13 @@ struct ModifyTextAction: CanvasAction {
     var description: String { "修改文字: \(textID)" }
     
     func execute() {
-        canvasView?.updateText(toText)
+        // TODO: 实现文本更新逻辑
+        // canvasView?.updateText(toText)
     }
     
     func undo() {
-        canvasView?.updateText(fromText)
+        // TODO: 实现文本更新逻辑
+        // canvasView?.updateText(fromText)
     }
 }
 

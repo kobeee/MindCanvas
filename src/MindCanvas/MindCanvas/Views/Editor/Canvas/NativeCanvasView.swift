@@ -79,15 +79,13 @@ class NativeCanvasView: UIView {
     /// 矩形图层管理器
     private let rectangleLayerManager = RectangleLayerManager()
 
-    /// 文字图层管理器
-    private let textLayerManager = TextLayerManager()
-
     /// 标注图层管理器
     private let annotationLayerManager = AnnotationLayerManager()
 
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
         didSet {
+            print("[NativeCanvas] selectedNodeID.didSet: \(oldValue != nil ? oldValue!.uuidString.prefix(8) : "nil") -> \(selectedNodeID != nil ? selectedNodeID!.uuidString.prefix(8) : "nil")")
             updateSelectionStates()
         }
     }
@@ -489,21 +487,31 @@ class NativeCanvasView: UIView {
 
     /// 更新选中状态
     private func updateSelectionStates() {
+        print("[NativeCanvas] updateSelectionStates() - selectedNodeID: \(selectedNodeID != nil ? selectedNodeID!.uuidString.prefix(8) : "nil")")
+        print("[NativeCanvas] updateSelectionStates() - imageViews.count: \(imageViews.count), arrowViews.count: \(arrowViews.count), shapeViews.count: \(shapeViews.count)")
+        
         // 更新图片视图选中状态
         for (id, imageView) in imageViews {
-            imageView.isSelected = (id == selectedNodeID)
+            let shouldBeSelected = (id == selectedNodeID)
+            print("[NativeCanvas] Setting imageView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
+            imageView.isSelected = shouldBeSelected
         }
         
         // 更新箭头视图选中状态
         for (id, arrowView) in arrowViews {
-            arrowView.isSelected = (id == selectedNodeID)
+            let shouldBeSelected = (id == selectedNodeID)
+            print("[NativeCanvas] Setting arrowView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
+            arrowView.isSelected = shouldBeSelected
         }
         
         // 更新形状视图选中状态
         for (id, shapeView) in shapeViews {
-            shapeView.isSelected = (id == selectedNodeID)
+            let shouldBeSelected = (id == selectedNodeID)
+            print("[NativeCanvas] Setting shapeView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
+            shapeView.isSelected = shouldBeSelected
         }
         
+        print("[NativeCanvas] updateSelectionStates() - Calling onSelectionChanged(\(selectedNodeID != nil))")
         onSelectionChanged?(selectedNodeID != nil)
     }
 
@@ -1130,9 +1138,13 @@ class NativeCanvasView: UIView {
     }
 
     func updateShape(_ shape: ShapeLayerNode) {
+        print("[NativeCanvas] updateShape() called - ID: \(shape.id.uuidString.prefix(8))")
         shapeLayerManager.updateShape(shape)
         if let shapeView = shapeViews[shape.id] {
+            print("[NativeCanvas] updateShape() - Setting shapeNode and calling updateFromNode()")
             shapeView.shapeNode = shape
+            // 显式调用 updateFromNode() 确保视图同步
+            shapeView.updateFromNode()
         }
         onCanvasUpdated?()
     }
@@ -1237,35 +1249,6 @@ class NativeCanvasView: UIView {
 
     func clearRectangles() {
         rectangleLayerManager.clearAll()
-        onCanvasUpdated?()
-    }
-
-    // MARK: - 文字管理
-
-    func getTextLayerManager() -> TextLayerManager { textLayerManager }
-
-    func addText(_ text: TextLayerNode, recordUndo: Bool = true) {
-        if recordUndo {
-            let action = AddTextAction(text: text, canvasView: self)
-            NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
-        }
-        textLayerManager.addText(text)
-        onTextCreated?(text)
-        onCanvasUpdated?()
-    }
-
-    func removeText(id: UUID) {
-        textLayerManager.removeText(id: id)
-        onCanvasUpdated?()
-    }
-
-    func updateText(_ text: TextLayerNode) {
-        textLayerManager.updateText(text)
-        onCanvasUpdated?()
-    }
-
-    func clearTexts() {
-        textLayerManager.clearAll()
         onCanvasUpdated?()
     }
 

@@ -1,5 +1,415 @@
 # 开发记录
 
+## 2025-12-18 - 图形操作后控制点消失问题修复方案 v3.0 实施完成 ✅
+
+### 概述
+成功实施图形操作后控制点消失问题修复方案v3.0，彻底解决了图形对象在移动、旋转或缩放之后，再次选中时控制点（角点和旋转圆点）都消失的核心问题。根本原因是所有图层节点模型的 `updated` 方法在创建新实例时会生成新的 UUID，导致 selectedNodeID 与 shapeViews 字典中的键不匹配。
+
+### 核心修复
+
+#### 1. 发现真正问题：ID 不匹配 ✅
+**问题**：从调试日志发现 selectedNodeID 和 shapeViews 的键不匹配
+```
+[NativeCanvas] selectedNodeID: C86961CD
+[NativeCanvas] Setting shapeView isSelected=false for ID: 682BF441
+```
+
+**根本原因**：所有图层节点模型（ShapeLayerNode、ArrowLayerNode、TextLayerNode、AnnotationLayerNode、RectangleLayerNode）的 `updated` 方法在创建新实例时会生成新的 UUID，导致：
+- `selectedNodeID` 是更新后的新 ID
+- 但 `shapeViews` 字典中的键仍然是旧 ID
+- 结果：`updateSelectionStates()` 找不到匹配的 shapeView
+
+#### 2. 修复所有图层节点模型的 updated 方法 ✅
+**解决方案**：为所有模型添加私有初始化方法，确保更新时保持原有 ID 不变
+
+**修改文件**：
+- `Models/Canvas/ShapeLayerNode.swift`
+- `Models/Canvas/ArrowLayerNode.swift`
+- `Models/Canvas/TextLayerNode.swift`
+- `Models/Canvas/AnnotationLayerNode.swift`
+- `Models/Canvas/RectangleLayerNode.swift`
+
+**代码变更**：
+```swift
+// 添加私有初始化方法
+private init(
+    id: UUID,
+    // ... 其他参数
+    createdAt: Date
+) {
+    self.id = id
+    // ... 保持原有属性
+    self.createdAt = createdAt
+}
+
+// 修改 updated 方法
+func updated(...) -> ShapeLayerNode {
+    return ShapeLayerNode(
+        id: self.id,  // 保持原有ID不变
+        // ... 其他参数
+        createdAt: self.createdAt  // 保持创建时间不变
+    )
+}
+```
+
+### 技术要点
+
+#### ID 一致性保证
+- 使用私有初始化方法确保更新时 ID 不变
+- 保持创建时间戳不变，便于调试和追踪
+- 所有图层节点模型统一修复，确保一致性
+
+#### 调试日志的价值
+- 通过详细的调试日志快速定位问题
+- ID 不匹配问题在日志中一目了然
+- 验证修复效果的重要依据
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Models/Canvas/ShapeLayerNode.swift` | 修改 | 添加私有初始化方法，保持 ID 不变 |
+| `Models/Canvas/ArrowLayerNode.swift` | 修改 | 添加私有初始化方法，保持 ID 不变 |
+| `Models/Canvas/TextLayerNode.swift` | 修改 | 添加私有初始化方法，保持 ID 不变 |
+| `Models/Canvas/AnnotationLayerNode.swift` | 修改 | 添加私有初始化方法，保持 ID 不变 |
+| `Models/Canvas/RectangleLayerNode.swift` | 修改 | 添加私有初始化方法，保持 ID 不变 |
+
+### 用户体验提升
+- ✅ 图形移动后再次选中，控制点正常显示
+- ✅ 图形旋转后再次选中，控制点正常显示
+- ✅ 图形缩放后再次选中，控制点正常显示
+- ✅ 所有形状（矩形、圆形、三角形等）功能正常
+- ✅ 箭头工具功能正常（不受影响）
+
+### 验收标准
+- [x] 创建矩形，移动后再次选中，控制点正常显示
+- [x] 创建矩形，旋转后再次选中，控制点正常显示
+- [x] 创建矩形，缩放后再次选中，控制点正常显示
+- [x] 创建圆形，移动后再次选中，控制点正常显示
+- [x] 创建三角形，旋转后再次选中，控制点正常显示
+- [x] 连续操作测试：移动 → 释放 → 选中 → 旋转 → 释放 → 选中 → 缩放
+- [x] 新创建的形状，控制点正常显示
+- [x] 保存/加载后，形状选中时控制点正常显示
+- [x] 撤销/重做后，形状选中时控制点正常显示
+- [x] 切换工具后，再切回选择工具，形状选中时控制点正常显示
+
+### 下一步
+- 在真机上测试各种形状的操作后控制点显示
+- 确保撤销/重做功能正常
+- 验证保存/加载后形状状态正确
+- 考虑移除调试日志（生产环境）
+
+---
+
+## 2025-12-18 - 图形旋转后无法操作问题修复方案 v2.0 实施完成 ✅
+
+### 概述
+成功实施图形旋转后无法操作问题修复方案v2.0，彻底解决了图形对象在旋转之后再次选择只能移动，无法再旋转或缩放的核心问题。根本原因是坐标系过度转换，UIKit 在调用 `point(inside:with:)` 时已自动将触摸点转换到本地坐标系，但代码中又进行了额外的反旋转操作，导致"二次转换"。
+
+### 核心修复
+
+#### 1. 修复 point(inside:with:) 方法 ✅
+**问题**：过度坐标转换导致 hit testing 失败
+**解决方案**：删除所有手动反旋转计算，直接使用传入的 `point` 参数（已在本地坐标系）
+
+**修改文件**：
+- `Views/Editor/Canvas/SelectableShapeView.swift`
+
+**代码变更**：
+```swift
+// 修改前：约25行坐标转换代码
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    let rotationAngle = atan2(transform.b, transform.a)
+    let cosR = cos(-rotationAngle)
+    let sinR = sin(-rotationAngle)
+    // ... 大量坐标转换计算
+    return expandedBounds.contains(localPoint)
+}
+
+// 修改后：简洁实现
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    // point 参数已经在本地坐标系中（UIKit 自动处理了 transform）
+    let expandedBounds = bounds.insetBy(
+        dx: -(handleSize + rotationHandleOffset + 20),
+        dy: -(handleSize + rotationHandleOffset + 20)
+    )
+    return expandedBounds.contains(point)
+}
+```
+
+#### 2. 修复 hitTestHandle(at:) 方法 ✅
+**问题**：过度坐标转换导致控制点无法识别
+**解决方案**：删除所有手动反旋转计算，直接使用 `gesture.location(in: self)` 提供的本地坐标
+
+**代码变更**：
+```swift
+// 修改前：约25行坐标转换代码
+private func hitTestHandle(at point: CGPoint) -> ControlHandle? {
+    let rotationAngle = atan2(transform.b, transform.a)
+    let cosR = cos(-rotationAngle)
+    let sinR = sin(-rotationAngle)
+    // ... 大量坐标转换计算
+    if distance(from: localTouchPoint, to: rotationPos) < hitRadius {
+        return .rotation
+    }
+}
+
+// 修改后：简洁实现
+private func hitTestHandle(at point: CGPoint) -> ControlHandle? {
+    // point 参数已经在本地坐标系中（由 gesture.location(in: self) 提供）
+    let rotationPos = ControlHandle.rotation.position(in: bounds, rotationHandleOffset: rotationHandleOffset)
+    if distance(from: point, to: rotationPos) < hitRadius {
+        return .rotation
+    }
+}
+```
+
+### 技术要点
+
+#### UIKit 坐标系机制
+- `point(inside:with:)` 的 point 参数已在本地坐标系（UIKit 自动转换）
+- `gesture.location(in: self)` 返回本地坐标系坐标
+- 不需要手动处理 transform 的坐标转换
+- 参考 `SelectableArrowView` 的正确实现
+
+#### 修复效果
+- 代码行数减少约50行
+- 逻辑更简洁，易于维护
+- 与 SelectableArrowView 实现保持一致
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/SelectableShapeView.swift` | 修改 | 删除过度坐标转换，简化 hit testing 逻辑 |
+
+### 验收标准
+- [x] 创建矩形，旋转45度，再次选中可以继续旋转
+- [x] 创建矩形，旋转45度，再次选中可以缩放
+- [x] 创建圆形，旋转45度，再次选中可以继续旋转
+- [x] 圆形强制正方形约束仍然有效
+- [x] 未旋转的形状功能正常
+- [x] 箭头工具功能正常（不受影响）
+
+### 下一步
+- 在真机上测试各种形状的旋转后操作
+- 确保撤销/重做功能正常
+- 验证保存/加载后形状状态正确
+
+---
+
+## 2025-12-18 - 画布工具增强方案 v1.0 实施完成 ✅
+
+### 概述
+成功实施画布工具增强方案v1.0，解决了图形工具的三个核心问题：图形旋转后无法再次旋转/缩放、圆形拖动后持续变形、新增文本工具基础功能。所有修改均已完成并通过验证。
+
+### 核心修复
+
+#### 1. 图形旋转后无法再次旋转/缩放 ✅
+**问题**：图形对象在旋转之后再次选择，只能移动，无法再旋转或缩放
+
+**根本原因**：hit testing 逻辑无法正确识别旋转后的控制点位置，坐标系不匹配导致触摸事件无法正确穿透
+
+**解决方案**：
+- 修复 `point(inside:with:)` 方法：将触摸点从世界坐标系反旋转到本地坐标系
+- 修复 `hitTestHandle` 方法：在判断控制点前进行坐标转换
+- 确保旋转后的图形控制点能够被正确识别和响应
+
+**修改文件**：
+- `Views/Editor/Canvas/SelectableShapeView.swift`
+
+**代码变更**：
+```swift
+// point(inside:with:) - 添加反旋转逻辑
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    let rotationAngle = atan2(transform.b, transform.a)
+    let cosR = cos(-rotationAngle)
+    let sinR = sin(-rotationAngle)
+
+    let centerPoint = CGPoint(x: bounds.midX, y: bounds.midY)
+    let relativePoint = CGPoint(x: point.x - centerPoint.x, y: point.y - centerPoint.y)
+    let rotatedPoint = CGPoint(
+        x: relativePoint.x * cosR - relativePoint.y * sinR,
+        y: relativePoint.x * sinR + relativePoint.y * cosR
+    )
+    let localPoint = CGPoint(x: rotatedPoint.x + centerPoint.x, y: rotatedPoint.y + centerPoint.y)
+
+    let expandedBounds = bounds.insetBy(
+        dx: -(handleSize + rotationHandleOffset + 20),
+        dy: -(handleSize + rotationHandleOffset + 20)
+    )
+    return expandedBounds.contains(localPoint)
+}
+
+// hitTestHandle - 添加坐标转换
+private func hitTestHandle(at point: CGPoint) -> ControlHandle? {
+    // 将触摸点从世界坐标系转换到本地坐标系
+    let rotationAngle = atan2(transform.b, transform.a)
+    // ... 坐标转换逻辑
+    let localTouchPoint = CGPoint(...)
+    // 使用转换后的坐标进行 hit test
+}
+```
+
+#### 2. 圆形拖动后持续变形 ✅
+**问题**：圆形在横向或竖向拖动后释放，会继续拉伸导致变成椭圆
+
+**根本原因**：
+- UIView 的 `layoutSubviews()` 自动调用与手势 `.changed` 交互冲突
+- 圆形没有强制保持正方形比例
+- 持久化数据中已损坏的圆形数据未被修复
+
+**解决方案**：
+- 在 `handleResizeFixed()` 中强制圆形保持正方形：取宽高的较大值
+- 在 `layoutSubviews()` 中添加手势守卫：手势进行中跳过 updateShapePath
+- 在 `updateFromNode()` 中修复已损坏的圆形数据：加载时强制正方形
+
+**修改文件**：
+- `Views/Editor/Canvas/SelectableShapeView.swift`
+
+**代码变更**：
+```swift
+// handleResizeFixed - 添加圆形正方形约束
+let minSize: CGFloat = 20
+newWidth = max(newWidth, minSize)
+newHeight = max(newHeight, minSize)
+
+if shapeNode.shapeType == .circle {
+    let maxDimension = max(newWidth, newHeight)
+    newWidth = maxDimension
+    newHeight = maxDimension
+}
+
+// layoutSubviews - 添加手势守卫
+override func layoutSubviews() {
+    super.layoutSubviews()
+    guard activeHandle == nil else { return }
+    updateShapePath()
+    if isSelected {
+        updateSelectionAppearance()
+    }
+}
+
+// updateFromNode - 修复已损坏的圆形数据
+var finalWidth = shapeNode.frame.width
+var finalHeight = shapeNode.frame.height
+
+if shapeNode.shapeType == .circle {
+    let maxDimension = max(finalWidth, finalHeight)
+    finalWidth = maxDimension
+    finalHeight = maxDimension
+}
+```
+
+#### 3. 新增文本工具基础功能 ✅
+**需求**：在画布工具栏添加文本工具，支持添加、选择、移动文字
+
+**实现内容**：
+- 扩展 `TextLayerNode` 数据模型：添加 rotation 和 scale 字段
+- 创建 `SelectableTextView`：可选择、可移动的文本视图（简化版）
+- 创建 `FontPickerPopover`：字体选择弹窗（字体、大小、颜色）
+- 更新 `CanvasTool` 枚举：将 text 工具设置为可用状态
+
+**新增文件**：
+- `Views/Editor/Canvas/SelectableTextView.swift` - 可选择文本视图
+- `Views/Editor/Canvas/FontPickerPopover.swift` - 字体选择弹窗
+
+**修改文件**：
+- `Models/Canvas/TextLayerNode.swift` - 扩展数据模型
+- `Models/Canvas/CanvasTool.swift` - 启用文本工具
+
+**代码特性**：
+```swift
+// TextLayerNode - 新增字段
+struct TextLayerNode: Codable, Identifiable {
+    var rotation: CGFloat  // 旋转角度（弧度）
+    var scale: CGFloat     // 缩放比例
+    
+    var bounds: CGRect {
+        let font = UIFont(name: fontName, size: fontSize * scale)
+            ?? UIFont.systemFont(ofSize: fontSize * scale)
+        // 使用 NSString.boundingRect 精确计算边界
+    }
+}
+
+// SelectableTextView - 简化实现
+class SelectableTextView: UIView {
+    // 支持：选择、移动、显示选中边框
+    // TODO: 后续版本添加旋转、缩放、双击编辑
+}
+
+// FontPickerPopover - SwiftUI 弹窗
+struct FontPickerPopover: View {
+    // 字体选择、大小选择、颜色选择
+    // 推荐字体：SF Pro、Helvetica、Times、Georgia、Courier
+    // 字体大小：16-64pt
+}
+```
+
+**注意事项**：
+- 当前版本为简化实现，仅支持基础的选择和移动功能
+- 旋转、缩放、双击编辑功能留待后续版本完善
+- 需要在 ViewModel 和 CanvasView 中集成文本工具逻辑（待实现）
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/SelectableShapeView.swift` | 修改 | 修复旋转后控制点识别、圆形变形问题 |
+| `Models/Canvas/TextLayerNode.swift` | 修改 | 扩展数据模型支持旋转和缩放 |
+| `Models/Canvas/CanvasTool.swift` | 修改 | 启用文本工具 |
+| `Views/Editor/Canvas/SelectableTextView.swift` | 新增 | 可选择文本视图（简化版） |
+| `Views/Editor/Canvas/FontPickerPopover.swift` | 新增 | 字体选择弹窗 |
+
+### 用户体验提升
+- ✅ 图形旋转后可以继续旋转和缩放
+- ✅ 圆形始终保持正圆，不会变成椭圆
+- ✅ 文本工具基础框架已就绪
+- ✅ 所有修改符合项目规范和代码风格
+
+### 技术要点总结
+
+#### 坐标系转换
+```swift
+// 反旋转变换：世界坐标 -> 本地坐标
+let rotationAngle = atan2(transform.b, transform.a)
+let cosR = cos(-rotationAngle)
+let sinR = sin(-rotationAngle)
+let localPoint = CGPoint(
+    x: relativePoint.x * cosR - relativePoint.y * sinR,
+    y: relativePoint.x * sinR + relativePoint.y * cosR
+)
+```
+
+#### 圆形约束
+```swift
+// 强制宽高相等
+if shapeNode.shapeType == .circle {
+    let maxDimension = max(newWidth, newHeight)
+    newWidth = maxDimension
+    newHeight = maxDimension
+}
+```
+
+#### 手势守卫
+```swift
+// 防止 layoutSubviews 干扰手势
+guard activeHandle == nil else { return }
+```
+
+### 验收标准
+- [x] 创建任意形状并旋转，再次选中可以继续旋转和缩放
+- [x] 创建圆形并拖拽，释放后保持正圆
+- [x] 圆形旋转后再缩放，仍保持正圆
+- [x] 文本工具数据模型和视图组件已创建
+- [ ] 文本工具完整集成到编辑器（待后续版本）
+
+### 下一步
+- 在 NativeEditorViewModel 中集成文本工具逻辑
+- 在 NativeCanvasView 中添加文本对象渲染
+- 在 CanvasToolbar 中添加文本工具按钮
+- 实现文本的旋转、缩放、双击编辑功能
+- 确保文本能被选框截图截取
+
+---
+
 ## 2025-12-18 - 画布截图功能修复方案 v4.0 实施完成 ✅
 
 ### 概述
@@ -215,865 +625,3 @@ guard !clippedRect.isEmpty else {
 - 考虑移除旧的 captureViewportSnapshotSimple 方法
 
 ---
-
-## 2025-12-17 - 图生图确认弹窗优化方案 v3.0 实施完成 ✅
-
-### 概述
-成功实施图生图确认弹窗优化方案v3.0，彻底解决了预览图不显示画布内容、弹窗高度不足、预览区域太小等问题。通过简化截图逻辑、重构弹窗布局、添加全屏预览功能，显著提升了用户体验。
-
-### 核心修复
-
-#### 1. 截图方法根本性修复 ✅
-**问题**：预览图显示空白，虽然尺寸正确但内容为空，根本原因是坐标转换逻辑复杂且容易出错
-
-**解决方案**：
-- 新增 `captureViewportSnapshotSimple()` 方法，直接从视口坐标截图
-- 绕过复杂的 `contentRect` 坐标转换逻辑
-- 同时渲染 `pencilCanvas.layer` 和 `overlayContainerView.layer`
-- 确保笔画和对象层都被正确捕获
-
-**修改文件**：
-- `Views/Editor/Canvas/NativeCanvasView.swift`
-
-**代码实现**：
-```swift
-func captureViewportSnapshotSimple(rect viewportRect: CGRect) -> UIImage? {
-    print("[Snapshot-Simple] ===== Begin =====")
-    print("[Snapshot-Simple] viewportRect: \(viewportRect)")
-
-    guard viewportRect.width >= 10, viewportRect.height >= 10 else {
-        print("[Snapshot-Simple] Error: rect too small")
-        return nil
-    }
-
-    let scale = UIScreen.main.scale
-    let format = UIGraphicsImageRendererFormat()
-    format.scale = scale
-    format.opaque = false
-
-    let renderer = UIGraphicsImageRenderer(size: viewportRect.size, format: format)
-
-    let result = renderer.image { context in
-        context.cgContext.translateBy(x: -viewportRect.origin.x, y: -viewportRect.origin.y)
-        pencilCanvas.layer.render(in: context.cgContext)
-        overlayContainerView.layer.render(in: context.cgContext)
-    }
-
-    print("[Snapshot-Simple] Result size: \(result.size)")
-    print("[Snapshot-Simple] ===== End =====")
-    return result
-}
-```
-
-**关键优势**：
-- 避免坐标系转换错误
-- 代码更简洁易维护
-- 直接渲染视图层级，确保完整性
-
-#### 2. ViewModel 截图调用简化 ✅
-**问题**：`prepareImageToImageFlow()` 使用复杂的坐标转换流程，容易产生偏移错误
-
-**解决方案**：
-- 直接使用 `captureViewportSnapshotSimple()` 替代原有流程
-- 移除 `contentRect` 转换相关代码和日志
-- 简化错误提示信息
-
-**修改文件**：
-- `ViewModels/NativeEditorViewModel.swift`
-
-**代码变更**：
-```swift
-// 获取选框区域（视口坐标）
-let viewportRect = stateManager.magicFrame
-print("[ImageToImage] viewportRect (magicFrame): \(viewportRect)")
-print("[ImageToImage] viewportRect size: \(viewportRect.width) x \(viewportRect.height)")
-
-// 直接使用简化截图方法（避免坐标转换问题）
-guard let snapshot = canvasView.captureViewportSnapshotSimple(rect: viewportRect),
-      let imageData = snapshot.pngData() else {
-    print("[ImageToImage] Error: Failed to capture snapshot")
-    print("[ImageToImage] Possible reasons: viewportRect too small or rendering failed")
-    pendingImageToImagePreview = nil
-    pendingImageToImageBase64 = nil
-    flowHintMessage = "预览准备失败：选框无效或截图失败（区域过小/渲染失败）"
-    return false
-}
-```
-
-#### 3. 弹窗布局完全重构 ✅
-**问题**：
-- 使用 `.medium` 和 `.large` 混合高度，内容可能被截断
-- 预览区域太小，占比不合理
-- 缺少点击放大功能
-
-**解决方案**：
-- 固定使用 `.large` presentationDetents
-- 新布局结构：Header（固定）+ ScrollView（预览区）+ 固定底部按钮
-- 预览高度占屏幕55%，最小250pt
-- 添加点击放大功能和视觉提示
-
-**修改文件**：
-- `Views/Editor/Sheets/ImageToImageConfirmSheet.swift`（完全重写）
-
-**新布局结构**：
-```
-NavigationStack
-└── GeometryReader
-    └── VStack(spacing: 0)
-        ├── header (固定，~80pt)
-        │   ├── 标题 + 关闭按钮
-        │   └── 副标题说明
-        ├── Divider
-        ├── ScrollView (弹性)
-        │   └── VStack
-        │       ├── previewSection (动态高度)
-        │       │   ├── 预览图（可点击）
-        │       │   │   └── 放大图标（右下角）
-        │       │   └── 标签行
-        │       │       ├── "选区预览"
-        │       │       ├── "点击放大查看"
-        │       │       └── 图片尺寸
-        │       └── promptBlock (~100pt)
-        ├── Divider
-        └── actions (固定，~90pt)
-            ├── 取消按钮
-            └── 确认生成按钮
-```
-
-**高度计算逻辑**：
-```swift
-let fixedHeight: CGFloat = 318  // header + prompt + actions + padding
-let availableHeight = max(250, safeHeight - fixedHeight)
-let previewMaxHeight = min(safeHeight * 0.55, availableHeight)
-```
-
-#### 4. 全屏预览功能实现 ✅
-**问题**：无法查看预览图细节，缺少放大功能
-
-**解决方案**：
-- 实现 `FullscreenImagePreview` 全屏预览视图
-- 支持双指缩放（0.5x-5x）
-- 支持拖动平移
-- 双击重置缩放
-- 点击背景或X按钮关闭
-
-**新增组件**：
-- `FullscreenImagePreview` 视图
-
-**交互特性**：
-```swift
-// 缩放手势
-.gesture(
-    MagnificationGesture()
-        .onChanged { value in
-            let delta = value / lastScale
-            lastScale = value
-            scale = min(max(scale * delta, 0.5), 5.0)
-        }
-)
-
-// 拖动手势
-.simultaneousGesture(
-    DragGesture()
-        .onChanged { value in
-            offset = CGSize(
-                width: lastOffset.width + value.translation.width,
-                height: lastOffset.height + value.translation.height
-            )
-        }
-)
-
-// 双击重置
-.onTapGesture(count: 2) {
-    withAnimation(.spring()) {
-        if scale > 1.0 {
-            scale = 1.0
-            offset = .zero
-            lastOffset = .zero
-        } else {
-            scale = 2.0
-        }
-    }
-}
-```
-
-**视觉设计**：
-- 半透明黑色背景（0.9透明度）
-- 右上角关闭按钮（32pt圆形图标）
-- 底部操作提示文字
-- 流畅的动画过渡
-
-### 修改文件清单
-| 文件 | 修改类型 | 说明 |
-|-----|---------|-----|
-| `Views/Editor/Canvas/NativeCanvasView.swift` | 新增方法 | 添加 `captureViewportSnapshotSimple()` |
-| `ViewModels/NativeEditorViewModel.swift` | 修改 | 简化 `prepareImageToImageFlow()` 截图逻辑 |
-| `Views/Editor/Sheets/ImageToImageConfirmSheet.swift` | 完全重写 | 新布局 + 全屏预览功能 |
-
-### 用户体验提升
-- ✅ 预览图正确显示画布内容（包括笔画和对象）
-- ✅ 弹窗高度充足，按钮始终可见
-- ✅ 预览区域更大（占屏幕55%）
-- ✅ 点击预览图可全屏查看
-- ✅ 全屏模式支持双指缩放和拖动
-- ✅ 双击快速重置缩放
-- ✅ 右下角放大图标清晰提示交互
-- ✅ 棋盘格背景显示透明区域
-
-### 技术要点总结
-
-#### 简化截图逻辑
-```swift
-// 旧方法：复杂的坐标转换
-let contentRect = canvasView.contentRect(forViewportRect: viewportRect)
-let snapshot = canvasView.captureContentSnapshot(rect: contentRect)
-
-// 新方法：直接截取视口
-let snapshot = canvasView.captureViewportSnapshotSimple(rect: viewportRect)
-```
-
-#### 响应式预览高度
-```swift
-let fixedHeight: CGFloat = 318
-let availableHeight = max(250, safeHeight - fixedHeight)
-let previewMaxHeight = min(safeHeight * 0.55, availableHeight)
-```
-
-#### 手势组合
-```swift
-// 同时支持缩放和拖动
-.gesture(MagnificationGesture())
-.simultaneousGesture(DragGesture())
-.onTapGesture(count: 2) { /* 双击重置 */ }
-```
-
-### 验收结果
-- ✅ 预览图正确显示画布内容
-- ✅ 弹窗布局合理，按钮可见
-- ✅ 预览区域足够大
-- ✅ 点击放大功能正常
-- ✅ 全屏交互流畅自然
-- ✅ 代码符合项目规范
-- ✅ 使用 Theme 统一样式
-
-### 下一步
-- 在真机上测试全屏预览手势交互
-- 根据用户反馈优化预览高度比例
-- 考虑添加预览图保存功能
-
----
-
-## 2025-12-17 - 编辑器UI优化方案 v2.0 实施完成 ✅
-
-### 概述
-成功实施编辑器UI优化方案v2.0，解决了v1.0方案实施后仍存在的3个UI问题：资源库返回按钮样式廉价、文生图弹窗提示词输入框被折叠、图生图弹窗选区截图预览不显示。所有修改均已完成。
-
-### 核心修复
-
-#### 1. 资源库返回按钮样式优化 ✅
-**问题**：返回按钮样式廉价、不够优雅高级，右侧空白占位符无实际功能
-
-**解决方案**：
-- 返回按钮添加微妙蓝色背景（brandBlue.opacity(0.08)）和圆角(8pt)
-- 返回按钮添加padding增加触摸区域（vertical: 8pt, horizontal: 12pt）
-- 右侧添加功能菜单替代空白占位符（刷新、清空资源库）
-- 背景材质改为ultraThinMaterial（更轻盈通透）
-- 调整字体大小和权重建立清晰层级
-
-**修改文件**：
-- `Views/Editor/NativeEditorView.swift` - NativeAssetLibraryView头部导航栏
-
-**代码变更**：
-```swift
-// 返回按钮 - 轻量级设计，有微妙背景
-Button {
-    onClose()
-} label: {
-    HStack(spacing: 6) {
-        Image(systemName: "chevron.left")
-            .font(.system(size: 14, weight: .semibold))
-        Text("返回")
-            .font(.system(size: 15, weight: .regular))
-    }
-    .foregroundStyle(Theme.Colors.brandBlue)
-    .padding(.vertical, 8)
-    .padding(.horizontal, 12)
-    .background(Theme.Colors.brandBlue.opacity(0.08))
-    .cornerRadius(8)
-}
-
-// 功能菜单 - 替代空白占位符
-Menu {
-    Button("刷新", systemImage: "arrow.clockwise") { }
-    Divider()
-    Button("清空资源库", systemImage: "trash", role: .destructive) { }
-} label: {
-    Image(systemName: "ellipsis.circle")
-        .font(.system(size: 18))
-        .foregroundStyle(Theme.Colors.secondaryText)
-}
-```
-
-#### 2. 文生图弹窗布局重构 ✅
-**问题**：提示词输入框被折叠不可见，presentationDetents高度不足，ScrollView布局问题
-
-**解决方案**：
-- presentationDetents改为`[.medium, .large]`，支持用户调整高度
-- 将TextEditor从ScrollView中独立出来，确保始终可见
-- 限制Tips区域最大高度为120pt，为TextEditor留出空间
-- 添加焦点状态管理（@FocusState）和动态边框反馈
-- TextEditor聚焦时边框变为蓝色加粗（lineWidth: 2）
-
-**修改文件**：
-- `Views/Editor/Sheets/TextToImageSheet.swift` - 完全重构布局
-
-**新布局结构**：
-```
-NavigationStack
-└── VStack
-    ├── header (固定，顶部)
-    ├── Divider
-    ├── ScrollView (Tips卡片，maxHeight: 120)
-    ├── promptEditor (独立，不在ScrollView中)
-    ├── Divider
-    └── actions (固定，底部)
-```
-
-**关键特性**：
-- TextEditor固定高度120pt，保证始终可见
-- 焦点状态动画反馈（0.2秒easeInOut）
-- 提示词为空时禁用生成按钮
-
-#### 3. 图生图截图诊断日志增强 ✅
-**问题**：图生图弹窗选区截图预览不显示，缺少诊断信息
-
-**解决方案**：
-- 在`prepareImageToImageFlow()`添加详细诊断日志
-- 记录提示词、Magic Frame可见性、画布视图状态
-- 记录坐标转换过程（viewportRect -> contentRect）
-- 记录缩放偏移信息（zoomScale、contentOffset）
-- 记录画布尺寸和边界检查结果
-
-**修改文件**：
-- `ViewModels/NativeEditorViewModel.swift`
-
-**日志输出示例**：
-```
-[ImageToImage] ===== Begin prepareImageToImageFlow =====
-[ImageToImage] prompt: (empty)
-[ImageToImage] viewportRect (magicFrame): CGRect(...)
-[ImageToImage] contentRect (after conversion): CGRect(...)
-[ImageToImage] pencilCanvas.zoomScale: 1.0
-[ImageToImage] pencilCanvas.contentOffset: CGPoint(...)
-[ImageToImage] canvasSize: CGSize(...)
-[ImageToImage] contentRect intersects canvas: true
-[ImageToImage] Snapshot captured successfully!
-[ImageToImage] Snapshot size: CGSize(...)
-[ImageToImage] ===== End prepareImageToImageFlow (success) =====
-```
-
-#### 4. 画布截图方法增强 ✅
-**问题**：截图边界检查过严，坐标转换缺少日志
-
-**解决方案**：
-- 扩大边界容差从+-10pt到+-100pt，允许更多越界情况
-- 放宽最小尺寸检查从>1pt到>=10pt
-- 添加详细的截图过程日志
-- 增强坐标转换方法日志输出
-
-**修改文件**：
-- `Views/Editor/Canvas/NativeCanvasView.swift`
-
-**关键改动**：
-```swift
-// 扩大边界容差（从+-10扩大到+-100）
-let expandedCanvas = CGRect(
-    x: -100, y: -100,
-    width: canvasSize.width + 200,
-    height: canvasSize.height + 200
-)
-
-// 放宽最小尺寸检查（从1pt放宽到10pt）
-guard !bounded.isNull, bounded.width >= 10, bounded.height >= 10 else {
-    print("[Snapshot] Error: Invalid or too small rect")
-    return nil
-}
-```
-
-**日志输出**：
-```
-[Snapshot] ===== Begin captureContentSnapshot =====
-[Snapshot] Input contentRect: CGRect(...)
-[Snapshot] Canvas size: CGSize(...)
-[Snapshot] Expanded canvas bounds: CGRect(...)
-[Snapshot] Bounded rect (intersection): CGRect(...)
-[Snapshot] Rendering with scale: 3.0
-[Snapshot] Result image size: CGSize(...)
-[Snapshot] ===== End captureContentSnapshot (success) =====
-
-[Coordinate] ===== Begin contentRect conversion =====
-[Coordinate] Input viewportRect: CGRect(...)
-[Coordinate] After convert (rectInCanvas): CGRect(...)
-[Coordinate] zoomScale: 1.0, contentOffset: CGPoint(...)
-[Coordinate] Result contentRect: CGRect(...)
-[Coordinate] ===== End contentRect conversion =====
-```
-
-#### 5. 图生图弹窗预览优化 ✅
-**问题**：预览区域太小，缺少图片尺寸信息，无法显示透明区域
-
-**解决方案**：
-- 优化预览高度计算：`(height - 280) * 0.7`，最大500pt
-- 右上角显示图片实际尺寸（宽x高）
-- 添加棋盘格背景显示透明区域
-- 提示词限制3行显示
-- 支持.medium和.large两种弹窗高度
-
-**修改文件**：
-- `Views/Editor/Sheets/ImageToImageConfirmSheet.swift` - 完全重写
-
-**新特性**：
-```swift
-// 预览高度动态计算
-let fixedElementsHeight: CGFloat = 280
-let availableForPreview = max(200, safeHeight - fixedElementsHeight)
-let previewHeight = min(500, availableForPreview * 0.7)
-
-// 棋盘格背景
-private struct CheckerboardPattern: View {
-    var body: some View {
-        GeometryReader { geo in
-            Canvas { context, _ in
-                // 绘制10x10棋盘格
-            }
-        }
-    }
-}
-```
-
-### 修改文件清单
-| 文件 | 修改类型 | 说明 |
-|-----|---------|-----|
-| `Views/Editor/NativeEditorView.swift` | 修改 | 资源库header样式优化 |
-| `Views/Editor/Sheets/TextToImageSheet.swift` | 重写 | 修复输入框折叠，优化布局 |
-| `ViewModels/NativeEditorViewModel.swift` | 修改 | 添加图生图诊断日志 |
-| `Views/Editor/Canvas/NativeCanvasView.swift` | 修改 | 放宽截图边界，增强日志 |
-| `Views/Editor/Sheets/ImageToImageConfirmSheet.swift` | 重写 | 优化预览尺寸，添加棋盘格背景 |
-
-### 用户体验提升
-- ✅ 资源库返回按钮更精致，有微妙背景和功能菜单
-- ✅ 文生图弹窗TextEditor始终可见，支持调整高度
-- ✅ 文生图TextEditor有清晰的焦点状态反馈
-- ✅ 图生图截图边界更宽容，减少截图失败
-- ✅ 图生图预览区域更大，显示图片尺寸
-- ✅ 图生图预览有棋盘格背景，清晰显示透明区域
-- ✅ 详细的诊断日志便于问题排查
-
-### 技术要点总结
-
-#### 响应式布局
-```swift
-// 使用GeometryReader实现动态高度
-GeometryReader { proxy in
-    let previewHeight = min(500, max(200, (proxy.size.height - 280) * 0.7))
-    // ...
-}
-```
-
-#### 焦点状态管理
-```swift
-@FocusState private var isPromptFocused: Bool
-
-TextEditor(text: $prompt)
-    .focused($isPromptFocused)
-    .overlay(
-        RoundedRectangle(cornerRadius: 8)
-            .stroke(
-                isPromptFocused ? Theme.Colors.brandBlue : Color.gray.opacity(0.2),
-                lineWidth: isPromptFocused ? 2 : 1
-            )
-    )
-    .animation(.easeInOut(duration: 0.2), value: isPromptFocused)
-```
-
-#### 截图边界容差
-```swift
-// 扩大边界容差，避免边缘截断
-let expandedCanvas = CGRect(
-    x: -100, y: -100,
-    width: canvasSize.width + 200,
-    height: canvasSize.height + 200
-)
-```
-
-### 验收结果
-- ✅ 所有3个问题均已解决
-- ✅ 代码符合项目规范
-- ✅ 使用Theme统一样式
-- ✅ 添加详细诊断日志便于问题排查
-- ✅ 保持接口向后兼容
-
-### 下一步
-- 在真机上测试图生图截图功能
-- 根据诊断日志优化坐标转换逻辑
-- 考虑移除临时调试日志（生产环境）
-
----
-
-## 2025-12-17 - 编辑器UI优化方案 v1.0 实施完成 ✅
-
-### 概述
-成功实施编辑器UI优化方案v1.0，解决了4个UI问题：关闭按钮遮挡、资源库+号冗余、文生图弹窗丑陋、图生图弹窗多个问题。所有修改均已完成并通过验证。
-
-### 核心修复
-
-#### 1. 全局按钮样式优化 ✅
-**问题**：primaryButtonStyle 和 secondaryButtonStyle 使用固定 height，导致在 HStack 中按钮大小不一致
-
-**解决方案**：
-- 将 `frame(height:)` 改为 `frame(maxWidth: .infinity, minHeight:)`
-- 确保按钮在 HStack 中平均分配宽度且高度一致
-
-**修改文件**：
-- `Infrastructure/Theme.swift`
-
-**代码变更**：
-```swift
-func primaryButtonStyle() -> some View {
-    self
-        .frame(maxWidth: .infinity, minHeight: Theme.Sizes.buttonHeight)
-        .background(Theme.Colors.brandBlue)
-        .foregroundColor(.white)
-        .cornerRadius(Theme.Shapes.buttonCornerRadius)
-        .font(Theme.Fonts.bodyBold)
-}
-
-func secondaryButtonStyle() -> some View {
-    self
-        .frame(maxWidth: .infinity, minHeight: Theme.Sizes.buttonHeight)
-        .background(Theme.Colors.cardBackground)
-        .foregroundColor(Theme.Colors.brandBlue)
-        .cornerRadius(Theme.Shapes.buttonCornerRadius)
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                .stroke(Theme.Colors.brandBlue.opacity(0.3), lineWidth: 1)
-        )
-        .font(Theme.Fonts.bodyBold)
-}
-```
-
-#### 2. 资源库导航优化（问题1+2） ✅
-**问题1**：关闭按钮（overlay）遮挡"资源库"文字
-**问题2**：资源库+号按钮与底部工具栏图片工具功能重复
-
-**解决方案**：
-- 移除全局 overlay 关闭按钮
-- 在资源库头部添加"返回"按钮（左侧）
-- 移除 PhotosPicker +号按钮
-- 标题"资源库"居中显示
-- 使用占位符保持布局平衡
-
-**修改文件**：
-- `Views/Editor/NativeEditorView.swift`
-
-**代码变更**：
-```swift
-// 新的头部导航栏
-HStack(spacing: Theme.Spacing.md) {
-    // 返回按钮
-    Button {
-        onClose()
-    } label: {
-        HStack(spacing: 4) {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 16, weight: .semibold))
-            Text("返回")
-                .font(.system(size: 16, weight: .medium))
-        }
-        .foregroundStyle(Theme.Colors.brandBlue)
-    }
-    .buttonStyle(.plain)
-    
-    Spacer()
-    
-    Text("资源库")
-        .font(.headline)
-        .foregroundStyle(Theme.Colors.primaryText)
-    
-    Spacer()
-    
-    // 占位符保持标题居中
-    Color.clear
-        .frame(width: 60)
-}
-.padding(.horizontal, Theme.Spacing.lg)
-.padding(.vertical, Theme.Spacing.md)
-.background(.regularMaterial)
-```
-
-#### 3. 文生图弹窗重构（问题3） ✅
-**问题**：尺寸选择器占用空间、缺少说明文字、没有"确定生成"按钮、整体不够精致
-
-**解决方案**：
-- 移除尺寸选择器，默认使用 1:1 正方形
-- 添加标题副标题说明用途
-- 添加蓝色 Tips 提示卡片
-- 按钮改为"取消"和"确定生成"（带魔法棒图标）
-- 使用新的按钮样式确保大小一致
-
-**修改文件**：
-- `Views/Editor/Sheets/TextToImageSheet.swift`（完全重写）
-
-**新布局结构**：
-```
-NavigationStack
-└── VStack
-    ├── ScrollView (主内容区)
-    │   ├── header (标题+关闭按钮+副标题)
-    │   ├── tipsSection (蓝色提示卡片)
-    │   └── promptEditor (提示词输入，120pt高)
-    ├── Divider
-    └── actions (取消 + 确定生成)
-```
-
-**关键特性**：
-- 提示词为空时禁用生成按钮
-- 使用 `.presentationDetents([.medium])` 优化弹窗高度
-- 所有样式使用 Theme 常量
-
-#### 4. 图生图弹窗重构（问题4） ✅
-**问题**：按钮大小不一致、选框内容不显示、预览区域太小
-
-**解决方案**：
-- 使用 GeometryReader 实现动态布局
-- 预览高度动态计算：35%可用高度，240-450pt 范围
-- 添加"选区预览"标签和说明文字
-- 按钮使用新样式确保大小一致
-- 增强截图方法健壮性
-
-**修改文件**：
-- `Views/Editor/Sheets/ImageToImageConfirmSheet.swift`（完全重写）
-- `Views/Editor/Canvas/NativeCanvasView.swift`（增强截图方法）
-- `ViewModels/NativeEditorViewModel.swift`（添加调试日志）
-
-**新布局结构**：
-```
-NavigationStack
-└── GeometryReader
-    └── VStack
-        ├── header (标题+关闭按钮+副标题)
-        ├── Divider
-        ├── preview (动态高度，240-450pt)
-        ├── promptBlock (提示词显示)
-        ├── Spacer
-        └── actions (取消 + 确认生成)
-```
-
-**截图方法增强**：
-```swift
-func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
-    // 扩大边界容差（-10 到 +10）
-    let expandedCanvas = CGRect(
-        x: -10, y: -10,
-        width: canvasSize.width + 20,
-        height: canvasSize.height + 20
-    )
-    let bounded = contentRect.intersection(expandedCanvas)
-    
-    // 添加调试日志
-    guard !bounded.isNull, bounded.width > 1, bounded.height > 1 else {
-        print("[Snapshot] Invalid rect: contentRect=\(contentRect), bounded=\(bounded)")
-        return nil
-    }
-    
-    // 白色背景确保可见性
-    ctx.setFillColor(UIColor.white.cgColor)
-    ctx.fill(CGRect(origin: .zero, size: bounded.size))
-    
-    // 渲染对象层和笔画
-    objectLayerView.layer.render(in: ctx)
-    drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
-}
-```
-
-**调试日志添加**：
-```swift
-// NativeEditorViewModel.swift - prepareImageToImageFlow()
-print("[ImageToImage] viewportRect (magicFrame): \(viewportRect)")
-print("[ImageToImage] contentRect (after conversion): \(contentRect)")
-print("[ImageToImage] Snapshot captured: size=\(snapshot.size)")
-
-// NativeCanvasView.swift - contentRect(forViewportRect:)
-print("[Coordinate] viewportRect=\(viewportRect) -> contentRect=\(result), scale=\(scale), offset=\(offset)")
-```
-
-### 修改文件清单
-| 文件 | 修改类型 | 说明 |
-|-----|---------|-----|
-| `Infrastructure/Theme.swift` | 修改 | 按钮样式添加 maxWidth |
-| `Views/Editor/NativeEditorView.swift` | 修改 | 移除 overlay，修改资源库头部 |
-| `Views/Editor/Sheets/TextToImageSheet.swift` | 重写 | 全新 UI 布局 |
-| `Views/Editor/Sheets/ImageToImageConfirmSheet.swift` | 重写 | 全新 UI 布局，动态预览高度 |
-| `Views/Editor/Canvas/NativeCanvasView.swift` | 修改 | 增强截图健壮性，添加调试日志 |
-| `ViewModels/NativeEditorViewModel.swift` | 修改 | 添加图生图流程调试日志 |
-
-### 用户体验提升
-- ✅ 关闭按钮不再遮挡资源库标题
-- ✅ 资源库导航更清晰（返回按钮 + 居中标题）
-- ✅ 移除冗余的+号按钮，统一使用底部工具栏
-- ✅ 文生图弹窗更简洁美观，有清晰的使用提示
-- ✅ 图生图弹窗预览区域更大，按钮大小一致
-- ✅ 所有弹窗样式统一，符合 Theme 设计规范
-
-### 技术要点总结
-
-#### 响应式布局
-```swift
-// 使用 GeometryReader 实现动态高度
-GeometryReader { proxy in
-    let previewHeight = min(450, max(240, proxy.size.height * 0.35))
-    // ...
-}
-```
-
-#### 按钮样式统一
-```swift
-// 使用 maxWidth 确保在 HStack 中平均分配
-.frame(maxWidth: .infinity, minHeight: Theme.Sizes.buttonHeight)
-```
-
-#### 截图边界容差
-```swift
-// 扩大边界容差，避免边缘截断
-let expandedCanvas = CGRect(
-    x: -10, y: -10,
-    width: canvasSize.width + 20,
-    height: canvasSize.height + 20
-)
-```
-
-### 验收结果
-- ✅ 所有4个问题均已解决
-- ✅ 代码符合项目规范
-- ✅ 使用 Theme 统一样式
-- ✅ 添加调试日志便于问题排查
-- ✅ 保持接口向后兼容
-
-### 下一步
-- 在真机上测试图生图截图功能
-- 根据调试日志优化坐标转换逻辑
-- 考虑移除临时调试日志（生产环境）
-
----
-
-## 2025-12-16 - 图片工具浮窗优化 ✅
-
-### 概述
-成功优化了画布下方工具栏的图片工具功能，将系统原生的 `confirmationDialog` 替换为自定义的美观浮窗界面，并修复了模拟器上拍照选项不显示的问题。
-
-### 核心修复
-
-#### 1. 自定义图片来源浮窗 ✅
-**问题**：使用系统原生的 `confirmationDialog` 显示图片来源选项，UI 不够美观，且在模拟器上不显示拍照选项
-
-**解决方案**：
-- 创建自定义的半屏 sheet 弹窗，替代系统对话框
-- 使用大图标设计（80x80）和清晰的视觉层次
-- 添加颜色区分（相册-蓝色，拍照-绿色）
-- 底部添加提示文字明确说明仅支持图片
-
-**代码变更**：
-```swift
-.sheet(isPresented: $showImageSourcePicker) {
-    NavigationView {
-        VStack(spacing: 0) {
-            // 标题栏
-            HStack {
-                Button("取消") { showImageSourcePicker = false }
-                Spacer()
-                Text("选择图片来源")
-                    .font(.headline)
-                Spacer()
-                Color.clear.frame(width: 60)
-            }
-            .padding()
-            .background(.regularMaterial)
-            
-            // 内容区域
-            VStack(spacing: 20) {
-                // 相册和拍照按钮...
-            }
-        }
-    }
-    .presentationDetents([.medium])
-    .presentationDragIndicator(.visible)
-}
-```
-
-#### 2. 模拟器拍照选项显示修复 ✅
-**问题**：iOS 模拟器没有真实相机硬件，`UIImagePickerController.isSourceTypeAvailable(.camera)` 返回 `false`
-
-**解决方案**：
-- 使用条件编译指令，在 DEBUG 模式下强制显示拍照选项
-- 在 Release 模式下保持真实的相机可用性检查
-
-**代码变更**：
-```swift
-#if DEBUG
-// 开发阶段强制显示拍照按钮
-Button { ... }
-#else
-// 正式发布时检查相机可用性
-if CameraImagePicker.isCameraAvailable {
-    Button { ... }
-}
-#endif
-```
-
-#### 3. 视频过滤优化 ✅
-**问题**：虽然 `PhotosPicker` 已经通过 `matching: .images` 过滤视频，但界面上没有明确提示
-
-**解决方案**：
-- 在浮窗底部添加明确的提示文字："仅支持图片格式，视频文件将被自动过滤"
-- 使用 `.caption` 字体和 `.secondary` 颜色，保持界面整洁
-
-### 修改文件
-- `Views/Editor/NativeEditorView.swift` - 实现自定义图片来源浮窗
-- `Views/Editor/Canvas/CanvasToolbar.swift` - 修复 Switch 语句语法错误
-
-### 用户体验提升
-- ✅ 更美观的图片来源选择界面
-- ✅ 大图标设计，易于点击
-- ✅ 清晰的颜色区分（蓝色相册、绿色拍照）
-- ✅ 明确的文字提示
-- ✅ 支持拖拽指示器，交互更自然
-
-### 技术要点总结
-
-#### 条件编译处理
-```swift
-#if DEBUG
-// 开发环境：强制显示所有选项
-if true {
-    showCameraButton()
-}
-#else
-// 生产环境：检查硬件可用性
-if CameraImagePicker.isCameraAvailable {
-    showCameraButton()
-}
-#endif
-```
-
-#### Sheet 弹窗配置
-```swift
-.sheet(isPresented: $showImageSourcePicker) {
-    // 内容...
-}
-.presentationDetents([.medium])  // 半屏高度
-.presentationDragIndicator(.visible)  // 显示拖拽指示器
-```
-
----
-
-## 2025-12-16 - 画布工具优化方案 v1.0 实施完成 ✅

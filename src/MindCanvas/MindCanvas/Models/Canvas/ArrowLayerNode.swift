@@ -72,24 +72,44 @@ struct ArrowLayerNode: Codable, Identifiable {
         self.createdAt = Date()
     }
     
+    /// 内部初始化方法（用于更新时保持ID）
+    private init(
+        id: UUID,
+        startPoint: CGPoint,
+        endPoint: CGPoint,
+        color: String,
+        lineWidth: CGFloat,
+        zIndex: Int,
+        rotation: Double,
+        scale: CGFloat,
+        hasArrowHead: Bool,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.color = color
+        self.lineWidth = lineWidth
+        self.zIndex = zIndex
+        self.rotation = rotation
+        self.scale = scale
+        self.hasArrowHead = hasArrowHead
+        self.createdAt = createdAt
+    }
+    
     /// 更新箭头属性
     func updated(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil, color: String? = nil, lineWidth: CGFloat? = nil, zIndex: Int? = nil, rotation: Double? = nil, scale: CGFloat? = nil, hasArrowHead: Bool? = nil) -> ArrowLayerNode {
-        var node = self
-        if let startPoint = startPoint { node.startPoint = startPoint }
-        if let endPoint = endPoint { node.endPoint = endPoint }
-        if let rotation = rotation { node.rotation = rotation }
-        if let scale = scale { node.scale = scale }
-        if let hasArrowHead = hasArrowHead { node.hasArrowHead = hasArrowHead }
-        // 其他属性由于是 let，需要创建新实例
         return ArrowLayerNode(
-            startPoint: node.startPoint,
-            endPoint: node.endPoint,
+            id: self.id,  // 保持原有ID不变
+            startPoint: startPoint ?? self.startPoint,
+            endPoint: endPoint ?? self.endPoint,
             color: color ?? self.color,
             lineWidth: lineWidth ?? self.lineWidth,
             zIndex: zIndex ?? self.zIndex,
-            rotation: node.rotation,
-            scale: node.scale,
-            hasArrowHead: node.hasArrowHead
+            rotation: rotation ?? self.rotation,
+            scale: scale ?? self.scale,
+            hasArrowHead: hasArrowHead ?? self.hasArrowHead,
+            createdAt: self.createdAt  // 保持创建时间不变
         )
     }
 }

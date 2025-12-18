@@ -24,14 +24,35 @@ struct RectangleLayerNode: Codable, Identifiable {
         self.createdAt = Date()
     }
     
+    /// 内部初始化方法（用于更新时保持ID）
+    private init(
+        id: UUID,
+        rect: CGRect,
+        color: String,
+        lineWidth: CGFloat,
+        isFilled: Bool,
+        zIndex: Int,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.rect = rect
+        self.color = color
+        self.lineWidth = lineWidth
+        self.isFilled = isFilled
+        self.zIndex = zIndex
+        self.createdAt = createdAt
+    }
+    
     /// 更新矩形属性
     func updated(rect: CGRect? = nil, color: String? = nil, lineWidth: CGFloat? = nil, isFilled: Bool? = nil, zIndex: Int? = nil) -> RectangleLayerNode {
-        RectangleLayerNode(
+        return RectangleLayerNode(
+            id: self.id,  // 保持原有ID不变
             rect: rect ?? self.rect,
             color: color ?? self.color,
             lineWidth: lineWidth ?? self.lineWidth,
             isFilled: isFilled ?? self.isFilled,
-            zIndex: zIndex ?? self.zIndex
+            zIndex: zIndex ?? self.zIndex,
+            createdAt: self.createdAt  // 保持创建时间不变
         )
     }
 }

@@ -68,11 +68,7 @@ struct TextDisplayView: View {
     
     var body: some View {
         Text(textLayer.text)
-            .font(
-                textLayer.fontName != nil 
-                    ? .custom(textLayer.fontName!, size: textLayer.fontSize)
-                    : .system(size: textLayer.fontSize)
-            )
+            .font(.custom(textLayer.fontName, size: textLayer.fontSize))
             .foregroundColor(Color.fromHex(textLayer.color) ?? .black)
             .position(textLayer.position)
             .multilineTextAlignment(.center)

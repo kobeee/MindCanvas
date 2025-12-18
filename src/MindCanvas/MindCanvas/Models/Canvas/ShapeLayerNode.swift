@@ -39,6 +39,29 @@ struct ShapeLayerNode: Codable, Identifiable {
         self.zIndex = zIndex
         self.createdAt = Date()
     }
+    
+    /// 内部初始化方法（用于更新时保持ID）
+    private init(
+        id: UUID,
+        frame: CGRect,
+        shapeType: ShapeType,
+        color: String,
+        lineWidth: CGFloat,
+        isFilled: Bool,
+        rotation: Double,
+        zIndex: Int,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.frame = frame
+        self.rotation = rotation
+        self.shapeType = shapeType
+        self.color = color
+        self.lineWidth = lineWidth
+        self.isFilled = isFilled
+        self.zIndex = zIndex
+        self.createdAt = createdAt
+    }
 
     /// 更新形状属性
     func updated(
@@ -50,13 +73,15 @@ struct ShapeLayerNode: Codable, Identifiable {
         zIndex: Int? = nil
     ) -> ShapeLayerNode {
         return ShapeLayerNode(
+            id: self.id,  // 保持原有ID不变
             frame: frame ?? self.frame,
             shapeType: self.shapeType,
             color: color ?? self.color,
             lineWidth: lineWidth ?? self.lineWidth,
             isFilled: isFilled ?? self.isFilled,
             rotation: rotation ?? self.rotation,
-            zIndex: zIndex ?? self.zIndex
+            zIndex: zIndex ?? self.zIndex,
+            createdAt: self.createdAt  // 保持创建时间不变
         )
     }
 }

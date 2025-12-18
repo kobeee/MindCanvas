@@ -1,30 +1,40 @@
 import Foundation
 import CoreGraphics
-import Combine
+import UIKit
 
 /// 文字图层节点
 /// 表示画布上的一个文字对象
 struct TextLayerNode: Codable, Identifiable {
     let id: UUID
-    let position: CGPoint
-    let text: String
-    let fontSize: CGFloat
-    let color: String // 十六进制颜色值
-    let fontName: String?
+    var position: CGPoint
+    var text: String
+    var fontSize: CGFloat
+    var color: String
+    var fontName: String
+    var rotation: CGFloat
+    var scale: CGFloat
     let zIndex: Int
     let createdAt: Date
     
-    /// 计算文字的边界框（估算）
+    /// 计算精确的边界框
     var bounds: CGRect {
-        // 这里使用简单的估算，实际应用中可能需要使用 NSString 的 boundingRect
-        let estimatedWidth = CGFloat(text.count) * fontSize * 0.6
-        let estimatedHeight = fontSize * 1.2
-        
+        let font = UIFont(name: fontName, size: fontSize * scale)
+            ?? UIFont.systemFont(ofSize: fontSize * scale)
+
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let nsString = text as NSString
+        let size = nsString.boundingRect(
+            with: CGSize(width: CGFloat.infinity, height: CGFloat.infinity),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
+        ).size
+
         return CGRect(
-            x: position.x - estimatedWidth / 2,
-            y: position.y - estimatedHeight / 2,
-            width: estimatedWidth,
-            height: estimatedHeight
+            x: position.x - size.width / 2,
+            y: position.y - size.height / 2,
+            width: size.width,
+            height: size.height
         )
     }
     
@@ -32,9 +42,11 @@ struct TextLayerNode: Codable, Identifiable {
     init(
         position: CGPoint,
         text: String,
-        fontSize: CGFloat = 16,
+        fontSize: CGFloat = 24,
         color: String = "#000000",
-        fontName: String? = nil,
+        fontName: String = ".SF Pro Display",
+        rotation: CGFloat = 0,
+        scale: CGFloat = 1.0,
         zIndex: Int = 0
     ) {
         self.id = UUID()
@@ -43,8 +55,35 @@ struct TextLayerNode: Codable, Identifiable {
         self.fontSize = fontSize
         self.color = color
         self.fontName = fontName
+        self.rotation = rotation
+        self.scale = scale
         self.zIndex = zIndex
         self.createdAt = Date()
+    }
+    
+    /// 内部初始化方法（用于更新时保持ID）
+    private init(
+        id: UUID,
+        position: CGPoint,
+        text: String,
+        fontSize: CGFloat,
+        color: String,
+        fontName: String,
+        rotation: CGFloat,
+        scale: CGFloat,
+        zIndex: Int,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.position = position
+        self.text = text
+        self.fontSize = fontSize
+        self.color = color
+        self.fontName = fontName
+        self.rotation = rotation
+        self.scale = scale
+        self.zIndex = zIndex
+        self.createdAt = createdAt
     }
     
     /// 更新文字属性
@@ -54,55 +93,20 @@ struct TextLayerNode: Codable, Identifiable {
         fontSize: CGFloat? = nil,
         color: String? = nil,
         fontName: String? = nil,
-        zIndex: Int? = nil
+        rotation: CGFloat? = nil,
+        scale: CGFloat? = nil
     ) -> TextLayerNode {
-        TextLayerNode(
+        return TextLayerNode(
+            id: self.id,  // 保持原有ID不变
             position: position ?? self.position,
             text: text ?? self.text,
             fontSize: fontSize ?? self.fontSize,
             color: color ?? self.color,
             fontName: fontName ?? self.fontName,
-            zIndex: zIndex ?? self.zIndex
+            rotation: rotation ?? self.rotation,
+            scale: scale ?? self.scale,
+            zIndex: self.zIndex,
+            createdAt: self.createdAt  // 保持创建时间不变
         )
-    }
-}
-
-/// 文字图层管理器
-/// 管理画布上的所有文字图层
-class TextLayerManager: ObservableObject {
-    @Published var textLayers: [TextLayerNode] = []
-    
-    /// 添加文字
-    func addText(_ text: TextLayerNode) {
-        textLayers.append(text)
-        sortByZIndex()
-    }
-    
-    /// 移除文字
-    func removeText(id: UUID) {
-        textLayers.removeAll { $0.id == id }
-    }
-    
-    /// 更新文字
-    func updateText(_ text: TextLayerNode) {
-        if let index = textLayers.firstIndex(where: { $0.id == text.id }) {
-            textLayers[index] = text
-            sortByZIndex()
-        }
-    }
-    
-    /// 按 Z-Index 排序
-    private func sortByZIndex() {
-        textLayers.sort { $0.zIndex < $1.zIndex }
-    }
-    
-    /// 获取下一个可用的 Z-Index
-    func getNextZIndex() -> Int {
-        return (textLayers.map(\.zIndex).max() ?? 0) + 1
-    }
-    
-    /// 清空所有文字
-    func clearAll() {
-        textLayers.removeAll()
     }
 }

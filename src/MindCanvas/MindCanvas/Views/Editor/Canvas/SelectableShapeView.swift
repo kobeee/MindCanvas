@@ -43,11 +43,7 @@ class SelectableShapeView: UIView {
 
     // MARK: - Properties
 
-    var shapeNode: ShapeLayerNode {
-        didSet {
-            updateFromNode()
-        }
-    }
+    var shapeNode: ShapeLayerNode
 
     // 图层
     private let shapeLayer = CAShapeLayer()
@@ -63,6 +59,7 @@ class SelectableShapeView: UIView {
     // 选中状态
     var isSelected: Bool = false {
         didSet {
+            print("[ShapeView] isSelected.didSet: \(oldValue) -> \(isSelected), ID: \(shapeNode.id)")
             updateSelectionAppearance()
         }
     }
@@ -243,12 +240,23 @@ class SelectableShapeView: UIView {
     // MARK: - Sync Methods
 
     /// 从数据模型更新视图
-    func updateFromNode() {
+    internal func updateFromNode() {
+        print("[ShapeView] updateFromNode() START - ID: \(shapeNode.id), isSelected: \(isSelected)")
         // 重置 transform 为 identity
         transform = .identity
 
+        var finalWidth = shapeNode.frame.width
+        var finalHeight = shapeNode.frame.height
+
+        // 修复圆形的宽高（防止加载已损坏的数据）
+        if shapeNode.shapeType == .circle {
+            let maxDimension = max(finalWidth, finalHeight)
+            finalWidth = maxDimension
+            finalHeight = maxDimension
+        }
+
         // 设置 bounds 和 center
-        bounds = CGRect(x: 0, y: 0, width: shapeNode.frame.width, height: shapeNode.frame.height)
+        bounds = CGRect(x: 0, y: 0, width: finalWidth, height: finalHeight)
         center = CGPoint(x: shapeNode.frame.midX, y: shapeNode.frame.midY)
 
         // 应用旋转
@@ -256,10 +264,12 @@ class SelectableShapeView: UIView {
 
         updateShapePath()
         updateSelectionAppearance()
+        print("[ShapeView] updateFromNode() END - ID: \(shapeNode.id), isSelected: \(isSelected)")
     }
 
     /// 同步到数据模型
     private func syncToNode() {
+        print("[ShapeView] syncToNode() called - ID: \(shapeNode.id), isSelected: \(isSelected)")
         let currentRotation = atan2(transform.b, transform.a)
 
         // 从 center 和 bounds 重建 frame
@@ -281,13 +291,17 @@ class SelectableShapeView: UIView {
 
     private func updateSelectionAppearance() {
         let showHandles = isSelected
+        print("[ShapeView] updateSelectionAppearance() - ID: \(shapeNode.id), showHandles: \(showHandles)")
 
         selectionBorder.isHidden = !showHandles
         rotationLineLayer.isHidden = !showHandles
         rotationHandleLayer.isHidden = !showHandles
         cornerHandleLayers.forEach { $0.isHidden = !showHandles }
 
-        guard showHandles else { return }
+        guard showHandles else { 
+            print("[ShapeView] updateSelectionAppearance() - Early return, showHandles=false")
+            return 
+        }
 
         // 更新选中边框
         let borderRect = bounds
@@ -321,6 +335,8 @@ class SelectableShapeView: UIView {
             height: handleSize
         )
         rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
+        
+        print("[ShapeView] updateSelectionAppearance() - Control points updated, visible: \(showHandles)")
     }
 
     // MARK: - Hit Testing
@@ -330,7 +346,10 @@ class SelectableShapeView: UIView {
 
         let hitRadius: CGFloat = handleSize + 10
 
-        // 先检查旋转手柄
+        // point 参数已经在本地坐标系中（由 gesture.location(in: self) 提供）
+        // 直接使用 point 进行距离检测
+
+        // 先检查旋转手柄（优先级更高）
         let rotationPos = ControlHandle.rotation.position(in: bounds, rotationHandleOffset: rotationHandleOffset)
         if distance(from: point, to: rotationPos) < hitRadius {
             return .rotation
@@ -353,6 +372,8 @@ class SelectableShapeView: UIView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        // point 参数已经在本地坐标系中（UIKit 自动处理了 transform）
+        // 直接使用扩展后的 bounds 进行范围检查
         let expandedBounds = bounds.insetBy(
             dx: -(handleSize + rotationHandleOffset + 20),
             dy: -(handleSize + rotationHandleOffset + 20)
@@ -484,6 +505,13 @@ class SelectableShapeView: UIView {
         let minSize: CGFloat = 20
         newWidth = max(newWidth, minSize)
         newHeight = max(newHeight, minSize)
+
+        // 新增：圆形强制正方形比例
+        if shapeNode.shapeType == .circle {
+            let maxDimension = max(newWidth, newHeight)
+            newWidth = maxDimension
+            newHeight = maxDimension
+        }
 
         // Step 5: 计算新中心点
         // 锚点固定不动，中心点根据新尺寸移动
@@ -646,6 +674,16 @@ class SelectableShapeView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        
+        print("[ShapeView] layoutSubviews() - ID: \(shapeNode.id), activeHandle: \(activeHandle != nil), isSelected: \(isSelected)")
+
+        // 防护：如果正在手势中，跳过 updateShapePath
+        // 因为 handleResizeFixed 已经调用过了
+        guard activeHandle == nil else { 
+            print("[ShapeView] layoutSubviews() - Skipping due to active handle")
+            return 
+        }
+
         updateShapePath()
         if isSelected {
             updateSelectionAppearance()

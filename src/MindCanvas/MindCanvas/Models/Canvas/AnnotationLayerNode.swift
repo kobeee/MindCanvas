@@ -33,6 +33,27 @@ struct AnnotationLayerNode: Codable, Identifiable {
         self.createdAt = Date()
     }
     
+    /// 内部初始化方法（用于更新时保持ID）
+    private init(
+        id: UUID,
+        rect: CGRect,
+        text: String,
+        fontSize: CGFloat,
+        color: String,
+        lineWidth: CGFloat,
+        zIndex: Int,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.rect = rect
+        self.text = text
+        self.fontSize = fontSize
+        self.color = color
+        self.lineWidth = lineWidth
+        self.zIndex = zIndex
+        self.createdAt = createdAt
+    }
+    
     /// 更新标注属性
     func updated(
         rect: CGRect? = nil,
@@ -42,13 +63,15 @@ struct AnnotationLayerNode: Codable, Identifiable {
         lineWidth: CGFloat? = nil,
         zIndex: Int? = nil
     ) -> AnnotationLayerNode {
-        AnnotationLayerNode(
+        return AnnotationLayerNode(
+            id: self.id,  // 保持原有ID不变
             rect: rect ?? self.rect,
             text: text ?? self.text,
             fontSize: fontSize ?? self.fontSize,
             color: color ?? self.color,
             lineWidth: lineWidth ?? self.lineWidth,
-            zIndex: zIndex ?? self.zIndex
+            zIndex: zIndex ?? self.zIndex,
+            createdAt: self.createdAt  // 保持创建时间不变
         )
     }
     
