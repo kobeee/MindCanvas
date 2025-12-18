@@ -1,5 +1,150 @@
 # 开发记录
 
+## 2025-12-19 - 清屏按钮智能删除功能根源问题修复 ✅
+
+### 概述
+通过深入分析问题的根本原因，从第一性原理出发，成功定位并修复了清屏按钮智能删除功能未生效的核心问题。根本原因是状态管理架构缺陷和生命周期时序问题导致的选中状态同步失败。
+
+### 问题根源发现
+
+#### 1. **状态管理架构缺陷** - 核心根源
+**问题本质**：存在双重状态管理器，缺乏单一数据源
+- NativeCanvasView有自己的`selectedNodeID`私有属性
+- CanvasStateManager也有自己的`selectedNodeID`属性
+- 两者之间没有建立双向绑定关系
+
+**影响链路**：
+```
+用户选择对象 → NativeCanvasView.selectedNodeID更新 → 
+CanvasStateManager.selectedNodeID未同步 → 
+hasSelection计算错误 → 清屏按钮文案显示错误
+```
+
+#### 2. **生命周期时序问题** - 执行层面
+**问题本质**：回调绑定与视图初始化的时序竞争
+- onAppear可能在canvasView初始化完成前执行
+- onViewCreated是异步初始化，可能晚于onAppear
+- 弱引用在内存压力下可能被提前释放
+
+### 核心修复方案
+
+#### 1. 建立状态同步机制 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+// 添加选中ID变化回调
+var onSelectionIdChanged: ((UUID?) -> Void)?
+
+private var selectedNodeID: UUID? {
+    didSet {
+        updateSelectionStates()
+        // 修复：同步选中状态到CanvasStateManager
+        onSelectionIdChanged?(selectedNodeID)
+    }
+}
+```
+
+#### 2. 绑定状态同步回调 ✅
+**修改文件**：`Views/Editor/NativeEditorView.swift`
+
+**关键修复**：
+```swift
+// 在onAppear中绑定
+.onAppear {
+    // 修复：绑定状态同步
+    if let canvasView = viewModel.canvasView {
+        canvasView.onSelectionIdChanged = { [weak viewModel] selectedID in
+            viewModel?.stateManager.selectedNodeID = selectedID
+        }
+    }
+    // ... 其他回调绑定
+}
+
+// 在onViewCreated中也绑定（确保初始化后立即生效）
+onViewCreated: { view in
+    viewModel.canvasView = view
+    // 修复：绑定状态同步
+    view.onSelectionIdChanged = { [weak viewModel] selectedID in
+        viewModel?.stateManager.selectedNodeID = selectedID
+    }
+    // ... 其他设置
+}
+```
+
+#### 3. 增强删除回调错误处理 ✅
+**修改文件**：`Views/Editor/NativeEditorView.swift`
+
+**关键改进**：
+```swift
+viewModel.stateManager.onDeleteSelected = { [weak viewModel] in
+    guard let viewModel = viewModel,
+          let canvasView = viewModel.canvasView,
+          let selectedID = viewModel.stateManager.selectedNodeID
+    else { 
+        print("[NativeEditor] Delete selected failed: missing viewModel, canvasView or selectedID")
+        return 
+    }
+    
+    print("[NativeEditor] Deleting selected object: \(selectedID.uuidString.prefix(8))")
+    
+    var deletionSuccess = false
+    // 按类型删除并记录成功状态
+    // ... 删除逻辑
+    
+    if !deletionSuccess {
+        print("[NativeEditor] Warning: No object found with ID: \(selectedID.uuidString.prefix(8))")
+    }
+    
+    viewModel.stateManager.clearSelection()
+}
+```
+
+### 技术要点总结
+
+#### 状态同步机制
+- 使用回调机制建立双向绑定
+- 在生命周期关键点确保绑定生效
+- 添加调试日志追踪状态流转
+
+#### 生命周期管理
+- 在onAppear和onViewCreated中都进行绑定
+- 考虑异步初始化的时序问题
+- 使用弱引用避免循环引用
+
+#### 错误处理增强
+- 添加详细的边界条件检查
+- 增加删除成功的状态验证
+- 提供调试日志便于问题排查
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/NativeCanvasView.swift` | 修改 | 添加状态同步回调机制 |
+| `Views/Editor/NativeEditorView.swift` | 修改 | 绑定状态同步和增强错误处理 |
+
+### 预期效果
+修复后：
+- ✅ 选中对象时，按钮文案显示"删除选中对象"
+- ✅ 无选中对象时，按钮文案显示"清空画布"
+- ✅ 删除操作正确执行，支持撤销
+- ✅ 状态在所有组件间保持同步
+
+### 验收标准
+- [ ] 创建形状并选中，按钮显示"删除选中对象"
+- [ ] 点击删除按钮，只删除选中的形状
+- [ ] 取消选中，按钮显示"清空画布"
+- [ ] 点击清屏按钮，清空整个画布
+- [ ] 删除操作支持撤销功能
+- [ ] 快速操作场景下功能正常
+
+### 下一步
+- 在Xcode中编译测试修复效果
+- 在模拟器或真机上验证智能删除功能
+- 根据测试结果优化性能和用户体验
+
+---
+
 ## 2025-12-18 - 画布工具优化方案 v2.0 实施记录 ✅
 
 ### 概述

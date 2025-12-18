@@ -87,6 +87,9 @@ class NativeCanvasView: UIView {
         didSet {
             print("[NativeCanvas] selectedNodeID.didSet: \(oldValue != nil ? oldValue!.uuidString.prefix(8) : "nil") -> \(selectedNodeID != nil ? selectedNodeID!.uuidString.prefix(8) : "nil")")
             updateSelectionStates()
+            
+            // 修复：同步选中状态到CanvasStateManager
+            onSelectionIdChanged?(selectedNodeID)
         }
     }
 
@@ -97,6 +100,9 @@ class NativeCanvasView: UIView {
 
     /// 选区变化回调
     var onSelectionChanged: ((Bool) -> Void)?
+    
+    /// 选中ID变化回调（用于同步到CanvasStateManager）
+    var onSelectionIdChanged: ((UUID?) -> Void)?
 
     /// 图层更新回调
     var onLayersUpdated: (([LayerNode]) -> Void)?

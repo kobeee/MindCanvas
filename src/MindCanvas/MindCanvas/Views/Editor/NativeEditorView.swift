@@ -101,6 +101,14 @@ struct NativeEditorView: View {
         }
         .onAppear {
             viewModel.loadCanvasDocument()
+            
+            // 修复：绑定状态同步，确保NativeCanvasView的选中状态同步到CanvasStateManager
+            if let canvasView = viewModel.canvasView {
+                canvasView.onSelectionIdChanged = { [weak viewModel] selectedID in
+                    viewModel?.stateManager.selectedNodeID = selectedID
+                }
+            }
+            
             // 绑定清屏回调（支持撤销）
             viewModel.stateManager.onClearCanvas = { [weak viewModel] in
                 guard let viewModel = viewModel, let canvasView = viewModel.canvasView else { return }
@@ -147,31 +155,48 @@ struct NativeEditorView: View {
                 // 选中新复制的图层
                 viewModel.stateManager.selectNode(duplicatedLayer.id)
             }
-            // 新增：绑定删除选中节点回调
+            // 修复：绑定删除选中节点回调（增强错误处理）
             viewModel.stateManager.onDeleteSelected = { [weak viewModel] in
                 guard let viewModel = viewModel,
                       let canvasView = viewModel.canvasView,
                       let selectedID = viewModel.stateManager.selectedNodeID
-                else { return }
+                else { 
+                    print("[NativeEditor] Delete selected failed: missing viewModel, canvasView or selectedID")
+                    return 
+                }
+                
+                print("[NativeEditor] Deleting selected object: \(selectedID.uuidString.prefix(8))")
 
+                var deletionSuccess = false
+                
                 // 尝试删除不同类型的对象
                 // 1. 尝试作为图片图层删除
                 if let layer = canvasView.getLayers().first(where: { $0.id == selectedID }) {
                     let action = RemoveLayerAction(layer: layer, canvasView: canvasView)
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeLayer(id: selectedID, recordUndo: false)
+                    deletionSuccess = true
+                    print("[NativeEditor] Deleted layer: \(selectedID.uuidString.prefix(8))")
                 }
                 // 2. 尝试作为箭头删除
                 else if let arrow = canvasView.getArrowLayerManager().arrows.first(where: { $0.id == selectedID }) {
                     let action = RemoveArrowAction(arrow: arrow, canvasView: canvasView)
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeArrow(id: selectedID)
+                    deletionSuccess = true
+                    print("[NativeEditor] Deleted arrow: \(selectedID.uuidString.prefix(8))")
                 }
                 // 3. 尝试作为形状删除
                 else if let shape = canvasView.getShapeLayerManager().shapes.first(where: { $0.id == selectedID }) {
                     let action = RemoveShapeAction(shape: shape, canvasView: canvasView)
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeShape(id: selectedID)
+                    deletionSuccess = true
+                    print("[NativeEditor] Deleted shape: \(selectedID.uuidString.prefix(8))")
+                }
+                
+                if !deletionSuccess {
+                    print("[NativeEditor] Warning: No object found with ID: \(selectedID.uuidString.prefix(8))")
                 }
 
                 // 清除选中状态
@@ -437,6 +462,10 @@ private struct NativeCanvasContainer: View {
                     },
                     onViewCreated: { view in
                         viewModel.canvasView = view
+                        // 修复：绑定状态同步，确保选中状态正确同步
+                        view.onSelectionIdChanged = { [weak viewModel] selectedID in
+                            viewModel?.stateManager.selectedNodeID = selectedID
+                        }
                         // 设置箭头创建回调
                         view.onArrowCreated = { arrow in
                             // 这里可以添加箭头创建后的处理逻辑
