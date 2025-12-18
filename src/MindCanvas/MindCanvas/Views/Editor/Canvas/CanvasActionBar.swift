@@ -10,6 +10,7 @@ struct CanvasActionBar: View {
     var onRedo: () -> Void
     var onDuplicate: () -> Void
     var onClear: () -> Void
+    var onDeleteSelected: () -> Void  // 新增：删除选中对象回调
     
     @State private var showClearConfirmation = false
     
@@ -44,20 +45,34 @@ struct CanvasActionBar: View {
                     showClearConfirmation = true
                 }
             )
-            .help("清屏")
+            .help(hasSelection ? "删除选中对象" : "清空画布")  // 动态提示
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-        .alert("确认清屏", isPresented: $showClearConfirmation) {
+        .alert(
+            hasSelection ? "删除选中对象" : "清空画布",  // 动态标题
+            isPresented: $showClearConfirmation
+        ) {
             Button("取消", role: .cancel) { }
-            Button("清屏", role: .destructive) {
-                onClear()
+            Button(
+                hasSelection ? "删除" : "清屏",  // 动态按钮文案
+                role: .destructive
+            ) {
+                if hasSelection {
+                    onDeleteSelected()  // 调用删除选中
+                } else {
+                    onClear()  // 调用清空画布
+                }
             }
         } message: {
-            Text("此操作将清除画布上的所有内容，无法撤销。")
+            Text(
+                hasSelection
+                    ? "确定要删除选中的对象吗？此操作可以撤销。"
+                    : "此操作将清除画布上的所有内容，无法撤销。"
+            )
         }
     }
 }
@@ -104,7 +119,8 @@ private struct ActionButton: View {
                 onUndo: { print("Undo") },
                 onRedo: { print("Redo") },
                 onDuplicate: { print("Duplicate") },
-                onClear: { print("Clear") }
+                onClear: { print("Clear") },
+                onDeleteSelected: { print("Delete Selected") }
             )
             Spacer()
         }

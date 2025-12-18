@@ -375,6 +375,22 @@ class AddShapeAction: CanvasAction {
     }
 }
 
+/// 移除形状操作
+struct RemoveShapeAction: CanvasAction {
+    let shape: ShapeLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "移除形状: \(shape.id)" }
+    
+    func execute() {
+        canvasView?.removeShape(id: shape.id)
+    }
+    
+    func undo() {
+        canvasView?.addShape(shape)
+    }
+}
+
 /// 移动形状操作
 class MoveShapeAction: CanvasAction {
     let shapeID: UUID

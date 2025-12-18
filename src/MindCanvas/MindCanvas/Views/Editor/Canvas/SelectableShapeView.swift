@@ -68,6 +68,8 @@ class SelectableShapeView: UIView {
     private var activeHandle: ControlHandle?
     private var dragStartPoint: CGPoint = .zero
     
+    
+    
     // 初始状态 (手势开始时保存)
     private var initialBounds: CGRect = .zero
     private var initialCenter: CGPoint = .zero
@@ -193,6 +195,17 @@ class SelectableShapeView: UIView {
             return UIBezierPath(rect: rect)
             
         case .circle:
+            // 修复：圆形强制正方形，避免椭圆变形
+            let size = min(rect.width, rect.height)
+            let circleRect = CGRect(
+                x: rect.midX - size / 2,
+                y: rect.midY - size / 2,
+                width: size,
+                height: size
+            )
+            return UIBezierPath(ovalIn: circleRect)
+            
+        case .ellipse:
             return UIBezierPath(ovalIn: rect)
             
         case .triangle:
@@ -248,11 +261,11 @@ class SelectableShapeView: UIView {
         var finalWidth = shapeNode.frame.width
         var finalHeight = shapeNode.frame.height
 
-        // 修复圆形的宽高（防止加载已损坏的数据）
+        // 修复：圆形的宽高（防止加载已损坏的数据） - 使用较小值避免逐渐变大
         if shapeNode.shapeType == .circle {
-            let maxDimension = max(finalWidth, finalHeight)
-            finalWidth = maxDimension
-            finalHeight = maxDimension
+            let size = min(finalWidth, finalHeight)
+            finalWidth = size
+            finalHeight = size
         }
 
         // 设置 bounds 和 center
@@ -267,19 +280,39 @@ class SelectableShapeView: UIView {
         print("[ShapeView] updateFromNode() END - ID: \(shapeNode.id), isSelected: \(isSelected)")
     }
 
+    // 上次同步的 frame（用于防抖）
+    private var lastSyncedFrame: CGRect?
+
     /// 同步到数据模型
     private func syncToNode() {
-        print("[ShapeView] syncToNode() called - ID: \(shapeNode.id), isSelected: \(isSelected)")
         let currentRotation = atan2(transform.b, transform.a)
 
         // 从 center 和 bounds 重建 frame
+        var finalWidth = bounds.width
+        var finalHeight = bounds.height
+        
+        // 修复：在数据同步时也强制圆形保持正方形 - 使用较小值避免逐渐变大
+        if shapeNode.shapeType == .circle {
+            let size = min(finalWidth, finalHeight)
+            finalWidth = size
+            finalHeight = size
+        }
+
         let newFrame = CGRect(
-            x: center.x - bounds.width / 2,
-            y: center.y - bounds.height / 2,
-            width: bounds.width,
-            height: bounds.height
+            x: center.x - finalWidth / 2,
+            y: center.y - finalHeight / 2,
+            width: finalWidth,
+            height: finalHeight
         )
 
+        // 防护：如果与上次同步的 frame 几乎相同，不再更新（防抖机制）
+        if let lastFrame = lastSyncedFrame,
+           abs(lastFrame.width - newFrame.width) < 0.1,
+           abs(lastFrame.height - newFrame.height) < 0.1 {
+            return  // 跳过微小变化
+        }
+
+        lastSyncedFrame = newFrame
         shapeNode = shapeNode.updated(
             frame: newFrame,
             rotation: currentRotation
@@ -441,11 +474,13 @@ class SelectableShapeView: UIView {
             }
 
         case .ended, .cancelled:
+            print("[ShapeView] Gesture ended - ID: \(shapeNode.id), bounds: \(bounds), frame: \(frame)")
+            activeHandle = nil
             syncToNode()
+            
             if let initial = initialNode {
                 onOperationEnd?(initial, shapeNode)
             }
-            activeHandle = nil
             initialNode = nil
 
         default:
@@ -506,11 +541,11 @@ class SelectableShapeView: UIView {
         newWidth = max(newWidth, minSize)
         newHeight = max(newHeight, minSize)
 
-        // 新增：圆形强制正方形比例
+        // 修复：圆形强制正方形比例 - 使用较小值避免逐渐变大
         if shapeNode.shapeType == .circle {
-            let maxDimension = max(newWidth, newHeight)
-            newWidth = maxDimension
-            newHeight = maxDimension
+            let size = min(newWidth, newHeight)
+            newWidth = size
+            newHeight = size
         }
 
         // Step 5: 计算新中心点
@@ -674,14 +709,15 @@ class SelectableShapeView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        
-        print("[ShapeView] layoutSubviews() - ID: \(shapeNode.id), activeHandle: \(activeHandle != nil), isSelected: \(isSelected)")
 
         // 防护：如果正在手势中，跳过 updateShapePath
         // 因为 handleResizeFixed 已经调用过了
-        guard activeHandle == nil else { 
-            print("[ShapeView] layoutSubviews() - Skipping due to active handle")
-            return 
+        guard activeHandle == nil else { return }
+
+        // 修复：圆形约束防护 - 使用较小值避免逐渐变大
+        if shapeNode.shapeType == .circle && abs(bounds.width - bounds.height) > 0.1 {
+            let size = min(bounds.width, bounds.height)
+            bounds = CGRect(x: 0, y: 0, width: size, height: size)
         }
 
         updateShapePath()

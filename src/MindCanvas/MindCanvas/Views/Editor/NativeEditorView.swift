@@ -147,6 +147,36 @@ struct NativeEditorView: View {
                 // 选中新复制的图层
                 viewModel.stateManager.selectNode(duplicatedLayer.id)
             }
+            // 新增：绑定删除选中节点回调
+            viewModel.stateManager.onDeleteSelected = { [weak viewModel] in
+                guard let viewModel = viewModel,
+                      let canvasView = viewModel.canvasView,
+                      let selectedID = viewModel.stateManager.selectedNodeID
+                else { return }
+
+                // 尝试删除不同类型的对象
+                // 1. 尝试作为图片图层删除
+                if let layer = canvasView.getLayers().first(where: { $0.id == selectedID }) {
+                    let action = RemoveLayerAction(layer: layer, canvasView: canvasView)
+                    viewModel.stateManager.recordAction(action)
+                    canvasView.removeLayer(id: selectedID, recordUndo: false)
+                }
+                // 2. 尝试作为箭头删除
+                else if let arrow = canvasView.getArrowLayerManager().arrows.first(where: { $0.id == selectedID }) {
+                    let action = RemoveArrowAction(arrow: arrow, canvasView: canvasView)
+                    viewModel.stateManager.recordAction(action)
+                    canvasView.removeArrow(id: selectedID)
+                }
+                // 3. 尝试作为形状删除
+                else if let shape = canvasView.getShapeLayerManager().shapes.first(where: { $0.id == selectedID }) {
+                    let action = RemoveShapeAction(shape: shape, canvasView: canvasView)
+                    viewModel.stateManager.recordAction(action)
+                    canvasView.removeShape(id: selectedID)
+                }
+
+                // 清除选中状态
+                viewModel.stateManager.clearSelection()
+            }
         }
         
         // 设置绘图操作的撤销支持
@@ -522,8 +552,20 @@ private struct NativeCanvasContainer: View {
                                 height: viewportRect.height / scale
                             )
 
+                            // 修复：圆形创建时强制正方形，避免后续约束问题
+                            var finalFrame = contentRect
+                            if viewModel.selectedShapeType == .circle {
+                                let size = min(contentRect.width, contentRect.height)
+                                finalFrame = CGRect(
+                                    x: contentRect.midX - size / 2,
+                                    y: contentRect.midY - size / 2,
+                                    width: size,
+                                    height: size
+                                )
+                            }
+                            
                             let shape = ShapeLayerNode(
-                                frame: contentRect,
+                                frame: finalFrame,
                                 shapeType: viewModel.selectedShapeType,
                                 color: viewModel.stateManager.shapeStrokeColor,
                                 lineWidth: viewModel.stateManager.shapeLineWidth,
@@ -640,7 +682,8 @@ private struct NativeCanvasContainer: View {
                             onUndo: { viewModel.stateManager.undo() },
                             onRedo: { viewModel.stateManager.redo() },
                             onDuplicate: { viewModel.stateManager.duplicateSelected() },
-                            onClear: { viewModel.stateManager.clearCanvas() }
+                            onClear: { viewModel.stateManager.clearCanvas() },
+                            onDeleteSelected: { viewModel.stateManager.deleteSelectedNode() }
                         )
                         Spacer()
                         

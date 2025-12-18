@@ -29,6 +29,9 @@ struct ShapeDrawingView: View {
                 )
                 path.addEllipse(in: circleRect)
 
+            case .ellipse:
+                path.addEllipse(in: rect)
+
             case .triangle:
                 path.move(to: CGPoint(x: rect.midX, y: rect.minY))
                 path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))

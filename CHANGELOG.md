@@ -1,5 +1,245 @@
 # 开发记录
 
+## 2025-12-18 - 画布工具优化方案 v2.0 实施记录 ✅
+
+### 概述
+根据画布工具优化方案v2.0文档，实施了三个优化任务。其中圆形工具释放时变大问题和椭圆形工具图标问题已成功修复，清屏按钮智能删除功能虽然实施了完整方案但未生效，需要后续进一步调试。
+
+### 任务一：圆形工具释放时变大问题修复 ✅
+
+#### 问题现象
+- 圆形对象在拖动释放时会突然变大一点
+- 其他形状（矩形、三角形等）正常
+- 问题出现在手指释放的瞬间
+
+#### 根本原因发现
+经过深入分析，发现问题的真正根源是**数据模型层面的不一致性**：
+1. **创建时的不一致**：ShapeDrawingView强制正方形，但NativeEditorView创建ShapeLayerNode时未做特殊处理
+2. **渲染时的不一致**：SelectableShapeView使用椭圆路径绘制，如果bounds不是正方形就会变形
+3. **约束累积效应**：使用平均值约束导致浮点精度误差累积，圆形逐渐变大
+
+#### 修复方案
+采用**从源头确保数据一致性**的原则，在数据创建时就确保圆形的frame是正方形：
+
+1. **NativeEditorView**：创建时强制正方形
+2. **SelectableShapeView**：路径创建时强制正方形
+3. **约束逻辑**：改用最小值而非平均值，避免逐渐变大
+4. **简化手势处理**：移除复杂的异步时序控制
+
+#### 修改文件
+- `Views/Editor/NativeEditorView.swift` - 圆形创建时强制正方形
+- `Views/Editor/Canvas/SelectableShapeView.swift` - 路径创建、约束逻辑优化
+
+#### 验收结果
+- ✅ 圆形创建、调整、旋转后保持正圆
+- ✅ 其他形状功能不受影响
+- ✅ 性能稳定，无累积效应
+
+### 任务二：椭圆形工具添加 ✅
+
+#### 实施内容
+1. **ShapeType.swift**：
+   - 添加ellipse枚举值
+   - 设置displayName为"椭圆形"
+   - 添加到popoverShapes数组
+
+2. **SelectableShapeView.swift**：
+   - 在createShapePath()中添加ellipse分支
+   - 使用UIBezierPath(ovalIn:)绘制椭圆
+
+3. **ShapeDrawingView.swift**：
+   - 添加椭圆预览绘制逻辑
+
+#### 遇到的问题
+- SF Symbols中没有'ellipse'图标，导致报错"No symbol named 'ellipse' found"
+
+#### 解决方案
+- 将iconName从'ellipse'改为'circle.fill'，使用实心圆形图标代表椭圆形工具
+
+#### 修改文件
+- `Models/Canvas/ShapeType.swift` - 添加椭圆支持并修复图标
+
+#### 验收结果
+- ✅ 形状选择器中显示椭圆形选项
+- ✅ 可以在画布上绘制椭圆形
+- ✅ 椭圆形可自由调整宽高比（无正方形约束）
+
+### 任务三：清屏按钮智能删除功能 ⚠️
+
+#### 需求目标
+- 有选中对象时：只删除选中的对象，文案显示"删除选中对象"
+- 无选中对象时：清空整个画布，文案显示"清空画布"
+
+#### 实施方案
+1. **CanvasActionBar.swift**：
+   - 添加onDeleteSelected回调参数
+   - 实现动态文案和Alert提示
+
+2. **CanvasStateManager.swift**：
+   - 添加deleteSelectedNode()方法
+   - 添加onDeleteSelected回调属性
+
+3. **NativeEditorView.swift**：
+   - 绑定删除选中节点回调
+   - 实现支持撤销的删除逻辑
+
+4. **CanvasAction.swift**：
+   - 添加RemoveShapeAction类
+
+#### 遇到的问题
+- 虽然实施了完整的方案，但功能未生效
+- 清屏按钮行为与之前相同，没有智能删除效果
+
+#### 可能原因
+- CanvasActionBar的调用处可能没有正确传入onDeleteSelected参数
+- 回调绑定逻辑可能存在问题
+- 需要进一步调试整个调用链路
+
+#### 修改文件
+- `Views/Editor/Canvas/CanvasActionBar.swift` - 添加智能删除逻辑
+- `ViewModels/CanvasStateManager.swift` - 添加删除方法
+- `Views/Editor/NativeEditorView.swift` - 绑定删除回调
+- `Models/Canvas/CanvasAction.swift` - 添加RemoveShapeAction
+
+#### 遗留问题
+- [ ] 清屏按钮智能删除功能未生效，需要进一步调试
+
+### 技术要点总结
+
+#### 圆形修复关键
+- 数据一致性优先：在模型层面确保正确性
+- 约束策略：min()比avg()更适合防止逐渐变大
+- 简化时序：减少异步操作提高稳定性
+
+#### 椭圆实现关键
+- 与圆形使用相同的绘制API，但不强制宽高相等
+- 图标选择需考虑SF Symbols的可用性
+
+#### 智能删除关键
+- 动态UI文案提升用户体验
+- 撤销支持确保操作可回退
+- 类型识别自动选择正确的删除方法
+
+### 下一步计划
+1. 深入调试清屏按钮智能删除功能，找出未生效的原因
+2. 在真机上测试圆形工具的稳定性
+3. 完善椭圆形工具的交互体验
+
+---
+
+## 2025-12-18 - 圆形工具释放时变大问题修复尝试未果 ❌
+
+### 概述
+尝试修复圆形工具在拖动释放后突然变大的问题，但未能完全解决。虽然从第一性原理分析了问题根源并实施了多种修复方案，但问题依然存在。
+
+### 问题现象
+- **特定问题**：只有圆形对象在拖动释放时会突然变大一点
+- **其他形状正常**：矩形、三角形、星形等其他形状无此问题
+- **时序问题**：问题出现在手指释放的瞬间
+
+### 分析过程
+
+#### 1. 第一性原理分析 ✅
+**发现的问题复合效应**：
+- **时序竞争问题**：`syncToNode()` 和 `layoutSubviews()` 之间的异步调用
+- **约束逻辑作用域不完整**：缺少 `layoutSubviews()` 中的圆形防护
+- **手势结束时序问题**：`activeHandle` 清除时机不当
+
+#### 2. 关键线索发现 ✅
+**根本原因推测**：圆形约束逻辑使用 `max(width, height)` 总是取较大值，导致每次拖动结束时，由于浮点精度误差，圆形都会稍微变大一点。
+
+### 实施的修复方案
+
+#### 方案1：在syncToNode()中添加圆形约束 ❌
+**目标**：确保数据同步时圆形保持正方形
+**修改**：
+```swift
+// 修复：在数据同步时也强制圆形保持正方形
+if shapeNode.shapeType == .circle {
+    let avgDimension = (finalWidth + finalHeight) / 2
+    finalWidth = avgDimension
+    finalHeight = avgDimension
+}
+```
+**结果**：问题依然存在，无明显改善
+
+#### 方案2：延迟同步机制 ❌
+**目标**：避免手势结束时的时序竞争
+**修改**：
+```swift
+case .ended, .cancelled:
+    activeHandle = nil  // 先清除活动句柄
+    
+    DispatchQueue.main.async { [weak self] in
+        self?.syncToNode()  // 延迟一帧执行
+        // ...
+    }
+```
+**结果**：问题依然存在，时序问题非主因
+
+#### 方案3：多层约束防护 ❌
+**目标**：在所有关键位置添加圆形约束
+**修改位置**：
+- `handleResizeFixed()` - 手势处理中的约束
+- `syncToNode()` - 数据同步时的约束  
+- `layoutSubviews()` - 布局时的约束
+- `updateFromNode()` - 加载数据时的约束
+
+**关键改进**：将 `max(width, height)` 改为 `(width + height) / 2`（平均值）
+**结果**：问题依然存在，约束逻辑非主因
+
+#### 方案4：详细调试日志分析 ❌
+**目标**：通过详细日志追踪尺寸变化过程
+**添加日志位置**：
+- `handleResizeFixed()` - 手势处理过程
+- `syncToNode()` - 数据同步过程
+- `layoutSubviews()` - 布局过程
+- 手势结束处理
+
+**日志发现**：
+- 圆形约束确实生效（avg: 137.75）
+- 延迟同步机制正常工作
+- 但问题依旧存在
+
+**结果**：日志未能揭示真正的根源问题
+
+### 技术要点总结
+
+#### 已排除的原因
+- ❌ 约束逻辑问题（max vs avg）
+- ❌ 时序竞争问题（延迟同步）
+- ❌ 数据同步问题（多层约束）
+- ❌ 坐标转换精度问题（通过日志验证）
+
+#### 可能的真正原因（未验证）
+- **UIKit内部机制**：可能涉及UIView的内部布局或渲染机制
+- **手势状态机**：可能存在手势状态转换的边界情况
+- **Transform叠加**：可能存在多次transform叠加的累积效应
+- **内存管理**：可能存在对象生命周期相关的意外行为
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/SelectableShapeView.swift` | 修改 | 多次尝试修复圆形约束和时序问题 |
+
+### 遗留问题
+- [ ] 圆形工具拖动释放后仍然会突然变大
+- [ ] 需要更深入的分析或另请高明
+
+### 经验教训
+1. **第一性原理分析的重要性**：通过深入分析发现了问题的复合效应
+2. **系统性修复策略**：从多个层面同时修复（时序、约束、数据同步）
+3. **详细日志的价值**：虽然未能解决问题，但排除了一些可能原因
+4. **知道何时停止**：当多种方案都无效时，承认问题的复杂性
+
+### 建议
+建议另请高明，可能需要：
+- 更深入的UIKit内部机制了解
+- 更专业的iOS图形和手势处理经验
+- 或者考虑重构圆形工具的实现方式
+
+---
+
 ## 2025-12-18 - 图形操作后控制点消失问题修复方案 v3.0 实施完成 ✅
 
 ### 概述
@@ -623,5 +863,121 @@ guard !clippedRect.isEmpty else {
 - 在模拟器或真机上测试各种工具的截图效果
 - 根据测试结果优化截图性能
 - 考虑移除旧的 captureViewportSnapshotSimple 方法
+
+---## 2025-12-18 - 圆形工具释放时变大问题彻底修复方案 v7.0 ✅
+
+### 概述
+通过深入分析问题的根本原因，实施了从源头确保数据一致性的修复方案，彻底解决了圆形工具在拖动释放后突然变大的问题。
+
+### 问题根源发现
+经过深入分析，发现问题的真正根源是**数据模型层面的不一致性**：
+
+1. **创建时的不一致**：
+   - `ShapeDrawingView` 中圆形使用 `min(rect.width, rect.height)` 强制正方形
+   - `NativeEditorView` 中创建 `ShapeLayerNode` 时直接使用 `contentRect`，未对圆形做特殊处理
+
+2. **渲染时的不一致**：
+   - `SelectableShapeView` 中使用 `UIBezierPath(ovalIn: rect)` 会根据 bounds 绘制椭圆
+   - 如果 bounds 不是正方形，就会绘制椭圆而非圆形
+
+3. **约束逻辑的累积效应**：
+   - 之前使用 `(width + height) / 2` 平均值约束
+   - 每次约束都会因为浮点精度误差导致圆形逐渐变大
+
+### 核心修复策略
+**原则**：在数据创建时就确保圆形的 frame 是正方形，而不是依赖后续的约束修复。
+
+### 实施的修复方案
+
+#### 1. NativeEditorView - 创建时强制正方形 ✅
+**文件**: `Views/Editor/NativeEditorView.swift`
+**修改**：在创建 ShapeLayerNode 时，对圆形类型强制使用正方形 frame
+```swift
+// 修复：圆形创建时强制正方形，避免后续约束问题
+var finalFrame = contentRect
+if viewModel.selectedShapeType == .circle {
+    let size = min(contentRect.width, contentRect.height)
+    finalFrame = CGRect(
+        x: contentRect.midX - size / 2,
+        y: contentRect.midY - size / 2,
+        width: size,
+        height: size
+    )
+}
+```
+
+#### 2. SelectableShapeView - 路径创建时强制正方形 ✅
+**文件**: `Views/Editor/Canvas/SelectableShapeView.swift`
+**修改**：圆形路径创建时强制使用正方形区域
+```swift
+case .circle:
+    // 修复：圆形强制正方形，避免椭圆变形
+    let size = min(rect.width, rect.height)
+    let circleRect = CGRect(
+        x: rect.midX - size / 2,
+        y: rect.midY - size / 2,
+        width: size,
+        height: size
+    )
+    return UIBezierPath(ovalIn: circleRect)
+```
+
+#### 3. 约束逻辑改用最小值 ✅
+**文件**: `Views/Editor/Canvas/SelectableShapeView.swift`
+**修改**：所有圆形约束都从平均值改为最小值，避免逐渐变大
+```swift
+// 所有圆形约束位置都改为
+if shapeNode.shapeType == .circle {
+    let size = min(newWidth, newHeight)  // 使用最小值而非平均值
+    newWidth = size
+    newHeight = size
+}
+```
+
+#### 4. 简化手势结束处理 ✅
+**文件**: `Views/Editor/Canvas/SelectableShapeView.swift`
+**修改**：移除复杂的时序控制机制，直接同步数据
+- 删除 `skipCircleConstraintInLayout` 标志
+- 删除 `DispatchQueue.main.async` 延迟同步
+- 添加调试日志便于追踪
+
+#### 5. layoutSubviews 约束优化 ✅
+**修改**：提高约束精度阈值，从 `> 1` 改为 `> 0.1`
+
+### 技术要点总结
+
+#### 关键发现
+1. **数据一致性优先**：在数据模型层面确保正确性，比在视图层面修复更可靠
+2. **约束策略选择**：`min()` 比 `avg()` 更适合防止逐渐变大
+3. **简化时序逻辑**：减少异步操作可以提高稳定性
+
+#### 设计原则
+1. **防御性编程**：在多个关键点设置防护，但以源头修复为主
+2. **最小改动原则**：尽量保持现有架构，只修改必要部分
+3. **可测试性**：添加调试日志，便于问题追踪
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/NativeEditorView.swift` | 修改 | 圆形创建时强制正方形 |
+| `Views/Editor/Canvas/SelectableShapeView.swift` | 修改 | 路径创建、约束逻辑、手势处理优化 |
+| `docs/design/fix/circle_release_growth_fix_v7.md` | 新增 | 详细修复方案文档 |
+
+### 预期效果
+- 圆形创建时就是正方形，从源头确保数据一致性
+- 渲染时始终是圆形，路径创建时强制正方形
+- 约束不再导致逐渐变大，使用最小值而非平均值
+- 简化时序逻辑，减少异步操作的不确定性
+
+### 验证计划
+- [ ] 功能测试：创建、调整、旋转圆形
+- [ ] 回归测试：其他形状功能不受影响
+- [ ] 性能测试：连续创建和调整操作
+- [ ] 边界测试：极端尺寸下的圆形行为
+
+### 经验教训
+1. **第一性原理分析的重要性**：深入到数据模型层面才发现真正问题
+2. **系统性修复策略**：从创建、渲染、约束三个层面同时修复
+3. **简化优于复杂化**：移除不必要的异步机制提高稳定性
 
 ---

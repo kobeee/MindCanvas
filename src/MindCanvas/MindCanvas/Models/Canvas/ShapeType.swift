@@ -5,6 +5,7 @@ enum ShapeType: String, CaseIterable, Identifiable, Codable {
     case rectangle = "rectangle"
     case roundedRectangle = "roundedRectangle"
     case circle = "circle"
+    case ellipse = "ellipse"
     case triangle = "triangle"
     case pentagon = "pentagon"
     case diamond = "diamond"
@@ -21,6 +22,7 @@ enum ShapeType: String, CaseIterable, Identifiable, Codable {
         case .rectangle: return "rectangle"
         case .roundedRectangle: return "rectangle.inset.filled"
         case .circle: return "circle"
+        case .ellipse: return "circle.fill"
         case .triangle: return "triangle"
         case .pentagon: return "pentagon"
         case .diamond: return "diamond"
@@ -37,6 +39,7 @@ enum ShapeType: String, CaseIterable, Identifiable, Codable {
         case .rectangle: return "矩形"
         case .roundedRectangle: return "圆角矩形"
         case .circle: return "圆形"
+        case .ellipse: return "椭圆形"
         case .triangle: return "三角形"
         case .pentagon: return "五边形"
         case .diamond: return "菱形"
@@ -54,7 +57,7 @@ enum ShapeType: String, CaseIterable, Identifiable, Codable {
 
     /// 弹出菜单显示的所有形状
     static var popoverShapes: [ShapeType] {
-        [.line, .arrow, .rectangle, .roundedRectangle, .circle, .triangle, .diamond, .star, .hexagon]
+        [.line, .arrow, .rectangle, .roundedRectangle, .circle, .ellipse, .triangle, .diamond, .star, .hexagon]
     }
 
     /// 主选择器显示的形状

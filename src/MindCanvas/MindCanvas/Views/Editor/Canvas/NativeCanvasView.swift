@@ -1137,6 +1137,16 @@ class NativeCanvasView: UIView {
         onCanvasUpdated?()
     }
 
+    /// 检查是否存在指定ID的箭头
+    func hasArrow(id: UUID) -> Bool {
+        return arrowViews[id] != nil
+    }
+
+    /// 检查是否存在指定ID的形状
+    func hasShape(id: UUID) -> Bool {
+        return shapeViews[id] != nil
+    }
+
     func updateShape(_ shape: ShapeLayerNode) {
         print("[NativeCanvas] updateShape() called - ID: \(shape.id.uuidString.prefix(8))")
         shapeLayerManager.updateShape(shape)

@@ -218,6 +218,9 @@ class CanvasStateManager {
     /// 复制选中对象回调（由外部设置）
     var onDuplicateSelected: (() -> Void)?
     
+    /// 删除选中节点的回调
+    var onDeleteSelected: (() -> Void)?
+    
     /// 清屏
     func clearCanvas() {
         onClearCanvas?()
@@ -227,6 +230,12 @@ class CanvasStateManager {
     func duplicateSelected() {
         guard hasSelection else { return }
         onDuplicateSelected?()
+    }
+    
+    /// 删除选中的节点（支持撤销）
+    func deleteSelectedNode() {
+        guard hasSelection else { return }
+        onDeleteSelected?()
     }
     
     // MARK: - 状态重置
