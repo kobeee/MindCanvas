@@ -1,5 +1,181 @@
 # 开发记录
 
+## 2025-12-19 - 空白区域点击取消选中功能实现 ✅
+
+### 概述
+通过深入分析问题的根本原因，从第一性原理出发，成功定位并实现了空白区域点击取消选中功能。根本原因是缺少空白区域点击手势识别器，导致用户选中对象后无法通过点击空白区域取消选中状态。
+
+### 问题根源发现
+
+#### 1. **空白区域点击手势识别器缺失** - 核心根源
+**问题本质**：NativeCanvasView 没有实现空白区域点击手势识别器
+- overlayContainerView 和 objectLayerView 在 select 工具模式下启用了用户交互，但只处理子对象的点击
+- 用户点击空白区域时无法触发 `selectedNodeID = nil`
+- 违反了主流设计工具(Figma、Sketch、Canva)的标准交互模式
+
+**影响链路**：
+```
+用户选中对象 → 对象显示控制点 → 点击空白区域 → 
+无手势识别器响应 → 选中状态保持 → 控制点一直显示
+```
+
+#### 2. **手势处理机制不完整** - 系统层面
+**问题本质**：只实现了对象级别的点击手势，缺少画布级别的空白点击处理
+- 各个对象视图（ResizableImageView、SelectableArrowView、SelectableShapeView）都有自己的 tapGesture
+- 缺少覆盖整个画布的空白区域点击手势识别器
+- 没有实现 `UIGestureRecognizerDelegate` 来处理手势冲突
+
+### 核心修复方案
+
+#### 1. 添加空白区域点击手势识别器 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+/// 空白区域点击手势识别器
+private lazy var canvasTapGesture: UITapGestureRecognizer = {
+    let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTap(_:)))
+    tap.delegate = self
+    return tap
+}()
+
+// 在 setupViews 中添加
+addGestureRecognizer(canvasTapGesture)
+```
+
+#### 2. 实现智能点击检测逻辑 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+/// 处理画布点击事件（用于空白区域取消选中）
+@objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
+    // 只在选择工具模式下处理空白点击
+    guard currentTool == .select else { return }
+    
+    let location = gesture.location(in: objectLayerView)
+    
+    // 检查点击是否在任何对象上
+    let hitView = objectLayerView.hitTest(location, with: nil)
+    
+    // 如果点击的是objectLayerView本身（空白区域）或其直接子视图不是可选对象，取消选中
+    if hitView == objectLayerView || (!isSelectableObject(hitView)) {
+        print("[NativeCanvas] 空白区域点击，取消选中")
+        selectedNodeID = nil
+    }
+}
+
+/// 检查视图是否为可选择对象
+private func isSelectableObject(_ view: UIView?) -> Bool {
+    guard let view = view else { return false }
+    
+    return view is ResizableImageView ||
+           view is SelectableArrowView ||
+           view is SelectableShapeView ||
+           view is SelectableTextView
+}
+```
+
+#### 3. 实现手势冲突处理机制 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+extension NativeCanvasView: UIGestureRecognizerDelegate {
+    /// 处理手势识别器之间的冲突
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // 只在选择工具模式下处理空白点击
+        guard gestureRecognizer == canvasTapGesture, currentTool == .select else {
+            return true
+        }
+        
+        let location = touch.location(in: objectLayerView)
+        let hitView = objectLayerView.hitTest(location, with: nil)
+        
+        // 如果点击在可选择对象上，不让空白点击手势处理
+        if isSelectableObject(hitView) {
+            return false
+        }
+        
+        return true
+    }
+    
+    /// 处理手势识别器之间的同时识别
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 空白点击手势不与其他手势同时识别
+        return false
+    }
+}
+```
+
+#### 4. 更新工具模式切换时的手势管理 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+/// 根据工具更新手势处理
+func updateForTool(_ tool: CanvasTool) {
+    switch tool {
+    case .select:
+        // ... 其他设置 ...
+        
+        // 启用空白区域点击手势识别器
+        canvasTapGesture.isEnabled = true
+        
+    case .pan, .pen, .eraser, .image, .arrow, .rectangle, .text, .annotation:
+        // ... 其他设置 ...
+        
+        // 禁用空白区域点击手势识别器
+        canvasTapGesture.isEnabled = false
+    }
+}
+```
+
+### 技术要点总结
+
+#### 手势识别器管理
+- 只在选择工具模式下启用手势识别器
+- 使用 `UIGestureRecognizerDelegate` 处理手势冲突
+- 通过 `shouldReceive` 方法过滤对象点击，避免与对象自身手势冲突
+
+#### 智能点击检测
+- 使用 `hitTest` 检测点击位置的对象
+- 区分空白区域点击和对象点击
+- 支持所有对象类型（图片、箭头、形状、文本）
+
+#### 状态同步机制
+- 利用现有的 `selectedNodeID` 属性和状态同步架构
+- 设置 `selectedNodeID = nil` 自动触发状态更新
+- 通过 `onSelectionIdChanged` 回调同步到 CanvasStateManager
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/NativeCanvasView.swift` | 修改 | 添加空白区域点击手势识别器和处理逻辑 |
+
+### 预期效果
+修复后：
+- ✅ 点击空白区域可以取消选中状态
+- ✅ 点击对象不会误触发取消选中
+- ✅ 符合主流设计工具的交互标准
+- ✅ 提升操作流畅性和用户体验
+- ✅ 支持所有对象类型的选中取消
+
+### 验收标准
+- [ ] 创建形状并选中，点击空白区域取消选中
+- [ ] 创建图片并选中，点击空白区域取消选中
+- [ ] 创建箭头并选中，点击空白区域取消选中
+- [ ] 点击对象本身不会取消选中
+- [ ] 工具切换时手势状态正确
+- [ ] 缩放和平移后功能正常
+
+### 下一步
+- 在Xcode中编译测试修复效果
+- 在模拟器或真机上验证各种场景的选中取消功能
+- 根据测试结果优化手势识别的准确性
+
+---
+
 ## 2025-12-19 - 清屏撤销后图形对象消失问题修复 ✅
 
 ### 概述

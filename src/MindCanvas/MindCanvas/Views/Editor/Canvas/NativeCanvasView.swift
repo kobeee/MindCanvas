@@ -82,6 +82,13 @@ class NativeCanvasView: UIView {
     /// 标注图层管理器
     private let annotationLayerManager = AnnotationLayerManager()
 
+    /// 空白区域点击手势识别器
+    private lazy var canvasTapGesture: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTap(_:)))
+        tap.delegate = self
+        return tap
+    }()
+
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
         didSet {
@@ -182,6 +189,9 @@ class NativeCanvasView: UIView {
         addSubview(pencilCanvas)
         addSubview(overlayContainerView)  // 覆盖在 pencilCanvas 上方
         overlayContainerView.addSubview(objectLayerView)
+
+        // 添加空白区域点击手势识别器
+        addGestureRecognizer(canvasTapGesture)
 
         // 初始化完成后设置状态
         DispatchQueue.main.async { [weak self] in
@@ -584,6 +594,35 @@ class NativeCanvasView: UIView {
         return layers.first { $0.id == id }
     }
 
+    // MARK: - Gesture Handling
+
+    /// 处理画布点击事件（用于空白区域取消选中）
+    @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
+        // 只在选择工具模式下处理空白点击
+        guard currentTool == .select else { return }
+        
+        let location = gesture.location(in: objectLayerView)
+        
+        // 检查点击是否在任何对象上
+        let hitView = objectLayerView.hitTest(location, with: nil)
+        
+        // 如果点击的是objectLayerView本身（空白区域）或其直接子视图不是可选对象，取消选中
+        if hitView == objectLayerView || (!isSelectableObject(hitView)) {
+            print("[NativeCanvas] 空白区域点击，取消选中")
+            selectedNodeID = nil
+        }
+    }
+    
+    /// 检查视图是否为可选择对象
+    private func isSelectableObject(_ view: UIView?) -> Bool {
+        guard let view = view else { return false }
+        
+        return view is ResizableImageView ||
+               view is SelectableArrowView ||
+               view is SelectableShapeView ||
+               view is SelectableTextView
+    }
+
     // MARK: - Tool Management
 
     /// 根据工具更新手势处理
@@ -600,6 +639,9 @@ class NativeCanvasView: UIView {
             // 关键：启用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
+            
+            // 启用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = true
 
             // 确保所有对象的手势都能正常工作
             for imageView in imageViews.values {
@@ -626,6 +668,9 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
             overlayContainerView.isUserInteractionEnabled = false
+            
+            // 禁用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = false
 
         case .pen:
             pencilCanvas.isUserInteractionEnabled = true
@@ -638,6 +683,9 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
+            
+            // 禁用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = false
 
         case .eraser:
             pencilCanvas.isUserInteractionEnabled = true
@@ -650,6 +698,9 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
+            
+            // 禁用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = false
 
         case .image:
             pencilCanvas.isUserInteractionEnabled = true
@@ -662,6 +713,9 @@ class NativeCanvasView: UIView {
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
+            
+            // 禁用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = false
 
         case .arrow, .rectangle, .text, .annotation:
             pencilCanvas.isUserInteractionEnabled = true
@@ -673,6 +727,9 @@ class NativeCanvasView: UIView {
 
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
+            
+            // 禁用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = false
             objectLayerView.isUserInteractionEnabled = true
         }
     }
@@ -1315,6 +1372,34 @@ class NativeCanvasView: UIView {
     func clearAnnotations() {
         annotationLayerManager.clearAll()
         onCanvasUpdated?()
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension NativeCanvasView: UIGestureRecognizerDelegate {
+    /// 处理手势识别器之间的冲突
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // 只在选择工具模式下处理空白点击
+        guard gestureRecognizer == canvasTapGesture, currentTool == .select else {
+            return true
+        }
+        
+        let location = touch.location(in: objectLayerView)
+        let hitView = objectLayerView.hitTest(location, with: nil)
+        
+        // 如果点击在可选择对象上，不让空白点击手势处理
+        if isSelectableObject(hitView) {
+            return false
+        }
+        
+        return true
+    }
+    
+    /// 处理手势识别器之间的同时识别
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 空白点击手势不与其他手势同时识别
+        return false
     }
 }
 
