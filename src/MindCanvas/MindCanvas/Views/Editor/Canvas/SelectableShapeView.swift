@@ -403,12 +403,37 @@ class SelectableShapeView: UIView {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         // point 参数已经在本地坐标系中（UIKit 自动处理了 transform）
-        // 直接使用扩展后的 bounds 进行范围检查
-        let expandedBounds = bounds.insetBy(
-            dx: -(handleSize + rotationHandleOffset + 20),
-            dy: -(handleSize + rotationHandleOffset + 20)
-        )
-        return expandedBounds.contains(point)
+        
+        // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+        if bounds.contains(point) {
+            return true
+        }
+        
+        // 2. 只有在选中状态下才扩展控制点区域
+        guard isSelected else { 
+            return false
+        }
+        
+        // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+        let controlPointHitRadius: CGFloat = 22
+        
+        // 检查旋转手柄区域
+        let rotationPos = ControlHandle.rotation.position(in: bounds, rotationHandleOffset: rotationHandleOffset)
+        if distance(from: point, to: rotationPos) <= controlPointHitRadius {
+            return true
+        }
+        
+        // 检查角点控制点区域
+        let corners: [ControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        for corner in corners {
+            let cornerPos = corner.position(in: bounds)
+            if distance(from: point, to: cornerPos) <= controlPointHitRadius {
+                return true
+            }
+        }
+        
+        // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+        return false
     }
 
     // MARK: - Gesture Handlers

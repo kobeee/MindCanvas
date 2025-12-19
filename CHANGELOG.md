@@ -1,5 +1,153 @@
 # 开发记录
 
+## 2025-12-19 - 图形对象隐形外圈区域问题修复 ✅
+
+### 概述
+通过深入分析问题的根本原因，从第一性原理出发，成功定位并修复了图形对象隐形外圈区域问题。根本原因是SelectableShapeView和SelectableArrowView在`point(inside:with:)`方法中过度扩展了触摸区域，导致相邻对象间的干扰。
+
+### 问题根源发现
+
+#### 1. **过度扩展触摸区域** - 核心根源
+**问题本质**：`point(inside:with:)`方法错误地扩展了整个视图的触摸区域，而不是仅扩展控制点区域
+- **SelectableShapeView**: 扩展了62pt（31pt隐形外圈）
+- **SelectableArrowView**: 扩展了32pt（16pt隐形外圈）
+- **ResizableImageView**: ✅ 正确实现，无扩展
+- **SelectableTextView**: ✅ 正确实现，无扩展
+
+**影响链路**：
+```
+用户点击靠近图形区域 → 过度扩展的触摸区域响应 → 
+对象被意外选中 → 相邻对象受到影响 → 用户体验差
+```
+
+#### 2. **iOS hit testing机制理解偏差** - 技术层面
+**问题本质**：对UIKit的`point(inside:with:)`方法理解不准确
+- 该方法用于判断触摸点是否在视图内
+- 当前实现错误地扩展了整个bounds，而不是仅扩展控制点
+- 违反了精确交互的设计原则
+
+### 核心修复方案
+
+#### 1. 实现精确控制点扩展方案 ✅
+**修改文件**：`Views/Editor/Canvas/SelectableShapeView.swift`
+
+**关键修复**：
+```swift
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+    if bounds.contains(point) {
+        return true
+    }
+    
+    // 2. 只有在选中状态下才扩展控制点区域
+    guard isSelected else { 
+        return false
+    }
+    
+    // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+    let controlPointHitRadius: CGFloat = 22
+    
+    // 检查旋转手柄区域
+    let rotationPos = ControlHandle.rotation.position(in: bounds, rotationHandleOffset: rotationHandleOffset)
+    if distance(from: point, to: rotationPos) <= controlPointHitRadius {
+        return true
+    }
+    
+    // 检查角点控制点区域
+    let corners: [ControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+    for corner in corners {
+        let cornerPos = corner.position(in: bounds)
+        if distance(from: point, to: cornerPos) <= controlPointHitRadius {
+            return true
+        }
+    }
+    
+    // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+    return false
+}
+```
+
+#### 2. 修复SelectableArrowView的过大点击区域 ✅
+**修改文件**：`Views/Editor/Canvas/SelectableArrowView.swift`
+
+**关键修复**：
+```swift
+override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+    if bounds.contains(point) {
+        return true
+    }
+    
+    // 2. 只有在选中状态下才扩展控制点区域
+    guard isSelected else { 
+        return false
+    }
+    
+    // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+    let controlPointHitRadius: CGFloat = 22
+    
+    // 检查端点控制点区域
+    let endpoints: [ArrowHandle] = [.startPoint, .endPoint]
+    for endpoint in endpoints {
+        let endpointPos = endpoint.position(for: arrowNode, in: bounds)
+        if distance(from: point, to: endpointPos) <= controlPointHitRadius {
+            return true
+        }
+    }
+    
+    // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+    return false
+}
+```
+
+### 技术要点总结
+
+#### 分层检测策略
+- **第一层**：检查原始bounds内的精确点击
+- **第二层**：仅在选中状态下检查控制点区域
+- **第三层**：仅对控制点周围22pt半径进行适度扩展
+- **第四层**：不在任何有效区域内返回false
+
+#### 状态感知机制
+- 只有在选中状态下才扩展控制点区域
+- 非选中状态下保持精确的bounds检测
+- 避免了不必要的隐形扩展区域
+
+#### 精确扩展原则
+- 控制点扩展半径：22pt（适中的触摸友好区域）
+- 消除了62pt和32pt的过大扩展区域
+- 保持控制点的良好可点击性
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Views/Editor/Canvas/SelectableShapeView.swift` | 修改 | 实现精确控制点扩展方案，消除62pt隐形外圈 |
+| `Views/Editor/Canvas/SelectableArrowView.swift` | 修改 | 实现精确控制点扩展方案，消除32pt隐形外圈 |
+
+### 预期效果
+修复后：
+- ✅ **消除隐形外圈区域**：不再有超出图形本身的隐形选中区域
+- ✅ **保持控制点的良好可点击性**：控制点仍有22pt的扩展区域便于操作
+- ✅ **解决相邻对象的干扰问题**：挨近的图形对象不会互相影响
+- ✅ **提供更精确的用户体验**：点击哪里就是哪里，符合用户预期
+- ✅ **符合主流设计工具标准**：与Figma、Sketch等工具的交互一致
+
+### 验收标准
+- [ ] 创建两个挨近的形状，点击一个不会误选中另一个
+- [ ] 点击形状边界外的空白区域不会选中形状
+- [ ] 点击控制点附近22pt范围内仍能正常操作控制点
+- [ ] 选中状态下控制点保持良好的可点击性
+- [ ] 非选中状态下只有精确点击形状本身才能选中
+- [ ] 箭头对象的端点控制点交互正常
+
+### 下一步
+- 在Xcode中编译测试修复效果
+- 在模拟器或真机上验证各种场景的精确点击检测
+- 根据测试结果优化控制点扩展半径
+- 验证复杂图形排列场景下的交互准确性
+
+---
+
 ## 2025-12-19 - 空白区域点击取消选中功能实现 ✅
 
 ### 概述

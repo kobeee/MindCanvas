@@ -249,8 +249,30 @@ class SelectableArrowView: UIView {
     }
     
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        let expandedBounds = bounds.insetBy(dx: -(handleSize + 20), dy: -(handleSize + 20))
-        return expandedBounds.contains(point)
+        // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+        if bounds.contains(point) {
+            return true
+        }
+        
+        // 2. 只有在选中状态下才扩展控制点区域
+        guard isSelected else { 
+            return false
+        }
+        
+        // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+        let controlPointHitRadius: CGFloat = 22
+        
+        // 检查端点控制点区域
+        let endpoints: [ArrowHandle] = [.startPoint, .endPoint]
+        for endpoint in endpoints {
+            let endpointPos = endpoint.position(for: arrowNode, in: bounds)
+            if distance(from: point, to: endpointPos) <= controlPointHitRadius {
+                return true
+            }
+        }
+        
+        // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+        return false
     }
     
     // MARK: - Gesture Handlers
