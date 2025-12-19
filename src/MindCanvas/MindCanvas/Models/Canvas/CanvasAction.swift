@@ -228,8 +228,7 @@ struct ClearCanvasAction: CanvasAction {
         // 恢复文字
         if !previousTexts.isEmpty {
             previousTexts.forEach { text in
-                // TODO: 待文本工具完整实现后启用
-                // canvasView?.addText(text, recordUndo: false)
+                canvasView?.addText(text, recordUndo: false)
             }
         }
         
@@ -565,61 +564,266 @@ struct ModifyRectangleAction: CanvasAction {
 // MARK: - 文字操作
 
 /// 添加文字操作
-/// TODO: 待文本工具完整实现后启用
+/// 线程安全的文字添加操作，支持完整的撤销/恢复生命周期
 struct AddTextAction: CanvasAction {
     let text: TextLayerNode
     weak var canvasView: NativeCanvasView?
     
-    var description: String { "添加文字: \(text.id)" }
+    var description: String { "添加文字: \(text.id) [\(text.text.prefix(20))]" }
     
     func execute() {
-        // TODO: 实现文本添加逻辑
-        // canvasView?.addText(text, recordUndo: false)
+        guard let canvasView = canvasView else {
+            print("⚠️ [AddTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        // 验证文字节点有效性
+        guard isValidTextNode(text) else {
+            print("⚠️ [AddTextAction] Invalid text node: \(text.id)")
+            return
+        }
+        
+        canvasView.addText(text, recordUndo: false)
     }
     
     func undo() {
-        // TODO: 实现文本移除逻辑
-        // canvasView?.removeText(id: text.id)
+        guard let canvasView = canvasView else {
+            print("⚠️ [AddTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        canvasView.removeText(id: text.id)
+    }
+    
+    /// 验证文字节点的有效性
+    private func isValidTextNode(_ text: TextLayerNode) -> Bool {
+        return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+               text.fontSize > 0 &&
+               text.scale > 0 &&
+               !text.color.isEmpty
     }
 }
 
 /// 移除文字操作
-/// TODO: 待文本工具完整实现后启用
+/// 安全的文字移除操作，支持恢复已删除的文字
 struct RemoveTextAction: CanvasAction {
     let text: TextLayerNode
     weak var canvasView: NativeCanvasView?
     
-    var description: String { "移除文字: \(text.id)" }
+    var description: String { "移除文字: \(text.id) [\(text.text.prefix(20))]" }
     
     func execute() {
-        // TODO: 实现文本移除逻辑
-        // canvasView?.removeText(id: text.id)
+        guard let canvasView = canvasView else {
+            print("⚠️ [RemoveTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        canvasView.removeText(id: text.id)
     }
     
     func undo() {
-        // TODO: 实现文本添加逻辑
-        // canvasView?.addText(text)
+        guard let canvasView = canvasView else {
+            print("⚠️ [RemoveTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        // 恢复时需要确保不重复记录撤销操作
+        canvasView.addText(text, recordUndo: false)
     }
 }
 
 /// 修改文字操作
-/// TODO: 待文本工具完整实现后启用
+/// 支持文字内容、样式、位置等所有属性的修改撤销
 struct ModifyTextAction: CanvasAction {
     let textID: UUID
     let fromText: TextLayerNode
     let toText: TextLayerNode
     weak var canvasView: NativeCanvasView?
     
-    var description: String { "修改文字: \(textID)" }
+    /// 检测哪些属性发生了变化，用于更精确的描述
+    private var changedProperties: [String] {
+        var properties: [String] = []
+        
+        if fromText.text != toText.text {
+            properties.append("内容")
+        }
+        if fromText.fontSize != toText.fontSize {
+            properties.append("字号")
+        }
+        if fromText.color != toText.color {
+            properties.append("颜色")
+        }
+        if fromText.fontName != toText.fontName {
+            properties.append("字体")
+        }
+        if fromText.position != toText.position {
+            properties.append("位置")
+        }
+        if abs(fromText.rotation - toText.rotation) > 0.001 {
+            properties.append("旋转")
+        }
+        if abs(fromText.scale - toText.scale) > 0.01 {
+            properties.append("缩放")
+        }
+        
+        return properties.isEmpty ? ["未知"] : properties
+    }
+    
+    var description: String { 
+        let changes = changedProperties.joined(separator: ",")
+        return "修改文字: \(textID) [\(changes)]"
+    }
     
     func execute() {
-        // TODO: 实现文本更新逻辑
-        // canvasView?.updateText(toText)
+        guard let canvasView = canvasView else {
+            print("⚠️ [ModifyTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        // 验证目标文字节点的有效性
+        guard isValidTextNode(toText) else {
+            print("⚠️ [ModifyTextAction] Invalid target text node: \(textID)")
+            return
+        }
+        
+        canvasView.updateText(toText)
     }
     
     func undo() {
-        // TODO: 实现文本更新逻辑
-        // canvasView?.updateText(fromText)
+        guard let canvasView = canvasView else {
+            print("⚠️ [ModifyTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        canvasView.updateText(fromText)
+    }
+    
+    /// 验证文字节点的有效性
+    private func isValidTextNode(_ text: TextLayerNode) -> Bool {
+        return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+               text.fontSize > 0 &&
+               text.scale > 0 &&
+               !text.color.isEmpty
+    }
+}
+
+/// 移动文字操作
+/// 专门处理文字位置移动的撤销操作
+struct MoveTextAction: CanvasAction {
+    let textID: UUID
+    let fromText: TextLayerNode
+    let toText: TextLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    /// 计算移动距离
+    private var movementDelta: CGPoint {
+        CGPoint(
+            x: toText.position.x - fromText.position.x,
+            y: toText.position.y - fromText.position.y
+        )
+    }
+    
+    var description: String { 
+        let delta = movementDelta
+        return "移动文字: \(textID) [Δx: \(String(format: "%.1f", delta.x)), Δy: \(String(format: "%.1f", delta.y))]"
+    }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [MoveTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        canvasView.updateText(toText)
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [MoveTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        canvasView.updateText(fromText)
+    }
+}
+
+/// 缩放文字操作
+/// 专门处理文字缩放操作的撤销，支持精确的缩放比例追踪
+struct ScaleTextAction: CanvasAction {
+    let textID: UUID
+    let fromText: TextLayerNode
+    let toText: TextLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    /// 计算缩放比例变化
+    private var scaleRatio: CGFloat {
+        guard fromText.scale > 0 else { return 1.0 }
+        return toText.scale / fromText.scale
+    }
+    
+    var description: String { 
+        return "缩放文字: \(textID) [\(String(format: "%.2f", scaleRatio))x]"
+    }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [ScaleTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        // 验证缩放值的有效性
+        guard toText.scale > 0 && toText.scale <= 10.0 else {
+            print("⚠️ [ScaleTextAction] Invalid scale value: \(toText.scale)")
+            return
+        }
+        
+        canvasView.updateText(toText)
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [ScaleTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        canvasView.updateText(fromText)
+    }
+}
+
+/// 旋转文字操作
+/// 专门处理文字旋转操作的撤销，支持角度变化的精确追踪
+struct RotateTextAction: CanvasAction {
+    let textID: UUID
+    let fromText: TextLayerNode
+    let toText: TextLayerNode
+    weak var canvasView: NativeCanvasView?
+    
+    /// 计算旋转角度变化（转换为度数）
+    private var rotationDelta: CGFloat {
+        let delta = toText.rotation - fromText.rotation
+        return delta * 180.0 / CGFloat.pi
+    }
+    
+    var description: String { 
+        return "旋转文字: \(textID) [\(String(format: "%.1f", rotationDelta))°]"
+    }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [RotateTextAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        canvasView.updateText(toText)
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [RotateTextAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        canvasView.updateText(fromText)
     }
 }
 
@@ -675,6 +879,181 @@ struct ModifyAnnotationAction: CanvasAction {
     }
 }
 
+// MARK: - 文字批量操作
+
+/// 批量添加文字操作
+/// 原子性地添加多个文字对象，要么全部成功要么全部失败
+struct BatchAddTextsAction: CanvasAction {
+    let texts: [TextLayerNode]
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "批量添加文字: \(texts.count)个" }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchAddTextsAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        // 验证所有文字节点的有效性
+        let validTexts = texts.filter { text in
+            !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            text.fontSize > 0 &&
+            text.scale > 0 &&
+            !text.color.isEmpty
+        }
+        
+        if validTexts.count != texts.count {
+            print("⚠️ [BatchAddTextsAction] \(texts.count - validTexts.count) 个文字节点无效")
+        }
+        
+        // 批量添加，不记录单独的撤销操作
+        validTexts.forEach { text in
+            canvasView.addText(text, recordUndo: false)
+        }
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchAddTextsAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        // 批量移除所有添加的文字
+        texts.forEach { text in
+            canvasView.removeText(id: text.id)
+        }
+    }
+}
+
+/// 批量删除文字操作
+/// 原子性地删除多个文字对象
+struct BatchRemoveTextsAction: CanvasAction {
+    let texts: [TextLayerNode]
+    weak var canvasView: NativeCanvasView?
+    
+    var description: String { "批量删除文字: \(texts.count)个" }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchRemoveTextsAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        texts.forEach { text in
+            canvasView.removeText(id: text.id)
+        }
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchRemoveTextsAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        // 批量恢复所有删除的文字
+        texts.forEach { text in
+            canvasView.addText(text, recordUndo: false)
+        }
+    }
+}
+
+/// 批量修改文字样式操作
+/// 同时修改多个文字的样式属性（字体、颜色、字号等）
+struct BatchModifyTextsStyleAction: CanvasAction {
+    let textIDs: [UUID]
+    let fromTexts: [TextLayerNode]
+    let toTexts: [TextLayerNode]
+    weak var canvasView: NativeCanvasView?
+    
+    init(textIDs: [UUID], fromTexts: [TextLayerNode], toTexts: [TextLayerNode], canvasView: NativeCanvasView) {
+        self.textIDs = textIDs
+        self.fromTexts = fromTexts
+        self.toTexts = toTexts
+        self.canvasView = canvasView
+    }
+    
+    var description: String { "批量修改文字样式: \(textIDs.count)个" }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchModifyTextsStyleAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        guard textIDs.count == fromTexts.count && fromTexts.count == toTexts.count else {
+            print("⚠️ [BatchModifyTextsStyleAction] 数据不一致")
+            return
+        }
+        
+        toTexts.forEach { text in
+            canvasView.updateText(text)
+        }
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [BatchModifyTextsStyleAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        fromTexts.forEach { text in
+            canvasView.updateText(text)
+        }
+    }
+}
+
+/// 文字图层排序操作
+/// 调整多个文字图层的Z-Index顺序
+struct ReorderTextsAction: CanvasAction {
+    let textIDs: [UUID]
+    let fromZIndexes: [Int]
+    let toZIndexes: [Int]
+    weak var canvasView: NativeCanvasView?
+    
+    init(textIDs: [UUID], fromZIndexes: [Int], toZIndexes: [Int], canvasView: NativeCanvasView) {
+        self.textIDs = textIDs
+        self.fromZIndexes = fromZIndexes
+        self.toZIndexes = toZIndexes
+        self.canvasView = canvasView
+    }
+    
+    var description: String { "重排序文字图层: \(textIDs.count)个" }
+    
+    func execute() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [ReorderTextsAction] CanvasView is nil, cannot execute")
+            return
+        }
+        
+        guard textIDs.count == fromZIndexes.count && fromZIndexes.count == toZIndexes.count else {
+            print("⚠️ [ReorderTextsAction] 数据不一致")
+            return
+        }
+        
+        // 更新每个文字的Z-Index
+        for (index, textID) in textIDs.enumerated() {
+            guard var text = canvasView.getTextLayerManager().getText(id: textID) else { continue }
+            text = text.updated(zIndex: toZIndexes[index])
+            canvasView.updateText(text)
+        }
+    }
+    
+    func undo() {
+        guard let canvasView = canvasView else {
+            print("⚠️ [ReorderTextsAction] CanvasView is nil, cannot undo")
+            return
+        }
+        
+        // 恢复原始Z-Index
+        for (index, textID) in textIDs.enumerated() {
+            guard var text = canvasView.getTextLayerManager().getText(id: textID) else { continue }
+            text = text.updated(zIndex: fromZIndexes[index])
+            canvasView.updateText(text)
+        }
+    }
+}
+
 // MARK: - 复合操作
 
 /// 复合操作（将多个操作打包为一个）
@@ -690,6 +1069,58 @@ struct CompoundAction: CanvasAction {
     
     func undo() {
         actions.reversed().forEach { $0.undo() }
+    }
+}
+
+// MARK: - 文字操作工具类
+
+/// 文字操作工具类
+/// 提供便捷的批量操作创建和执行方法
+class TextActionHelper {
+    
+    /// 创建批量添加文字操作
+    static func createBatchAddAction(texts: [TextLayerNode], canvasView: NativeCanvasView) -> BatchAddTextsAction {
+        return BatchAddTextsAction(texts: texts, canvasView: canvasView)
+    }
+    
+    /// 创建批量删除文字操作
+    static func createBatchRemoveAction(texts: [TextLayerNode], canvasView: NativeCanvasView) -> BatchRemoveTextsAction {
+        return BatchRemoveTextsAction(texts: texts, canvasView: canvasView)
+    }
+    
+    /// 创建批量样式修改操作
+    static func createBatchStyleModifyAction(
+        textIDs: [UUID],
+        fromTexts: [TextLayerNode],
+        toTexts: [TextLayerNode],
+        canvasView: NativeCanvasView
+    ) -> BatchModifyTextsStyleAction {
+        return BatchModifyTextsStyleAction(
+            textIDs: textIDs,
+            fromTexts: fromTexts,
+            toTexts: toTexts,
+            canvasView: canvasView
+        )
+    }
+    
+    /// 创建文字重排序操作
+    static func createReorderAction(
+        textIDs: [UUID],
+        fromZIndexes: [Int],
+        toZIndexes: [Int],
+        canvasView: NativeCanvasView
+    ) -> ReorderTextsAction {
+        return ReorderTextsAction(
+            textIDs: textIDs,
+            fromZIndexes: fromZIndexes,
+            toZIndexes: toZIndexes,
+            canvasView: canvasView
+        )
+    }
+    
+    /// 创建复合操作（用于复杂的多步骤操作）
+    static func createCompoundAction(actions: [any CanvasAction], name: String) -> CompoundAction {
+        return CompoundAction(actions: actions, name: name)
     }
 }
 

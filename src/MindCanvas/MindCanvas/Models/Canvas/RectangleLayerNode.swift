@@ -4,7 +4,7 @@ import Combine
 
 /// 矩形图层节点
 /// 表示画布上的一个矩形对象
-struct RectangleLayerNode: Codable, Identifiable {
+struct RectangleLayerNode: Codable, Identifiable, Equatable {
     let id: UUID
     let rect: CGRect
     let color: String // 十六进制颜色值
@@ -12,6 +12,11 @@ struct RectangleLayerNode: Codable, Identifiable {
     let isFilled: Bool
     let zIndex: Int
     let createdAt: Date
+    
+    /// 计算属性：frame（兼容性）
+    var frame: CGRect {
+        return rect
+    }
     
     /// 创建矩形图层
     init(rect: CGRect, color: String = "#000000", lineWidth: CGFloat = 3, isFilled: Bool = false, zIndex: Int = 0) {

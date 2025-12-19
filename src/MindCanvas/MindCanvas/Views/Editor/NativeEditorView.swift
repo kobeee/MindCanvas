@@ -208,10 +208,18 @@ struct NativeEditorView: View {
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeShape(id: selectedID)
                     deletionSuccess = true
-                    }
+                }
+                // 4. 尝试作为文字删除
+                else if let text = canvasView.getTextLayerManager().texts.first(where: { $0.id == selectedID }) {
+                    let action = RemoveTextAction(text: text, canvasView: canvasView)
+                    viewModel.stateManager.recordAction(action)
+                    canvasView.removeText(id: selectedID)
+                    deletionSuccess = true
+                    print("✅ [NativeEditorView] 删除文字对象成功: \(text.text)")
+                }
                 
                 if !deletionSuccess {
-                    // 删除失败，静默处理
+                    print("⚠️ [NativeEditorView] 删除对象失败，未找到ID: \(selectedID)")
                 }
 
                 // 清除选中状态
@@ -459,6 +467,9 @@ private struct NativeCanvasContainer: View {
     @State private var textPosition: CGPoint = .zero
     @State private var editingText: String = ""
     
+    // 文字工具状态监听
+    @State private var previousTool: CanvasTool = .select
+    
     // 标注绘制状态
     @State private var isDrawingAnnotation = false
     @State private var annotationStartPoint: CGPoint?
@@ -625,27 +636,46 @@ private struct NativeCanvasContainer: View {
                 // 不再使用 SwiftUI ForEach 渲染，避免遮挡 UIKit 手势
                 
                 // 文字编辑层
-                // TODO: 待文本工具完整实现后启用
-                // if viewModel.stateManager.currentTool == .text {
-                //     TextEditingView(
-                //         isEditing: $isEditingText,
-                //         position: $textPosition,
-                //         text: $editingText,
-                //         fontSize: viewModel.stateManager.textFontSize,
-                //         color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
-                //     ) { position, text in
-                //         // 创建文字图层
-                //         let textLayer = TextLayerNode(
-                //             position: position,
-                //             text: text,
-                //             fontSize: viewModel.stateManager.textFontSize,
-                //             color: viewModel.stateManager.textColor,
-                //             fontName: viewModel.stateManager.textFontName,
-                //             zIndex: 0
-                //         )
-                //         // viewModel.canvasView?.addText(textLayer)
-                //     }
-                // }
+                if viewModel.stateManager.currentTool == .text {
+                    TextEditingView(
+                        isEditing: $isEditingText,
+                        position: $textPosition,
+                        text: $editingText,
+                        fontSize: viewModel.stateManager.textFontSize,
+                        color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
+                    ) { position, text in
+                        // 创建文字图层
+                        guard let canvasView = viewModel.canvasView else {
+                            print("❌ [NativeEditorView] 画布视图不可用，无法创建文字")
+                            return
+                        }
+                        
+                        // 坐标转换：SwiftUI 坐标 + contentOffset = 画布内容坐标
+                        let offset = canvasView.pencilCanvas.contentOffset
+                        let scale = canvasView.pencilCanvas.zoomScale
+                        let contentPosition = CGPoint(
+                            x: (position.x + offset.x) / scale,
+                            y: (position.y + offset.y) / scale
+                        )
+                        
+                        let textLayer = TextLayerNode(
+                            position: contentPosition,
+                            text: text,
+                            fontSize: viewModel.stateManager.textFontSize,
+                            color: viewModel.stateManager.textColor,
+                            fontName: viewModel.stateManager.textFontName ?? ".SF Pro Display",
+                            zIndex: canvasView.getTextLayerManager().getNextZIndex()
+                        )
+                        
+                        print("✅ [NativeEditorView] 创建文字图层: '\(text)' at \(contentPosition)")
+                        canvasView.addText(textLayer)
+                        
+                        // 创建完成后自动切换回选择工具
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            viewModel.stateManager.currentTool = .pan
+                        }
+                    }
+                }
                 
                 // 显示所有矩形
                 ForEach(viewModel.canvasView?.getRectangleLayerManager().rectangles ?? []) { rectangle in
@@ -699,10 +729,9 @@ private struct NativeCanvasContainer: View {
                 }
                 
                 // 显示所有文字
-                // TODO: 待文本工具完整实现后启用
-                // ForEach(viewModel.canvasView?.getTextLayerManager().textLayers ?? []) { textLayer in
-                //     TextDisplayView(textLayer: textLayer)
-                // }
+                ForEach(viewModel.canvasView?.getTextLayerManager().texts ?? []) { textLayer in
+                    TextDisplayView(textLayer: textLayer)
+                }
                 
                 // 显示所有标注
                 ForEach(viewModel.canvasView?.getAnnotationLayerManager().annotations ?? []) { annotation in
@@ -775,8 +804,26 @@ private struct NativeCanvasContainer: View {
                             viewModel.selectedShapeType = shapeType
                         },
                         onToolChanged: { newTool in
+                            print("🔧 [NativeEditorView] 工具切换回调: \(newTool.displayName)")
+                            
                             // 工具切换时取消选中状态
                             viewModel.stateManager.clearSelection()
+                            
+                            // 文字工具特殊处理：重置文字编辑状态
+                            if newTool == .text {
+                                print("✅ [NativeEditorView] 切换到文字工具，重置编辑状态")
+                                isEditingText = false
+                                textPosition = .zero
+                                editingText = ""
+                            } else {
+                                // 切换出文字工具时，如果正在编辑文字，取消编辑状态
+                                if isEditingText {
+                                    print("🔧 [NativeEditorView] 切换出文字工具，取消编辑状态")
+                                    isEditingText = false
+                                    textPosition = .zero
+                                    editingText = ""
+                                }
+                            }
                         },
                         penColor: Binding(
                             get: { Color(hex: viewModel.stateManager.penColor) },
@@ -803,6 +850,21 @@ private struct NativeCanvasContainer: View {
                     .padding(.bottom, Theme.Spacing.xl)
                 }
             }
+        }
+        .onChange(of: viewModel.stateManager.currentTool) { _, newTool in
+            // 监听工具变化，确保文字工具状态正确
+            if newTool == .text && previousTool != .text {
+                print("🔧 [NativeCanvasContainer] 进入文字工具模式")
+                // 清除选中状态，避免冲突
+                viewModel.stateManager.clearSelection()
+            } else if previousTool == .text && newTool != .text {
+                print("🔧 [NativeCanvasContainer] 退出文字工具模式")
+                // 重置文字编辑状态
+                isEditingText = false
+                textPosition = .zero
+                editingText = ""
+            }
+            previousTool = newTool
         }
     }
 }

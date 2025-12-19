@@ -6,6 +6,9 @@ struct FontPickerPopover: View {
     @Binding var fontSize: CGFloat
     @Binding var textColor: Color
     let onConfirm: () -> Void
+    
+    // 实时更新状态
+    var onFontChanged: ((String, CGFloat, Color) -> Void)?
 
     // 推荐字体列表
     private let recommendedFonts: [(name: String, displayName: String)] = [
@@ -96,7 +99,7 @@ struct FontPickerPopover: View {
             Button {
                 onConfirm()
             } label: {
-                Text("添加文字")
+                Text("确认设置")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.blue)
@@ -105,6 +108,15 @@ struct FontPickerPopover: View {
             }
             .buttonStyle(.plain)
             .padding(.bottom, 8)
+            .onChange(of: selectedFont) { _, newFont in
+                onFontChanged?(newFont, fontSize, textColor)
+            }
+            .onChange(of: fontSize) { _, newSize in
+                onFontChanged?(selectedFont, newSize, textColor)
+            }
+            .onChange(of: textColor) { _, newColor in
+                onFontChanged?(selectedFont, fontSize, newColor)
+            }
         }
         .padding(.horizontal, 16)
         .frame(width: 320)

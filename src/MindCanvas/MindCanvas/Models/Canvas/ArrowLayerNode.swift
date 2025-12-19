@@ -4,7 +4,7 @@ import Combine
 
 /// 箭头图层节点
 /// 表示画布上的一个箭头对象
-struct ArrowLayerNode: Codable, Identifiable {
+struct ArrowLayerNode: Codable, Identifiable, Equatable {
     let id: UUID
     var startPoint: CGPoint
     var endPoint: CGPoint

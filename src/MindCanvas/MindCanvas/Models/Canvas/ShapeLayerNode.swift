@@ -3,7 +3,7 @@ import CoreGraphics
 import Combine
 
 /// 通用形状图层节点
-struct ShapeLayerNode: Codable, Identifiable {
+struct ShapeLayerNode: Codable, Identifiable, Equatable {
     let id: UUID
     var frame: CGRect           // 位置和尺寸
     var rotation: Double        // 旋转角度（弧度）

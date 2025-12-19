@@ -4,7 +4,7 @@ import Combine
 
 /// 标注图层节点
 /// 表示画布上的一个标注对象（包含矩形框和文字）
-struct AnnotationLayerNode: Codable, Identifiable {
+struct AnnotationLayerNode: Codable, Identifiable, Equatable {
     let id: UUID
     let rect: CGRect
     let text: String

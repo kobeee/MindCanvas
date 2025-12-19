@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// 画布文档 - 代表一个完整的创作画布状态
 struct CanvasDocument: Codable, Identifiable {
@@ -35,6 +36,9 @@ struct CanvasDocument: Codable, Identifiable {
     /// 最后修改时间
     var modifiedAt: Date
     
+    /// 文档版本号（用于兼容性检查）
+    var version: Int = 1
+    
     // MARK: - 初始化
     
     init(
@@ -48,7 +52,8 @@ struct CanvasDocument: Codable, Identifiable {
         drawingData: Data? = nil,
         canvasTransform: CanvasTransform = .identity,
         createdAt: Date = Date(),
-        modifiedAt: Date = Date()
+        modifiedAt: Date = Date(),
+        version: Int = 1
     ) {
         self.id = id
         self.projectID = projectID
@@ -61,6 +66,7 @@ struct CanvasDocument: Codable, Identifiable {
         self.canvasTransform = canvasTransform
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
+        self.version = version
     }
     
     // MARK: - 图层管理
@@ -318,5 +324,233 @@ struct CanvasDocument: Codable, Identifiable {
     var isEmpty: Bool {
         layers.isEmpty && arrows.isEmpty && rectangles.isEmpty && texts.isEmpty && annotations.isEmpty && drawingData == nil
     }
+    
+    // MARK: - 数据验证和完整性检查
+    
+    /// 验证文档数据的完整性和有效性
+    func validate() -> [ValidationError] {
+        var errors: [ValidationError] = []
+        
+        // 验证基本字段
+        if projectID == UUID(uuidString: "00000000-0000-0000-0000-000000000000") {
+            errors.append(.invalidProjectID)
+        }
+        
+        // 验证图层
+        for layer in layers {
+            if layer.frame.width <= 0 || layer.frame.height <= 0 {
+                errors.append(.invalidLayerSize(id: layer.id))
+            }
+        }
+        
+        // 验证箭头
+        for arrow in arrows {
+            if arrow.startPoint == arrow.endPoint {
+                errors.append(.invalidArrowGeometry(id: arrow.id))
+            }
+        }
+        
+        // 验证矩形
+        for rectangle in rectangles {
+            if rectangle.frame.width <= 0 || rectangle.frame.height <= 0 {
+                errors.append(.invalidRectangleSize(id: rectangle.id))
+            }
+        }
+        
+        // 验证文字
+        for text in texts {
+            if text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                errors.append(.emptyText(id: text.id))
+            }
+            if text.fontSize <= 0 || text.scale <= 0 {
+                errors.append(.invalidTextProperties(id: text.id))
+            }
+        }
+        
+        // 验证标注
+        for annotation in annotations {
+            if annotation.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                errors.append(.emptyAnnotation(id: annotation.id))
+            }
+        }
+        
+        return errors
+    }
+    
+    /// 修复可修复的数据问题
+    mutating func repair() {
+        // 修复无效的图层尺寸
+        for i in layers.indices {
+            if layers[i].frame.width <= 0 {
+                layers[i].frame.size.width = 100
+            }
+            if layers[i].frame.height <= 0 {
+                layers[i].frame.size.height = 100
+            }
+        }
+        
+        // 修复无效的矩形尺寸
+        for i in rectangles.indices {
+            if rectangles[i].rect.width <= 0 {
+                rectangles[i] = rectangles[i].updated(rect: CGRect(
+                    x: rectangles[i].rect.origin.x,
+                    y: rectangles[i].rect.origin.y,
+                    width: 100,
+                    height: rectangles[i].rect.height
+                ))
+            }
+            if rectangles[i].rect.height <= 0 {
+                rectangles[i] = rectangles[i].updated(rect: CGRect(
+                    x: rectangles[i].rect.origin.x,
+                    y: rectangles[i].rect.origin.y,
+                    width: rectangles[i].rect.width,
+                    height: 100
+                ))
+            }
+        }
+        
+        // 修复无效的文字属性
+        for i in texts.indices {
+            if texts[i].fontSize <= 0 {
+                texts[i].fontSize = 16
+            }
+            if texts[i].scale <= 0 {
+                texts[i].scale = 1.0
+            }
+        }
+        
+        // 移除空的文字和标注
+        texts.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        annotations.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        
+        // 移除重复的箭头（起点和终点相同）
+        arrows.removeAll { $0.startPoint == $0.endPoint }
+        
+        updateModifiedDate()
+    }
+    
+    /// 获取文档统计信息
+    var statistics: DocumentStatistics {
+        DocumentStatistics(
+            layerCount: layers.count,
+            arrowCount: arrows.count,
+            rectangleCount: rectangles.count,
+            textCount: texts.count,
+            annotationCount: annotations.count,
+            hasDrawingData: drawingData != nil,
+            totalSize: estimateDataSize(),
+            version: version
+        )
+    }
+    
+    /// 估算文档数据大小（字节）
+    private func estimateDataSize() -> Int {
+        var size = 0
+        size += layers.count * 256 // 估算每个图层256字节
+        size += arrows.count * 128 // 估算每个箭头128字节
+        size += rectangles.count * 128
+        size += texts.count * 512 // 文字数据较大
+        size += annotations.count * 256
+        size += drawingData?.count ?? 0
+        return size
+    }
+    
+    // MARK: - 增量保存支持
+    
+    /// 生成增量快照（用于优化保存性能）
+    func generateIncrementalSnapshot(from previous: CanvasDocument) -> DocumentSnapshot {
+        let changedLayers = layers.filter { layer in
+            !previous.layers.contains { $0.id == layer.id && $0 == layer }
+        }
+        
+        let changedArrows = arrows.filter { arrow in
+            !previous.arrows.contains { $0.id == arrow.id && $0 == arrow }
+        }
+        
+        let changedRectangles = rectangles.filter { rectangle in
+            !previous.rectangles.contains { $0.id == rectangle.id && $0 == rectangle }
+        }
+        
+        let changedTexts = texts.filter { text in
+            !previous.texts.contains { $0.id == text.id && $0 == text }
+        }
+        
+        let changedAnnotations = annotations.filter { annotation in
+            !previous.annotations.contains { $0.id == annotation.id && $0 == annotation }
+        }
+        
+        let drawingChanged = drawingData != previous.drawingData
+        
+        return DocumentSnapshot(
+            changedLayers: changedLayers,
+            changedArrows: changedArrows,
+            changedRectangles: changedRectangles,
+            changedTexts: changedTexts,
+            changedAnnotations: changedAnnotations,
+            drawingChanged: drawingChanged,
+            drawingData: drawingChanged ? drawingData : nil,
+            timestamp: Date()
+        )
+    }
+}
+
+// MARK: - 支持类型
+
+/// 验证错误类型
+enum ValidationError: Equatable {
+    case invalidProjectID
+    case invalidLayerSize(id: UUID)
+    case invalidArrowGeometry(id: UUID)
+    case invalidRectangleSize(id: UUID)
+    case emptyText(id: UUID)
+    case invalidTextProperties(id: UUID)
+    case emptyAnnotation(id: UUID)
+    
+    var localizedDescription: String {
+        switch self {
+        case .invalidProjectID:
+            return "无效的项目ID"
+        case .invalidLayerSize(let id):
+            return "图层尺寸无效 (ID: \(id.uuidString.prefix(8)))"
+        case .invalidArrowGeometry(let id):
+            return "箭头几何无效 (ID: \(id.uuidString.prefix(8)))"
+        case .invalidRectangleSize(let id):
+            return "矩形尺寸无效 (ID: \(id.uuidString.prefix(8)))"
+        case .emptyText(let id):
+            return "文字内容为空 (ID: \(id.uuidString.prefix(8)))"
+        case .invalidTextProperties(let id):
+            return "文字属性无效 (ID: \(id.uuidString.prefix(8)))"
+        case .emptyAnnotation(let id):
+            return "标注内容为空 (ID: \(id.uuidString.prefix(8)))"
+        }
+    }
+}
+
+/// 文档统计信息
+struct DocumentStatistics {
+    let layerCount: Int
+    let arrowCount: Int
+    let rectangleCount: Int
+    let textCount: Int
+    let annotationCount: Int
+    let hasDrawingData: Bool
+    let totalSize: Int
+    let version: Int
+    
+    var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: Int64(totalSize), countStyle: .file)
+    }
+}
+
+/// 文档增量快照
+struct DocumentSnapshot: Codable {
+    let changedLayers: [LayerNode]
+    let changedArrows: [ArrowLayerNode]
+    let changedRectangles: [RectangleLayerNode]
+    let changedTexts: [TextLayerNode]
+    let changedAnnotations: [AnnotationLayerNode]
+    let drawingChanged: Bool
+    let drawingData: Data?
+    let timestamp: Date
 }
 

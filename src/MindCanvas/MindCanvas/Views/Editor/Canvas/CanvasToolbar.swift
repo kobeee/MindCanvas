@@ -15,6 +15,7 @@ struct CanvasToolbar: View {
     // 形状选择器弹出状态
     @State private var showShapePicker = false
     @State private var showPenSettings = false
+    @State private var showFontSettings = false
     
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
@@ -56,15 +57,32 @@ struct CanvasToolbar: View {
                         penWidth: $penWidth
                     )
                     
+                case .text:
+                    // 文字工具特殊处理 - 弹出字体设置面板
+                    TextToolButton(
+                        tool: tool,
+                        isSelected: currentTool == tool,
+                        showSettings: $showFontSettings,
+                        onSelect: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                currentTool = tool
+                                onToolChanged?(tool)
+                            }
+                        }
+                    )
+                    
                 default:
                     // 其他工具 - 普通按钮
                     ToolButton(
                         tool: tool,
                         isSelected: currentTool == tool,
                         action: {
+                            print("🔧 [CanvasToolbar] 点击工具按钮: \(tool.displayName) (\(tool.rawValue))")
                             if tool == .image {
+                                print("🔧 [CanvasToolbar] 触发图片导入")
                                 onImageImport()
                             } else {
+                                print("🔧 [CanvasToolbar] 切换到工具: \(tool.displayName)")
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     currentTool = tool
                                     onToolChanged?(tool)
@@ -215,6 +233,60 @@ private struct ImageToolButton: View {
     }
 }
 
+// MARK: - 文字工具按钮（带弹出设置面板）
+
+private struct TextToolButton: View {
+    let tool: CanvasTool
+    let isSelected: Bool
+    @Binding var showSettings: Bool
+    let onSelect: () -> Void
+    
+    // 临时文字设置状态（仅用于弹窗显示）
+    @State private var tempFontName: String = ".SF Pro Display"
+    @State private var tempFontSize: CGFloat = 16
+    @State private var tempTextColor: Color = .black
+
+    var body: some View {
+        Button {
+            if isSelected {
+                // 已选中时，点击弹出设置
+                showSettings.toggle()
+            } else {
+                // 未选中时，先选中工具
+                onSelect()
+            }
+        } label: {
+            Image(systemName: tool.iconName)
+                .font(.system(size: 22))
+                .foregroundColor(isSelected ? .white : Theme.Colors.secondaryText)
+                .frame(width: 40, height: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                        .fill(isSelected ? Theme.Colors.brandBlue : Color.clear)
+                )
+                .scaleEffect(isSelected ? 1.05 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
+        .help(tool.displayName)
+        .popover(isPresented: $showSettings, arrowEdge: .bottom) {
+            FontPickerPopover(
+                selectedFont: $tempFontName,
+                fontSize: $tempFontSize,
+                textColor: $tempTextColor,
+                onConfirm: {
+                    showSettings = false
+                    print("✅ [TextToolButton] 文字设置确认: 字体=\(tempFontName), 大小=\(tempFontSize), 颜色=\(tempTextColor)")
+                },
+                onFontChanged: { fontName, fontSize, textColor in
+                    print("🔧 [TextToolButton] 文字设置实时更新: 字体=\(fontName), 大小=\(fontSize), 颜色=\(textColor)")
+                    // TODO: 这里需要与CanvasStateManager同步
+                }
+            )
+        }
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
@@ -225,11 +297,10 @@ private struct ImageToolButton: View {
             onImageImport: { print("Import image") },
             onShapeSelected: { shape in print("Selected shape: \(shape.displayName)") },
             penColor: .constant(.black),
-            penWidth: .constant(4)
+            penWidth: .constant(2.0)
         )
-        .padding(.bottom, 20)
+        .padding()
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color.gray.opacity(0.1))
 }
 

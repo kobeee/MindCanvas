@@ -100,6 +100,9 @@ class NativeCanvasView: UIView {
     /// 形状视图字典 (nodeID -> SelectableShapeView)
     var shapeViews: [UUID: SelectableShapeView] = [:]
     
+    /// 文字视图字典 (nodeID -> SelectableTextView)
+    var textViews: [UUID: SelectableTextView] = [:]
+    
     /// 形状图层管理器
     private let shapeLayerManager = ShapeLayerManager()
 
@@ -108,6 +111,9 @@ class NativeCanvasView: UIView {
 
     /// 标注图层管理器
     private let annotationLayerManager = AnnotationLayerManager()
+    
+    /// 文字图层管理器
+    private let textLayerManager = TextLayerManager()
 
     /// 空白区域点击手势识别器
     private lazy var canvasTapGesture: DebugTapGestureRecognizer = {
@@ -364,7 +370,7 @@ class NativeCanvasView: UIView {
         }
     }
 
-    /// 移除所有图层（包括图片、箭头、形状）
+    /// 移除所有图层（包括图片、箭头、形状、文字）
     func removeAllLayers() {
         // 1. 清空图层数据
         layers.removeAll()
@@ -380,11 +386,16 @@ class NativeCanvasView: UIView {
         // 4. 清理形状视图
         shapeViews.values.forEach { $0.removeFromSuperview() }
         shapeViews.removeAll()
+        
+        // 5. 清理文字视图
+        textViews.values.forEach { $0.removeFromSuperview() }
+        textViews.removeAll()
+        textLayerManager.clearAll()
 
-        // 5. 清空选中状态
+        // 6. 清空选中状态
         selectedNodeID = nil
 
-        // 6. 通知更新
+        // 7. 通知更新
         onLayersUpdated?(layers)
     }
 
@@ -552,6 +563,12 @@ class NativeCanvasView: UIView {
             shapeView.isSelected = shouldBeSelected
         }
         
+        // 更新文字视图选中状态
+        for (id, textView) in textViews {
+            let shouldBeSelected = (id == selectedNodeID)
+            textView.isSelected = shouldBeSelected
+        }
+        
         onSelectionChanged?(selectedNodeID != nil)
     }
 
@@ -585,8 +602,7 @@ class NativeCanvasView: UIView {
 
     /// 获取所有文字对象
     func getTexts() -> [TextLayerNode] {
-        // TODO: 待文本工具完整实现后启用
-        return []
+        return textLayerManager.getAllTexts()
     }
 
     /// 获取所有标注对象
@@ -628,18 +644,60 @@ class NativeCanvasView: UIView {
 
     // MARK: - Gesture Handling
 
-    /// 处理画布点击事件（用于空白区域取消选中）
+    /// 处理画布点击事件（用于空白区域取消选中或创建文字）
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
-        // 在所有工具模式下都处理空白点击，提升用户体验
         let location = gesture.location(in: objectLayerView)
         
         // 检查点击是否在任何对象上
         let hitView = objectLayerView.hitTest(location, with: nil)
         
+        // 如果是文字工具且点击在空白区域，创建新文字
+        if currentTool == .text && (hitView == objectLayerView || !isSelectableObject(hitView)) {
+            createTextAtLocation(location)
+            return
+        }
+        
         // 如果点击的是objectLayerView本身（空白区域）或其直接子视图不是可选对象，取消选中
         if hitView == objectLayerView || (!isSelectableObject(hitView)) {
             selectedNodeID = nil
         }
+    }
+    
+    /// 在指定位置创建文字
+    private func createTextAtLocation(_ location: CGPoint) {
+        // 将点击位置转换为画布内容坐标
+        let contentLocation = convertToContentCoordinates(location)
+        
+        // 创建默认文字
+        let text = TextLayerNode(
+            position: contentLocation,
+            text: "新文字",
+            fontSize: 24,
+            color: "#000000",
+            fontName: ".SF Pro Display",
+            rotation: 0,
+            scale: 1.0,
+            zIndex: textLayerManager.getNextZIndex()
+        )
+        
+        // 添加文字
+        addText(text)
+        
+        // 自动选中新创建的文字
+        selectedNodeID = text.id
+        
+        print("✏️ [NativeCanvasView] 创建文字: \(text.id) at \(contentLocation)")
+    }
+    
+    /// 将视图坐标转换为画布内容坐标
+    private func convertToContentCoordinates(_ viewLocation: CGPoint) -> CGPoint {
+        let scale = pencilCanvas.zoomScale
+        let offset = pencilCanvas.contentOffset
+        
+        return CGPoint(
+            x: (viewLocation.x + offset.x) / scale,
+            y: (viewLocation.y + offset.y) / scale
+        )
     }
     
     /// 检查视图是否为可选择对象
@@ -656,6 +714,8 @@ class NativeCanvasView: UIView {
 
     /// 根据工具更新手势处理
     func updateForTool(_ tool: CanvasTool) {
+        print("🔧 [NativeCanvasView] updateForTool: \(tool.displayName) (\(tool.rawValue))")
+        
         switch tool {
         case .select:
             pencilCanvas.isUserInteractionEnabled = true
@@ -685,6 +745,11 @@ class NativeCanvasView: UIView {
             // 确保所有形状的手势都能正常工作
             for shapeView in shapeViews.values {
                 shapeView.enableShapeGestures()
+            }
+            
+            // 确保所有文字的手势都能正常工作
+            for textView in textViews.values {
+                textView.enableTextGestures()
             }
 
         case .pan:
@@ -747,6 +812,7 @@ class NativeCanvasView: UIView {
             canvasTapGesture.isEnabled = true
 
         case .arrow, .rectangle, .text, .annotation:
+            print("🔧 [NativeCanvasView] 处理工具: \(tool.displayName)")
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
@@ -760,6 +826,15 @@ class NativeCanvasView: UIView {
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
             objectLayerView.isUserInteractionEnabled = true
+            
+            // 特殊处理文字工具
+            if tool == .text {
+                print("🔧 [NativeCanvasView] 文字工具已激活，等待用户点击画布创建文字")
+                // 确保所有文字的手势都能正常工作
+                for textView in textViews.values {
+                    textView.enableTextGestures()
+                }
+            }
         }
     }
 
@@ -1349,6 +1424,160 @@ class NativeCanvasView: UIView {
     func clearAnnotations() {
         annotationLayerManager.clearAll()
         onCanvasUpdated?()
+    }
+    
+    // MARK: - 文字管理
+    
+    func getTextLayerManager() -> TextLayerManager { textLayerManager }
+
+    func addText(_ text: TextLayerNode, recordUndo: Bool = true) {
+        if recordUndo {
+            let action = AddTextAction(text: text, canvasView: self)
+            NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+        }
+        textLayerManager.addText(text)
+        createTextView(for: text)
+        onTextCreated?(text)
+        onCanvasUpdated?()
+    }
+
+    func removeText(id: UUID) {
+        guard let text = textLayerManager.getText(id: id) else { return }
+        textLayerManager.removeText(id: id)
+        textViews[id]?.removeFromSuperview()
+        textViews.removeValue(forKey: id)
+        onCanvasUpdated?()
+    }
+
+    func updateText(_ text: TextLayerNode) {
+        textLayerManager.updateText(text)
+        if let textView = textViews[text.id] {
+            textView.textNode = text
+        }
+        onCanvasUpdated?()
+    }
+
+    func clearTexts() {
+        textLayerManager.clearAll()
+        textViews.values.forEach { $0.removeFromSuperview() }
+        textViews.removeAll()
+        onCanvasUpdated?()
+    }
+    
+    /// 检查是否存在指定ID的文字
+    func hasText(id: UUID) -> Bool {
+        return textViews[id] != nil
+    }
+    
+    /// 创建文字视图
+    private func createTextView(for text: TextLayerNode) {
+        let textView = SelectableTextView(textNode: text)
+        
+        var operationStartText: TextLayerNode?
+        
+        // 设置选中回调
+        textView.onSelected = { [weak self] id in
+            self?.selectedNodeID = id
+        }
+        
+        // 设置节点更新回调
+        textView.onNodeUpdated = { [weak self] updatedText in
+            self?.textLayerManager.updateText(updatedText)
+        }
+        
+        // 设置操作回调（用于撤销）
+        textView.onOperationStart = { text in
+            operationStartText = text
+        }
+        
+        textView.onOperationEnd = { [weak self] _, endText in
+            guard let self = self, let startText = operationStartText else { return }
+            
+            // 检查是否移动
+            if startText.position != endText.position {
+                let action = MoveTextAction(
+                    textID: startText.id,
+                    fromText: startText,
+                    toText: endText,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否缩放
+            else if abs(startText.scale - endText.scale) > 0.01 {
+                let action = ScaleTextAction(
+                    textID: startText.id,
+                    fromText: startText,
+                    toText: endText,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否旋转
+            else if abs(startText.rotation - endText.rotation) > 0.001 {
+                let action = RotateTextAction(
+                    textID: startText.id,
+                    fromText: startText,
+                    toText: endText,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            // 检查是否修改了文字内容
+            else if startText.text != endText.text {
+                let action = ModifyTextAction(
+                    textID: startText.id,
+                    fromText: startText,
+                    toText: endText,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            
+            operationStartText = nil
+        }
+        
+        // 设置编辑回调
+        textView.onEditingStarted = { [weak self] startText in
+            print("🔧 [NativeCanvasView] 文字编辑开始: \(startText.text)")
+            // 编辑开始时可以选择性地禁用全局手势
+        }
+        
+        textView.onEditingFinished = { [weak self] updatedText, newText in
+            guard let self = self else { return }
+            print("🔧 [NativeCanvasView] 文字编辑完成: '\(newText)'")
+            
+            // 更新文字节点
+            self.textLayerManager.updateText(updatedText)
+            
+            // 记录撤销操作
+            if let startText = operationStartText, startText.text != updatedText.text {
+                let action = ModifyTextAction(
+                    textID: startText.id,
+                    fromText: startText,
+                    toText: updatedText,
+                    canvasView: self
+                )
+                NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
+            }
+            
+            operationStartText = nil
+            self.onCanvasUpdated?()
+        }
+        
+        textViews[text.id] = textView
+        objectLayerView.addSubview(textView)
+        
+        // 根据当前工具状态设置手势
+        if currentTool == .select || currentTool == .text {
+            textView.enableTextGestures()
+        }
+        
+        // 关键修复：强制立即布局，确保视图可见
+        textView.setNeedsLayout()
+        textView.layoutIfNeeded()
+        objectLayerView.setNeedsLayout()
+        objectLayerView.layoutIfNeeded()
     }
     
     /// 清理资源

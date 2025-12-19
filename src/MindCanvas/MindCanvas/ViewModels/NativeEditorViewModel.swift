@@ -2,6 +2,13 @@ import SwiftUI
 import SwiftData
 import Observation
 
+/// 文档操作错误
+enum DocumentError: Error {
+    case fileNotFound
+    case invalidData
+    case permissionDenied
+}
+
 /// 原生编辑器视图模型 (适配新架构)
 @Observable
 @MainActor
@@ -401,10 +408,145 @@ final class NativeEditorViewModel {
     
     // MARK: - 画布持久化
     
-    /// 保存画布文档
-    func saveCanvasDocument() {
-        guard let canvasView = canvasView else { return }
+    /// 保存画布文档（带数据验证）
+    func saveCanvasDocument() -> SaveResult {
+        guard let canvasView = canvasView else {
+            return .failure(.canvasViewNotAvailable)
+        }
         
+        do {
+            // 同步所有画布数据
+            syncDataFromCanvas(canvasView)
+            
+            // 验证数据完整性
+            let validationErrors = canvasDocument.validate()
+            if !validationErrors.isEmpty {
+                print("⚠️ 画布数据验证失败: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
+                
+                // 尝试自动修复
+                canvasDocument.repair()
+                print("✅ 已自动修复画布数据")
+            }
+            
+            // 执行实际保存
+            try performSave()
+            
+            print("✅ 画布文档保存成功 - \(canvasDocument.statistics)")
+            return .success
+            
+        } catch {
+            print("❌ 画布文档保存失败: \(error)")
+            return .failure(.saveError(error))
+        }
+    }
+    
+    /// 加载画布文档（带错误处理和版本兼容性）
+    func loadCanvasDocument() -> LoadResult {
+        guard let canvasView = canvasView else {
+            return .failure(.canvasViewNotAvailable)
+        }
+        
+        do {
+            // 执行实际加载
+            try performLoad()
+            
+            // 版本兼容性检查
+            if canvasDocument.version > 1 {
+                print("⚠️ 检测到较新版本的文档 (v\(canvasDocument.version))，可能存在兼容性问题")
+            }
+            
+            // 验证加载的数据
+            let validationErrors = canvasDocument.validate()
+            if !validationErrors.isEmpty {
+                print("⚠️ 加载的画布数据存在问题: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
+                
+                // 自动修复数据
+                canvasDocument.repair()
+                print("✅ 已修复加载的画布数据")
+            }
+            
+            // 同步数据到画布视图
+            syncDataToCanvas(canvasView)
+            
+            // 清空撤销栈（新会话开始）
+            stateManager.clearUndoRedoStacks()
+            
+            print("✅ 画布文档加载成功 - \(canvasDocument.statistics)")
+            return .success
+            
+        } catch {
+            print("❌ 画布文档加载失败: \(error)")
+            return .failure(.loadError(error))
+        }
+    }
+    
+    /// 强制保存（跳过验证）
+    func forceSaveCanvasDocument() -> SaveResult {
+        guard let canvasView = canvasView else {
+            return .failure(.canvasViewNotAvailable)
+        }
+        
+        do {
+            syncDataFromCanvas(canvasView)
+            try performSave()
+            print("✅ 强制保存完成")
+            return .success
+        } catch {
+            print("❌ 强制保存失败: \(error)")
+            return .failure(.saveError(error))
+        }
+    }
+    
+    /// 创建文档备份
+    func createDocumentBackup() -> Bool {
+        do {
+            let backupData = try JSONEncoder().encode(canvasDocument)
+            let backupURL = getBackupURL()
+            try backupData.write(to: backupURL)
+            print("✅ 文档备份已创建: \(backupURL.lastPathComponent)")
+            return true
+        } catch {
+            print("❌ 创建文档备份失败: \(error)")
+            return false
+        }
+    }
+    
+    /// 从备份恢复文档
+    func restoreFromBackup() -> Bool {
+        let backupURL = getBackupURL()
+        
+        guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            print("❌ 备份文件不存在")
+            return false
+        }
+        
+        do {
+            let backupData = try Data(contentsOf: backupURL)
+            let backupDocument = try JSONDecoder().decode(CanvasDocument.self, from: backupData)
+            
+            // 验证备份数据
+            let validationErrors = backupDocument.validate()
+            if !validationErrors.isEmpty {
+                print("⚠️ 备份数据存在问题，将尝试修复")
+                var repairedDocument = backupDocument
+                repairedDocument.repair()
+                canvasDocument = repairedDocument
+            } else {
+                canvasDocument = backupDocument
+            }
+            
+            print("✅ 已从备份恢复文档")
+            return true
+        } catch {
+            print("❌ 从备份恢复失败: \(error)")
+            return false
+        }
+    }
+    
+    // MARK: - Private Helper Methods
+    
+    /// 从画布视图同步数据到文档
+    private func syncDataFromCanvas(_ canvasView: NativeCanvasView) {
         // 同步图层数据
         canvasDocument.layers = canvasView.getLayers()
         
@@ -415,47 +557,44 @@ final class NativeEditorViewModel {
         canvasDocument.rectangles = canvasView.getRectangleLayerManager().rectangles
         
         // 同步文字数据
-        // TODO: 待文本工具完整实现后启用
-        // canvasDocument.texts = canvasView.getTextLayerManager().textLayers
+        canvasDocument.texts = canvasView.getTextLayerManager().getAllTexts()
         
         // 同步标注数据
         canvasDocument.annotations = canvasView.getAnnotationLayerManager().annotations
         
         // 同步绘图数据
         canvasDocument.drawingData = canvasView.getDrawingData()
-        
-        // TODO: 持久化到 SwiftData 或文件系统
-        print("画布文档已保存")
     }
     
-    /// 加载画布文档
-    func loadCanvasDocument() {
-        guard let canvasView = canvasView else { return }
-        
+    /// 从文档同步数据到画布视图
+    private func syncDataToCanvas(_ canvasView: NativeCanvasView) {
         // 加载图层
         canvasView.setLayers(canvasDocument.layers)
         
         // 加载箭头
         let arrowManager = canvasView.getArrowLayerManager()
+        arrowManager.clearAll()
         for arrow in canvasDocument.arrows {
             arrowManager.addArrow(arrow)
         }
         
         // 加载矩形
         let rectangleManager = canvasView.getRectangleLayerManager()
+        rectangleManager.clearAll()
         for rectangle in canvasDocument.rectangles {
             rectangleManager.addRectangle(rectangle)
         }
         
         // 加载文字
-        // TODO: 待文本工具完整实现后启用
-        // let textManager = canvasView.getTextLayerManager()
-        // for text in canvasDocument.texts {
-        //     textManager.addText(text)
-        // }
+        let textManager = canvasView.getTextLayerManager()
+        textManager.clearAll()
+        for text in canvasDocument.texts {
+            textManager.addText(text)
+        }
         
         // 加载标注
         let annotationManager = canvasView.getAnnotationLayerManager()
+        annotationManager.clearAll()
         for annotation in canvasDocument.annotations {
             annotationManager.addAnnotation(annotation)
         }
@@ -464,11 +603,99 @@ final class NativeEditorViewModel {
         if let drawingData = canvasDocument.drawingData {
             canvasView.loadDrawing(from: drawingData)
         }
+    }
+    
+    /// 执行实际的保存操作
+    private func performSave() throws {
+        // 这里可以实现保存到 SwiftData 或文件系统
+        // 目前使用简单的本地存储模拟
         
-        // 清空撤销栈（新会话开始）
-        stateManager.clearUndoRedoStacks()
+        let documentData = try JSONEncoder().encode(canvasDocument)
+        let documentURL = getDocumentURL()
         
-        print("画布文档已加载")
+        // 确保目录存在
+        let directory = documentURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        
+        try documentData.write(to: documentURL)
+    }
+    
+    /// 执行实际的加载操作
+    private func performLoad() throws {
+        let documentURL = getDocumentURL()
+        
+        guard FileManager.default.fileExists(atPath: documentURL.path) else {
+            throw DocumentError.fileNotFound
+        }
+        
+        let documentData = try Data(contentsOf: documentURL)
+        canvasDocument = try JSONDecoder().decode(CanvasDocument.self, from: documentData)
+    }
+    
+    /// 获取文档存储URL
+    private func getDocumentURL() -> URL {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let canvasDocumentsPath = documentsPath.appendingPathComponent("CanvasDocuments")
+        return canvasDocumentsPath.appendingPathComponent("\(project.id.uuidString).canvas")
+    }
+    
+    /// 获取备份文件URL
+    private func getBackupURL() -> URL {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let canvasDocumentsPath = documentsPath.appendingPathComponent("CanvasDocuments")
+        return canvasDocumentsPath.appendingPathComponent("\(project.id.uuidString).backup")
     }
 }
 
+// MARK: - 支持类型
+
+/// 保存结果
+enum SaveResult {
+    case success
+    case failure(SaveError)
+}
+
+/// 加载结果
+enum LoadResult {
+    case success
+    case failure(LoadError)
+}
+
+/// 保存错误类型
+enum SaveError: Error {
+    case canvasViewNotAvailable
+    case saveError(Error)
+    case validationFailed([ValidationError])
+    
+    var localizedDescription: String {
+        switch self {
+        case .canvasViewNotAvailable:
+            return "画布视图不可用"
+        case .saveError(let error):
+            return "保存失败: \(error.localizedDescription)"
+        case .validationFailed(let errors):
+            return "数据验证失败: \(errors.map(\.localizedDescription).joined(separator: ", "))"
+        }
+    }
+}
+
+/// 加载错误类型
+enum LoadError: Error {
+    case canvasViewNotAvailable
+    case loadError(Error)
+    case versionMismatch(Int, Int)
+    case dataCorrupted
+    
+    var localizedDescription: String {
+        switch self {
+        case .canvasViewNotAvailable:
+            return "画布视图不可用"
+        case .loadError(let error):
+            return "加载失败: \(error.localizedDescription)"
+        case .versionMismatch(let current, let required):
+            return "版本不匹配: 当前 v\(current)，需要 v\(required)"
+        case .dataCorrupted:
+            return "数据已损坏"
+        }
+    }
+}

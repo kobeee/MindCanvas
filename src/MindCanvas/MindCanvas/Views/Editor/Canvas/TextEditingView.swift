@@ -15,6 +15,16 @@ struct TextEditingView: View {
     
     var body: some View {
         ZStack {
+            // 透明背景层，用于捕获点击事件
+            if isEditing {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // 点击背景时完成文字输入
+                        createText()
+                    }
+            }
+            
             // 文字输入框
             if isEditing {
                 TextField("输入文字", text: $editingText, onCommit: {
@@ -25,32 +35,46 @@ struct TextEditingView: View {
                 .position(textFieldPosition)
                 .textFieldStyle(.plain)
                 .background(Color.clear)
+                .padding(8)
+                .background(Color.white.opacity(0.9))
+                .cornerRadius(4)
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 .onAppear {
+                    print("🔧 [TextEditingView] 文字输入框出现，位置: \(textFieldPosition)")
                     editingText = text
                     textFieldPosition = position
                 }
-                .onTapGesture {
-                    // 点击输入框外部时完成输入
+                .onSubmit {
                     createText()
+                }
+                .onTapGesture {
+                    // 点击输入框内部时不处理，避免与背景手势冲突
                 }
             }
         }
-        . gesture(
+        .gesture(
             // 点击画布时创建文字输入框
             DragGesture(minimumDistance: 0)
                 .onEnded { value in
+                    print("🔧 [TextEditingView] 画布点击，位置: \(value.location)")
                     if !isEditing {
                         position = value.location
                         textFieldPosition = value.location
                         editingText = ""
                         isEditing = true
+                        print("🔧 [TextEditingView] 开始编辑文字: \(value.location)")
                     }
                 }
         )
+        .onAppear {
+            print("🔧 [TextEditingView] 文字编辑视图出现")
+        }
     }
     
     private func createText() {
+        print("🔧 [TextEditingView] 创建文字: '\(editingText)' 在位置: \(position)")
         guard !editingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("🔧 [TextEditingView] 文字为空，取消创建")
             isEditing = false
             return
         }
@@ -58,6 +82,7 @@ struct TextEditingView: View {
         onTextCreated?(position, editingText)
         isEditing = false
         text = ""
+        print("🔧 [TextEditingView] 文字创建完成")
     }
 }
 
