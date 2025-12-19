@@ -71,7 +71,17 @@ class CanvasStateManager {
     // MARK: - 选中状态
     
     /// 当前选中的节点 ID
-    var selectedNodeID: UUID?
+    var selectedNodeID: UUID? {
+        didSet {
+            // 双向状态同步：当CanvasStateManager的选中状态改变时，同步到NativeCanvasView
+            
+            // 通知NativeCanvasView更新选中状态
+            NotificationCenter.default.post(
+                name: .selectionChangedInStateManager,
+                object: selectedNodeID
+            )
+        }
+    }
     
     /// 是否有选中的节点
     var hasSelection: Bool {

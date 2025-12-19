@@ -201,7 +201,8 @@ class SelectableArrowView: UIView {
     // MARK: - Selection Appearance
     
     private func updateSelectionAppearance() {
-        let showHandles = isSelected
+        // 角点在选中状态或操作过程中显示，提升交互体验
+        let showHandles = isSelected || activeHandle != nil
         
         selectionBorder.isHidden = !showHandles
         endpointHandleLayers.forEach { $0.isHidden = !showHandles }
@@ -290,6 +291,10 @@ class SelectableArrowView: UIView {
             onOperationStart?(arrowNode)
             
             activeHandle = hitTestHandle(at: location)
+            
+            // 立即更新角点显示状态，确保操作过程中角点可见
+            updateSelectionAppearance()
+            
             dragStartPoint = gesture.location(in: superview)
             
         case .changed:
@@ -307,6 +312,10 @@ class SelectableArrowView: UIView {
                 onOperationEnd?(initial, arrowNode)
             }
             activeHandle = nil
+            
+            // 立即更新角点显示状态，确保操作结束后角点状态正确
+            updateSelectionAppearance()
+            
             initialNode = nil
             
         default:

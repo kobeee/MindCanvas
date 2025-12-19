@@ -321,7 +321,8 @@ class SelectableShapeView: UIView {
     // MARK: - Selection Appearance
 
     private func updateSelectionAppearance() {
-        let showHandles = isSelected
+        // 角点在选中状态或操作过程中显示，提升交互体验
+        let showHandles = isSelected || activeHandle != nil
         
 
         selectionBorder.isHidden = !showHandles
@@ -452,6 +453,9 @@ class SelectableShapeView: UIView {
             onOperationStart?(shapeNode)
 
             activeHandle = hitTestHandle(at: locationInSelf)
+            
+            // 立即更新角点显示状态，确保操作过程中角点可见
+            updateSelectionAppearance()
 
             // 关键: 保存 center 和 bounds，而非 frame
             initialCenter = center
@@ -497,6 +501,10 @@ class SelectableShapeView: UIView {
 
         case .ended, .cancelled:
             activeHandle = nil
+            
+            // 立即更新角点显示状态，确保操作结束后角点状态正确
+            updateSelectionAppearance()
+            
             syncToNode()
             
             if let initial = initialNode {

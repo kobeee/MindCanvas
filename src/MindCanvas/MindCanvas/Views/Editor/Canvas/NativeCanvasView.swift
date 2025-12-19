@@ -2,6 +2,33 @@ import SwiftUI
 import UIKit
 import PencilKit
 
+/// 自定义手势识别器，用于追踪完整生命周期
+class DebugTapGestureRecognizer: UITapGestureRecognizer {
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+    }
+    
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+    }
+    
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+    }
+    
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+    }
+    
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+    }
+    
+    override func reset() {
+        super.reset()
+    }
+}
+
 /// 原生画布视图 (UIKit 实现)
 /// 重构版本：直接使用 PKCanvasView 的内置缩放功能，不再嵌套 UIScrollView
 /// 参考：https://github.com/simonbs/InfiniteCanvas
@@ -83,11 +110,15 @@ class NativeCanvasView: UIView {
     private let annotationLayerManager = AnnotationLayerManager()
 
     /// 空白区域点击手势识别器
-    private lazy var canvasTapGesture: UITapGestureRecognizer = {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTap(_:)))
+    private lazy var canvasTapGesture: DebugTapGestureRecognizer = {
+        let tap = DebugTapGestureRecognizer(target: self, action: #selector(handleCanvasTap(_:)))
         tap.delegate = self
+        
         return tap
     }()
+    
+    /// 全局点击监听器（用于监听画布外的点击）
+    private var globalTapObserver: NSObjectProtocol?
 
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
@@ -192,6 +223,12 @@ class NativeCanvasView: UIView {
 
         // 添加空白区域点击手势识别器
         addGestureRecognizer(canvasTapGesture)
+        
+        // 设置全局点击监听器
+        setupGlobalTapObserver()
+        
+        // 设置选中状态同步监听器
+        setupSelectionSyncObserver()
 
         // 初始化完成后设置状态
         DispatchQueue.main.async { [weak self] in
@@ -427,9 +464,7 @@ class NativeCanvasView: UIView {
     
     /// 创建箭头视图
     private func createArrowView(for arrow: ArrowLayerNode) {
-        print("[Arrow] createArrowView: bounds=\(arrow.bounds), objectLayerView.frame=\(objectLayerView.frame)")
         let arrowView = SelectableArrowView(arrowNode: arrow)
-        print("[Arrow] arrowView created: frame=\(arrowView.frame)")
         
         var operationStartArrow: ArrowLayerNode?
         
@@ -495,9 +530,6 @@ class NativeCanvasView: UIView {
         arrowView.layoutIfNeeded()
         objectLayerView.setNeedsLayout()
         objectLayerView.layoutIfNeeded()
-
-        print("[Arrow] arrowView added to superview: \(arrowView.superview != nil), frame=\(arrowView.frame)")
-        print("[Arrow] objectLayerView subviews count: \(objectLayerView.subviews.count)")
     }
 
     /// 更新选中状态
@@ -598,9 +630,7 @@ class NativeCanvasView: UIView {
 
     /// 处理画布点击事件（用于空白区域取消选中）
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
-        // 只在选择工具模式下处理空白点击
-        guard currentTool == .select else { return }
-        
+        // 在所有工具模式下都处理空白点击，提升用户体验
         let location = gesture.location(in: objectLayerView)
         
         // 检查点击是否在任何对象上
@@ -608,7 +638,6 @@ class NativeCanvasView: UIView {
         
         // 如果点击的是objectLayerView本身（空白区域）或其直接子视图不是可选对象，取消选中
         if hitView == objectLayerView || (!isSelectableObject(hitView)) {
-            print("[NativeCanvas] 空白区域点击，取消选中")
             selectedNodeID = nil
         }
     }
@@ -669,8 +698,8 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
             overlayContainerView.isUserInteractionEnabled = false
             
-            // 禁用空白区域点击手势识别器
-            canvasTapGesture.isEnabled = false
+            // 启用空白区域点击手势识别器（在所有工具模式下都可用）
+            canvasTapGesture.isEnabled = true
 
         case .pen:
             pencilCanvas.isUserInteractionEnabled = true
@@ -684,8 +713,8 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
             
-            // 禁用空白区域点击手势识别器
-            canvasTapGesture.isEnabled = false
+            // 启用空白区域点击手势识别器（在所有工具模式下都可用）
+            canvasTapGesture.isEnabled = true
 
         case .eraser:
             pencilCanvas.isUserInteractionEnabled = true
@@ -699,8 +728,8 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
             
-            // 禁用空白区域点击手势识别器
-            canvasTapGesture.isEnabled = false
+            // 启用空白区域点击手势识别器（在所有工具模式下都可用）
+            canvasTapGesture.isEnabled = true
 
         case .image:
             pencilCanvas.isUserInteractionEnabled = true
@@ -714,8 +743,8 @@ class NativeCanvasView: UIView {
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
             
-            // 禁用空白区域点击手势识别器
-            canvasTapGesture.isEnabled = false
+            // 启用空白区域点击手势识别器（在所有工具模式下都可用）
+            canvasTapGesture.isEnabled = true
 
         case .arrow, .rectangle, .text, .annotation:
             pencilCanvas.isUserInteractionEnabled = true
@@ -728,8 +757,8 @@ class NativeCanvasView: UIView {
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             
-            // 禁用空白区域点击手势识别器
-            canvasTapGesture.isEnabled = false
+            // 启用空白区域点击手势识别器（在所有工具模式下都可用）
+            canvasTapGesture.isEnabled = true
             objectLayerView.isUserInteractionEnabled = true
         }
     }
@@ -909,10 +938,6 @@ class NativeCanvasView: UIView {
 
     /// 捕获内容坐标系中的指定区域快照
     func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
-        print("[Snapshot] ===== Begin captureContentSnapshot =====")
-        print("[Snapshot] Input contentRect: \(contentRect)")
-        print("[Snapshot] Canvas size: \(canvasSize)")
-        print("[Snapshot] objectLayerView.subviews.count: \(objectLayerView.subviews.count)")
         
         // 扩大边界容差（从+-10扩大到+-100）
         let expandedCanvas = CGRect(
@@ -923,15 +948,10 @@ class NativeCanvasView: UIView {
         )
         let bounded = contentRect.intersection(expandedCanvas)
         
-        print("[Snapshot] Expanded canvas bounds: \(expandedCanvas)")
-        print("[Snapshot] Bounded rect (intersection): \(bounded)")
         
         // 放宽最小尺寸检查（从1pt放宽到10pt）
         guard !bounded.isNull, bounded.width >= 10, bounded.height >= 10 else {
-            print("[Snapshot] Error: Invalid or too small rect")
-            print("[Snapshot] bounded.isNull: \(bounded.isNull)")
             if !bounded.isNull {
-                print("[Snapshot] bounded size: \(bounded.width) x \(bounded.height)")
             }
             return nil
         }
@@ -941,12 +961,9 @@ class NativeCanvasView: UIView {
         format.scale = scale
         format.opaque = false
         
-        print("[Snapshot] Rendering with scale: \(scale)")
-        print("[Snapshot] Final render size: \(bounded.size)")
 
         // PencilKit 导出
         let drawingImage = pencilCanvas.drawing.image(from: bounded, scale: scale)
-        print("[Snapshot] Drawing image size: \(drawingImage.size)")
 
         // 对象层渲染
         let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
@@ -961,7 +978,6 @@ class NativeCanvasView: UIView {
             ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
             
             // 渲染对象层
-            print("[Snapshot] Rendering objectLayerView at origin: \(-bounded.origin.x), \(-bounded.origin.y)")
             objectLayerView.layer.render(in: ctx)
             
             ctx.restoreGState()
@@ -970,24 +986,18 @@ class NativeCanvasView: UIView {
             drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
         
-        print("[Snapshot] ===== End captureContentSnapshot (success) =====")
-        print("[Snapshot] Result image size: \(result.size)")
         return result
     }
 
     /// 将视口坐标映射到画布内容坐标
     func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
-        print("[Coordinate] ===== Begin contentRect conversion =====")
-        print("[Coordinate] Input viewportRect: \(viewportRect)")
         
         // 从视口坐标转换到Canvas坐标
         let rectInCanvas = pencilCanvas.convert(viewportRect, from: self)
-        print("[Coordinate] After convert (rectInCanvas): \(rectInCanvas)")
         
         // 获取缩放和偏移
         let scale = pencilCanvas.zoomScale
         let offset = pencilCanvas.contentOffset
-        print("[Coordinate] zoomScale: \(scale), contentOffset: \(offset)")
         
         // 应用缩放和偏移
         let result = CGRect(
@@ -997,8 +1007,6 @@ class NativeCanvasView: UIView {
             height: rectInCanvas.height / scale
         )
         
-        print("[Coordinate] Result contentRect: \(result)")
-        print("[Coordinate] ===== End contentRect conversion =====")
         return result
     }
 
@@ -1015,11 +1023,8 @@ class NativeCanvasView: UIView {
 
     /// 直接截取视口区域的快照（简化版）
     func captureViewportSnapshotSimple(rect viewportRect: CGRect) -> UIImage? {
-        print("[Snapshot-Simple] ===== Begin =====")
-        print("[Snapshot-Simple] viewportRect: \(viewportRect)")
 
         guard viewportRect.width >= 10, viewportRect.height >= 10 else {
-            print("[Snapshot-Simple] Error: rect too small")
             return nil
         }
 
@@ -1038,8 +1043,6 @@ class NativeCanvasView: UIView {
             overlayContainerView.layer.render(in: context.cgContext)
         }
 
-        print("[Snapshot-Simple] Result size: \(result.size)")
-        print("[Snapshot-Simple] ===== End =====")
         return result
     }
 
@@ -1047,29 +1050,18 @@ class NativeCanvasView: UIView {
     /// - Parameter viewportRect: 视口坐标（相对于 NativeCanvasView）
     /// - Returns: 截取的图片，失败返回 nil
     func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
-        print("[Snapshot] ===== Begin captureVisibleAreaSnapshot =====")
-        print("[Snapshot] Input viewportRect: \(viewportRect)")
-        print("[Snapshot] NativeCanvasView bounds: \(bounds)")
-        print("[Snapshot] pencilCanvas.bounds: \(pencilCanvas.bounds)")
-        print("[Snapshot] pencilCanvas.contentOffset: \(pencilCanvas.contentOffset)")
-        print("[Snapshot] pencilCanvas.zoomScale: \(pencilCanvas.zoomScale)")
-        print("[Snapshot] objectLayerView.frame: \(objectLayerView.frame)")
-        print("[Snapshot] objectLayerView.transform: \(objectLayerView.transform)")
 
         // 验证尺寸
         guard viewportRect.width >= 10, viewportRect.height >= 10 else {
-            print("[Snapshot] Error: viewportRect too small (< 10pt)")
             return nil
         }
 
         // 确保区域在视图范围内
         let clippedRect = viewportRect.intersection(bounds)
         guard !clippedRect.isEmpty else {
-            print("[Snapshot] Error: viewportRect does not intersect bounds")
             return nil
         }
 
-        print("[Snapshot] Clipped rect: \(clippedRect)")
 
         // 确保布局完成
         layoutIfNeeded()
@@ -1094,9 +1086,6 @@ class NativeCanvasView: UIView {
             self.layer.render(in: ctx)
         }
 
-        print("[Snapshot] Result image size: \(result.size)")
-        print("[Snapshot] Result image scale: \(result.scale)")
-        print("[Snapshot] ===== End captureVisibleAreaSnapshot (success) =====")
 
         return result
     }
@@ -1105,18 +1094,14 @@ class NativeCanvasView: UIView {
     /// - Parameter cropRect: 裁剪区域（相对于 NativeCanvasView）
     /// - Returns: 裁剪后的图片
     func captureAndCropSnapshot(cropRect: CGRect) -> UIImage? {
-        print("[Snapshot-Crop] ===== Begin =====")
-        print("[Snapshot-Crop] cropRect: \(cropRect)")
 
         // 验证
         guard cropRect.width >= 10, cropRect.height >= 10 else {
-            print("[Snapshot-Crop] Error: cropRect too small")
             return nil
         }
 
         let fullSize = bounds.size
         guard fullSize.width > 0, fullSize.height > 0 else {
-            print("[Snapshot-Crop] Error: bounds is empty")
             return nil
         }
 
@@ -1136,7 +1121,6 @@ class NativeCanvasView: UIView {
             self.layer.render(in: context.cgContext)
         }
 
-        print("[Snapshot-Crop] Full image captured: \(fullImage.size)")
 
         // 第二步：裁剪
         // 注意：CGImage 使用像素坐标，需要乘以 scale
@@ -1149,13 +1133,10 @@ class NativeCanvasView: UIView {
 
         guard let cgImage = fullImage.cgImage,
               let croppedCGImage = cgImage.cropping(to: pixelCropRect) else {
-            print("[Snapshot-Crop] Error: Failed to crop")
             return nil
         }
 
         let croppedImage = UIImage(cgImage: croppedCGImage, scale: scale, orientation: .up)
-        print("[Snapshot-Crop] Cropped image: \(croppedImage.size)")
-        print("[Snapshot-Crop] ===== End =====")
 
         return croppedImage
     }
@@ -1165,14 +1146,12 @@ class NativeCanvasView: UIView {
     func getArrowLayerManager() -> ArrowLayerManager { arrowLayerManager }
 
     func addArrow(_ arrow: ArrowLayerNode, recordUndo: Bool = true) {
-        print("[Arrow] addArrow called: start=\(arrow.startPoint), end=\(arrow.endPoint), bounds=\(arrow.bounds)")
         if recordUndo {
             let action = AddArrowAction(arrow: arrow, canvasView: self)
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
         }
         arrowLayerManager.addArrow(arrow)
         createArrowView(for: arrow)
-        print("[Arrow] arrowViews count: \(arrowViews.count), objectLayerView subviews: \(objectLayerView.subviews.count)")
         onArrowCreated?(arrow)
         onCanvasUpdated?()
     }
@@ -1231,10 +1210,8 @@ class NativeCanvasView: UIView {
     }
 
     func updateShape(_ shape: ShapeLayerNode) {
-        print("[NativeCanvas] updateShape() called - ID: \(shape.id.uuidString.prefix(8))")
         shapeLayerManager.updateShape(shape)
         if let shapeView = shapeViews[shape.id] {
-            print("[NativeCanvas] updateShape() - Setting shapeNode and calling updateFromNode()")
             shapeView.shapeNode = shape
             // 显式调用 updateFromNode() 确保视图同步
             shapeView.updateFromNode()
@@ -1373,20 +1350,33 @@ class NativeCanvasView: UIView {
         annotationLayerManager.clearAll()
         onCanvasUpdated?()
     }
+    
+    /// 清理资源
+    deinit {
+        cleanupGlobalTapObserver()
+        cleanupSelectionSyncObserver()
+    }
+    
+    /// 清理选中状态同步监听器
+    private func cleanupSelectionSyncObserver() {
+        NotificationCenter.default.removeObserver(self, name: .selectionChangedInStateManager, object: nil)
+    }
 }
 
 // MARK: - UIGestureRecognizerDelegate
 
 extension NativeCanvasView: UIGestureRecognizerDelegate {
-    /// 处理手势识别器之间的冲突
+    /// 处理手势识别器是否应该接收触摸事件
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        // 只在选择工具模式下处理空白点击
-        guard gestureRecognizer == canvasTapGesture, currentTool == .select else {
+        
+        // 只处理空白点击手势的冲突
+        guard gestureRecognizer == canvasTapGesture else {
             return true
         }
         
         let location = touch.location(in: objectLayerView)
         let hitView = objectLayerView.hitTest(location, with: nil)
+        
         
         // 如果点击在可选择对象上，不让空白点击手势处理
         if isSelectableObject(hitView) {
@@ -1396,9 +1386,46 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
         return true
     }
     
+    /// 处理手势识别器是否应该开始识别
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        
+        if gestureRecognizer == canvasTapGesture {
+        }
+        
+        return true
+    }
+    
     /// 处理手势识别器之间的同时识别
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        
         // 空白点击手势不与其他手势同时识别
+        if gestureRecognizer == canvasTapGesture || otherGestureRecognizer == canvasTapGesture {
+            return false
+        }
+        
+        return true
+    }
+    
+    /// 处理手势识别器是否应该接收按压事件
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive press: UIPress) -> Bool {
+        return true
+    }
+    
+    /// 处理手势识别器是否需要失败才能开始
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        
+        if gestureRecognizer == canvasTapGesture {
+        }
+        
+        return false
+    }
+    
+    /// 处理手势识别器是否需要其他手势失败
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        
+        if gestureRecognizer == canvasTapGesture {
+        }
+        
         return false
     }
 }
@@ -1506,4 +1533,187 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
     }
 
     class Coordinator {}
+}
+
+// MARK: - Global Tap Observer Extension
+
+extension NativeCanvasView {
+    
+    /// 设置选中状态同步监听器
+    private func setupSelectionSyncObserver() {
+        
+        NotificationCenter.default.addObserver(
+            forName: .selectionChangedInStateManager,
+            object: nil,
+            queue: .main,
+            using: { [weak self] notification in
+                self?.handleSelectionChangedInStateManager(notification)
+            }
+        )
+        
+    }
+    
+    /// 处理CanvasStateManager中选中状态变化的通知
+    @objc private func handleSelectionChangedInStateManager(_ notification: Notification) {
+        guard let newSelectedID = notification.object as? UUID? else {
+            return
+        }
+        
+        
+        // 同步选中状态到NativeCanvasView
+        if selectedNodeID != newSelectedID {
+            selectedNodeID = newSelectedID
+        } else {
+        }
+    }
+    
+    /// 设置全局点击监听器
+    private func setupGlobalTapObserver() {
+        
+        // 使用UITapGestureRecognizer监听整个窗口的点击
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self,
+                  let window = self.findWindow() else {
+                return
+            }
+            
+            
+            // 检查是否已经有全局手势
+            if let existingGesture = objc_getAssociatedObject(window, &AssociatedKeys.globalTapGesture) as? UITapGestureRecognizer {
+                return
+            }
+            
+            let globalTapGesture = UITapGestureRecognizer(target: self, action: #selector(self.handleGlobalTap(_:)))
+            globalTapGesture.cancelsTouchesInView = false  // 不阻止其他手势
+            globalTapGesture.delegate = self
+            
+            window.addGestureRecognizer(globalTapGesture)
+            
+            // 保存全局手势引用
+            objc_setAssociatedObject(window, &AssociatedKeys.globalTapGesture, globalTapGesture, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            
+        }
+    }
+    
+    /// 查找当前窗口
+    private func findWindow() -> UIWindow? {
+        // 优先使用自己的窗口
+        if let window = self.window {
+            return window
+        }
+        
+        // 使用父视图的窗口
+        if let parentWindow = self.superview?.window {
+            return parentWindow
+        }
+        
+        // 使用应用的第一个窗口
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = scene.windows.first {
+            return window
+        }
+        
+        // 备选方案：遍历所有窗口
+        for window in UIApplication.shared.windows {
+            if window.isKeyWindow {
+                return window
+            }
+        }
+        
+        return UIApplication.shared.windows.first
+    }
+    
+    /// 处理全局点击事件
+    @objc private func handleGlobalTap(_ gesture: UITapGestureRecognizer) {
+        
+        // 如果没有选中对象，不需要处理
+        guard selectedNodeID != nil else {
+            return
+        }
+        
+        guard let gestureView = gesture.view else {
+            return
+        }
+        
+        let location = gesture.location(in: gestureView)
+        
+        // 检查点击是否在当前画布视图内
+        let locationInCanvas = gesture.location(in: self)
+        let isTapInCanvas = bounds.contains(locationInCanvas)
+        
+        
+        if isTapInCanvas {
+            // 在画布内的点击，让画布自己的手势处理
+            return
+        }
+        
+        // 获取点击的视图层级信息
+        let hitView = gestureView.hitTest(location, with: nil)
+        
+        // 检查点击的是否是工具栏或其他UI控件
+        if isUIControl(hitView) {
+        } else {
+        }
+        
+        // 在画布外的点击，直接取消选中
+        selectedNodeID = nil
+    }
+    
+    /// 检查视图是否是UI控件（工具栏、按钮等）
+    private func isUIControl(_ view: UIView?) -> Bool {
+        guard let view = view else { return false }
+        
+        // 检查是否是常见的UI控件类型
+        if view is UIButton || 
+           view is UIToolbar || 
+           view is UINavigationBar || 
+           view is UITabBar ||
+           view is UISlider ||
+           view is UISwitch ||
+           view is UIStepper ||
+           view is UISegmentedControl {
+            return true
+        }
+        
+        // 检查视图类名是否包含常见的UI控件标识
+        let className = String(describing: type(of: view))
+        let uiControlKeywords = [
+            "Button", "Toolbar", "Bar", "Control", "Slider", "Switch", "Stepper",
+            "SegmentedControl", "TextField", "TextView", "Label", "ImageView",
+            "CanvasToolbar", "ToolButton", "ShapeToolButton", "PenToolButton"
+        ]
+        
+        for keyword in uiControlKeywords {
+            if className.contains(keyword) {
+                return true
+            }
+        }
+        
+        // 检查背景视图类型（通常表示UI容器）
+        if className.contains("Background") || className.contains("Container") {
+            return true
+        }
+        
+        return false
+    }
+    
+    /// 清理全局监听器
+    private func cleanupGlobalTapObserver() {
+        if let observer = globalTapObserver {
+            NotificationCenter.default.removeObserver(observer)
+            globalTapObserver = nil
+        }
+        
+        // 清理全局手势
+        if let window = self.window ?? self.superview?.window ?? UIApplication.shared.windows.first,
+           let globalGesture = objc_getAssociatedObject(window, &AssociatedKeys.globalTapGesture) as? UITapGestureRecognizer {
+            window.removeGestureRecognizer(globalGesture)
+            objc_setAssociatedObject(window, &AssociatedKeys.globalTapGesture, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
+}
+
+// MARK: - Associated Keys
+private struct AssociatedKeys {
+    static var globalTapGesture = "globalTapGesture"
 }

@@ -77,6 +77,8 @@ struct NativeEditorView: View {
             NativeCanvasContainer(
                 viewModel: viewModel,
                 onImageImport: {
+                    // 图片导入时取消选中状态
+                    viewModel.stateManager.clearSelection()
                     showImageSourcePicker = true
                 }
             )
@@ -731,6 +733,8 @@ private struct NativeCanvasContainer: View {
                         
                         // Magic Frame 切换按钮
                         Button {
+                            // 点击"显示选框"时取消选中状态
+                            viewModel.stateManager.clearSelection()
                             viewModel.stateManager.toggleMagicFrame()
                         } label: {
                             Label(
@@ -769,6 +773,10 @@ private struct NativeCanvasContainer: View {
                         onImageImport: onImageImport,
                         onShapeSelected: { shapeType in
                             viewModel.selectedShapeType = shapeType
+                        },
+                        onToolChanged: { newTool in
+                            // 工具切换时取消选中状态
+                            viewModel.stateManager.clearSelection()
                         },
                         penColor: Binding(
                             get: { Color(hex: viewModel.stateManager.penColor) },

@@ -6,6 +6,7 @@ struct CanvasToolbar: View {
     @Binding var currentTool: CanvasTool
     var onImageImport: () -> Void
     var onShapeSelected: ((ShapeType) -> Void)?  // 形状选择回调
+    var onToolChanged: ((CanvasTool) -> Void)?   // 工具切换回调
     
     // 画笔设置
     @Binding var penColor: Color
@@ -33,6 +34,7 @@ struct CanvasToolbar: View {
                                 } else {
                                     currentTool = .rectangle
                                 }
+                                onToolChanged?(currentTool)
                             }
                             onShapeSelected?(shape)
                         }
@@ -47,6 +49,7 @@ struct CanvasToolbar: View {
                         onSelect: {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 currentTool = tool
+                                onToolChanged?(tool)
                             }
                         },
                         penColor: $penColor,
@@ -64,6 +67,7 @@ struct CanvasToolbar: View {
                             } else {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     currentTool = tool
+                                    onToolChanged?(tool)
                                 }
                             }
                         }
