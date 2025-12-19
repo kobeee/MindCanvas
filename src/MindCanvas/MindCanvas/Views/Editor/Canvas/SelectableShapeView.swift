@@ -59,7 +59,6 @@ class SelectableShapeView: UIView {
     // 选中状态
     var isSelected: Bool = false {
         didSet {
-            print("[ShapeView] isSelected.didSet: \(oldValue) -> \(isSelected), ID: \(shapeNode.id)")
             updateSelectionAppearance()
         }
     }
@@ -254,7 +253,7 @@ class SelectableShapeView: UIView {
 
     /// 从数据模型更新视图
     internal func updateFromNode() {
-        print("[ShapeView] updateFromNode() START - ID: \(shapeNode.id), isSelected: \(isSelected)")
+        
         // 重置 transform 为 identity
         transform = .identity
 
@@ -277,7 +276,6 @@ class SelectableShapeView: UIView {
 
         updateShapePath()
         updateSelectionAppearance()
-        print("[ShapeView] updateFromNode() END - ID: \(shapeNode.id), isSelected: \(isSelected)")
     }
 
     // 上次同步的 frame（用于防抖）
@@ -324,7 +322,7 @@ class SelectableShapeView: UIView {
 
     private func updateSelectionAppearance() {
         let showHandles = isSelected
-        print("[ShapeView] updateSelectionAppearance() - ID: \(shapeNode.id), showHandles: \(showHandles)")
+        
 
         selectionBorder.isHidden = !showHandles
         rotationLineLayer.isHidden = !showHandles
@@ -332,7 +330,6 @@ class SelectableShapeView: UIView {
         cornerHandleLayers.forEach { $0.isHidden = !showHandles }
 
         guard showHandles else { 
-            print("[ShapeView] updateSelectionAppearance() - Early return, showHandles=false")
             return 
         }
 
@@ -369,7 +366,7 @@ class SelectableShapeView: UIView {
         )
         rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
         
-        print("[ShapeView] updateSelectionAppearance() - Control points updated, visible: \(showHandles)")
+        
     }
 
     // MARK: - Hit Testing
@@ -474,7 +471,6 @@ class SelectableShapeView: UIView {
             }
 
         case .ended, .cancelled:
-            print("[ShapeView] Gesture ended - ID: \(shapeNode.id), bounds: \(bounds), frame: \(frame)")
             activeHandle = nil
             syncToNode()
             

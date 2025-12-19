@@ -184,10 +184,15 @@ struct DrawingAction: CanvasAction {
 /// 清屏操作
 struct ClearCanvasAction: CanvasAction {
     let previousLayers: [LayerNode]
+    let previousArrows: [ArrowLayerNode]
+    let previousShapes: [ShapeLayerNode]
+    let previousRectangles: [RectangleLayerNode]
+    let previousTexts: [TextLayerNode]
+    let previousAnnotations: [AnnotationLayerNode]
     let previousDrawingData: Data?
     weak var canvasView: NativeCanvasView?
     
-    var description: String { "清屏操作" }
+    var description: String { "清屏操作(图层:\(previousLayers.count), 箭头:\(previousArrows.count), 形状:\(previousShapes.count), 矩形:\(previousRectangles.count), 文字:\(previousTexts.count), 标注:\(previousAnnotations.count))" }
     
     func execute() {
         canvasView?.clearCanvas()
@@ -195,7 +200,46 @@ struct ClearCanvasAction: CanvasAction {
     
     func undo() {
         // 恢复图层
-        canvasView?.setLayers(previousLayers)
+        if !previousLayers.isEmpty {
+            canvasView?.setLayers(previousLayers)
+        }
+        
+        // 恢复箭头
+        if !previousArrows.isEmpty {
+            previousArrows.forEach { arrow in
+                canvasView?.addArrow(arrow, recordUndo: false)
+            }
+        }
+        
+        // 恢复形状
+        if !previousShapes.isEmpty {
+            previousShapes.forEach { shape in
+                canvasView?.addShape(shape, recordUndo: false)
+            }
+        }
+        
+        // 恢复矩形
+        if !previousRectangles.isEmpty {
+            previousRectangles.forEach { rectangle in
+                canvasView?.addRectangle(rectangle, recordUndo: false)
+            }
+        }
+        
+        // 恢复文字
+        if !previousTexts.isEmpty {
+            previousTexts.forEach { text in
+                // TODO: 待文本工具完整实现后启用
+                // canvasView?.addText(text, recordUndo: false)
+            }
+        }
+        
+        // 恢复标注
+        if !previousAnnotations.isEmpty {
+            previousAnnotations.forEach { annotation in
+                canvasView?.addAnnotation(annotation, recordUndo: false)
+            }
+        }
+        
         // 恢复绘图
         if let data = previousDrawingData {
             canvasView?.loadDrawing(from: data)

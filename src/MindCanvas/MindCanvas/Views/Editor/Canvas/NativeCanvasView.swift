@@ -85,7 +85,6 @@ class NativeCanvasView: UIView {
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
         didSet {
-            print("[NativeCanvas] selectedNodeID.didSet: \(oldValue != nil ? oldValue!.uuidString.prefix(8) : "nil") -> \(selectedNodeID != nil ? selectedNodeID!.uuidString.prefix(8) : "nil")")
             updateSelectionStates()
             
             // 修复：同步选中状态到CanvasStateManager
@@ -493,31 +492,24 @@ class NativeCanvasView: UIView {
 
     /// 更新选中状态
     private func updateSelectionStates() {
-        print("[NativeCanvas] updateSelectionStates() - selectedNodeID: \(selectedNodeID != nil ? selectedNodeID!.uuidString.prefix(8) : "nil")")
-        print("[NativeCanvas] updateSelectionStates() - imageViews.count: \(imageViews.count), arrowViews.count: \(arrowViews.count), shapeViews.count: \(shapeViews.count)")
-        
         // 更新图片视图选中状态
         for (id, imageView) in imageViews {
             let shouldBeSelected = (id == selectedNodeID)
-            print("[NativeCanvas] Setting imageView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
             imageView.isSelected = shouldBeSelected
         }
         
         // 更新箭头视图选中状态
         for (id, arrowView) in arrowViews {
             let shouldBeSelected = (id == selectedNodeID)
-            print("[NativeCanvas] Setting arrowView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
             arrowView.isSelected = shouldBeSelected
         }
         
         // 更新形状视图选中状态
         for (id, shapeView) in shapeViews {
             let shouldBeSelected = (id == selectedNodeID)
-            print("[NativeCanvas] Setting shapeView isSelected=\(shouldBeSelected) for ID: \(id.uuidString.prefix(8))")
             shapeView.isSelected = shouldBeSelected
         }
         
-        print("[NativeCanvas] updateSelectionStates() - Calling onSelectionChanged(\(selectedNodeID != nil))")
         onSelectionChanged?(selectedNodeID != nil)
     }
 
@@ -530,6 +522,34 @@ class NativeCanvasView: UIView {
     func setLayers(_ newLayers: [LayerNode]) {
         removeAllLayers()
         newLayers.forEach { addLayer($0, recordUndo: false) }
+    }
+
+    // MARK: - 获取所有图形对象（用于清屏撤销）
+
+    /// 获取所有箭头对象
+    func getArrows() -> [ArrowLayerNode] {
+        return arrowLayerManager.arrows
+    }
+
+    /// 获取所有形状对象
+    func getShapes() -> [ShapeLayerNode] {
+        return shapeLayerManager.shapes
+    }
+
+    /// 获取所有矩形对象
+    func getRectangles() -> [RectangleLayerNode] {
+        return rectangleLayerManager.rectangles
+    }
+
+    /// 获取所有文字对象
+    func getTexts() -> [TextLayerNode] {
+        // TODO: 待文本工具完整实现后启用
+        return []
+    }
+
+    /// 获取所有标注对象
+    func getAnnotations() -> [AnnotationLayerNode] {
+        return annotationLayerManager.annotations
     }
 
     /// 图层操作：置顶

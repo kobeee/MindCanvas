@@ -112,11 +112,25 @@ struct NativeEditorView: View {
             // 绑定清屏回调（支持撤销）
             viewModel.stateManager.onClearCanvas = { [weak viewModel] in
                 guard let viewModel = viewModel, let canvasView = viewModel.canvasView else { return }
-                // 记录当前状态用于撤销
+                
+                // 记录当前所有对象状态用于撤销
                 let previousLayers = canvasView.getLayers()
+                let previousArrows = canvasView.getArrows()
+                let previousShapes = canvasView.getShapes()
+                let previousRectangles = canvasView.getRectangles()
+                let previousTexts = canvasView.getTexts()
+                let previousAnnotations = canvasView.getAnnotations()
                 let previousDrawingData = canvasView.getDrawingData()
+                
+                
+                
                 let action = ClearCanvasAction(
                     previousLayers: previousLayers,
+                    previousArrows: previousArrows,
+                    previousShapes: previousShapes,
+                    previousRectangles: previousRectangles,
+                    previousTexts: previousTexts,
+                    previousAnnotations: previousAnnotations,
                     previousDrawingData: previousDrawingData,
                     canvasView: canvasView
                 )
@@ -161,11 +175,11 @@ struct NativeEditorView: View {
                       let canvasView = viewModel.canvasView,
                       let selectedID = viewModel.stateManager.selectedNodeID
                 else { 
-                    print("[NativeEditor] Delete selected failed: missing viewModel, canvasView or selectedID")
+                    
                     return 
                 }
                 
-                print("[NativeEditor] Deleting selected object: \(selectedID.uuidString.prefix(8))")
+                
 
                 var deletionSuccess = false
                 
@@ -176,7 +190,7 @@ struct NativeEditorView: View {
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeLayer(id: selectedID, recordUndo: false)
                     deletionSuccess = true
-                    print("[NativeEditor] Deleted layer: \(selectedID.uuidString.prefix(8))")
+                    
                 }
                 // 2. 尝试作为箭头删除
                 else if let arrow = canvasView.getArrowLayerManager().arrows.first(where: { $0.id == selectedID }) {
@@ -184,7 +198,7 @@ struct NativeEditorView: View {
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeArrow(id: selectedID)
                     deletionSuccess = true
-                    print("[NativeEditor] Deleted arrow: \(selectedID.uuidString.prefix(8))")
+                    
                 }
                 // 3. 尝试作为形状删除
                 else if let shape = canvasView.getShapeLayerManager().shapes.first(where: { $0.id == selectedID }) {
@@ -192,11 +206,10 @@ struct NativeEditorView: View {
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeShape(id: selectedID)
                     deletionSuccess = true
-                    print("[NativeEditor] Deleted shape: \(selectedID.uuidString.prefix(8))")
-                }
+                    }
                 
                 if !deletionSuccess {
-                    print("[NativeEditor] Warning: No object found with ID: \(selectedID.uuidString.prefix(8))")
+                    // 删除失败，静默处理
                 }
 
                 // 清除选中状态

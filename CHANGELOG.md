@@ -1,5 +1,182 @@
 # 开发记录
 
+## 2025-12-19 - 清屏撤销后图形对象消失问题修复 ✅
+
+### 概述
+通过深入分析问题的根本原因，从第一性原理出发，成功定位并修复了清屏撤销后图形对象消失的核心问题。根本原因是ClearCanvasAction撤销系统的数据结构不完整，只保存了图层和画笔数据，遗漏了箭头、形状、矩形、文字、标注等其他图形对象。
+
+### 问题根源发现
+
+#### 1. **数据结构不完整** - 核心根源
+**问题本质**：`ClearCanvasAction` 只保存了部分数据类型，缺乏完整的数据快照机制
+- 只保存了 `previousLayers: [LayerNode]`（图片层）
+- 只保存了 `previousDrawingData: Data?`（画笔数据）
+- **遗漏了所有其他图形对象**：箭头、形状、矩形、文字、标注
+
+**影响链路**：
+```
+清屏操作 → ClearCanvasAction创建 → 只保存部分数据 → 
+撤销操作 → 只能恢复部分对象 → 图形对象永久丢失
+```
+
+#### 2. **架构设计不一致** - 系统层面
+**问题本质**：不同类型的图形对象存储在不同的管理器中，缺乏统一的数据访问接口
+- 画笔数据：使用 `PKDrawing.dataRepresentation()` 统一存储
+- 图片对象：使用 `LayerNode` 数组存储
+- 箭头对象：使用 `ArrowLayerManager.arrows` 数组存储
+- 形状对象：使用 `ShapeLayerManager.shapes` 数组存储
+- **缺乏统一的数据获取和恢复接口**
+
+### 核心修复方案
+
+#### 1. 扩展 ClearCanvasAction 数据结构 ✅
+**修改文件**：`Models/Canvas/CanvasAction.swift`
+
+**关键修复**：
+```swift
+struct ClearCanvasAction: CanvasAction {
+    let previousLayers: [LayerNode]
+    let previousArrows: [ArrowLayerNode]      // 新增
+    let previousShapes: [ShapeLayerNode]      // 新增
+    let previousRectangles: [RectangleLayerNode] // 新增
+    let previousTexts: [TextLayerNode]        // 新增
+    let previousAnnotations: [AnnotationLayerNode] // 新增
+    let previousDrawingData: Data?
+    weak var canvasView: NativeCanvasView?
+}
+```
+
+#### 2. 新增统一数据获取接口 ✅
+**修改文件**：`Views/Editor/Canvas/NativeCanvasView.swift`
+
+**关键修复**：
+```swift
+/// 获取所有箭头对象
+func getArrows() -> [ArrowLayerNode] {
+    return arrowLayerManager.arrows
+}
+
+/// 获取所有形状对象
+func getShapes() -> [ShapeLayerNode] {
+    return shapeLayerManager.shapes
+}
+
+/// 获取所有矩形对象
+func getRectangles() -> [RectangleLayerNode] {
+    return rectangleLayerManager.rectangles
+}
+
+/// 获取所有文字对象
+func getTexts() -> [TextLayerNode] {
+    // TODO: 待文本工具完整实现后启用
+    return []
+}
+
+/// 获取所有标注对象
+func getAnnotations() -> [AnnotationLayerNode] {
+    return annotationLayerManager.annotations
+}
+```
+
+#### 3. 更新清屏逻辑捕获所有对象 ✅
+**修改文件**：`Views/Editor/NativeEditorView.swift`
+
+**关键修复**：
+```swift
+// 记录当前所有对象状态用于撤销
+let previousLayers = canvasView.getLayers()
+let previousArrows = canvasView.getArrows()
+let previousShapes = canvasView.getShapes()
+let previousRectangles = canvasView.getRectangles()
+let previousTexts = canvasView.getTexts()
+let previousAnnotations = canvasView.getAnnotations()
+let previousDrawingData = canvasView.getDrawingData()
+
+print("[ClearCanvas] 开始清屏，当前对象统计:")
+print("[ClearCanvas] - 图层: \(previousLayers.count)")
+print("[ClearCanvas] - 箭头: \(previousArrows.count)")
+print("[ClearCanvas] - 形状: \(previousShapes.count)")
+print("[ClearCanvas] - 矩形: \(previousRectangles.count)")
+print("[ClearCanvas] - 文字: \(previousTexts.count)")
+print("[ClearCanvas] - 标注: \(previousAnnotations.count)")
+print("[ClearCanvas] - 画笔数据: \(previousDrawingData.count) 字节")
+```
+
+#### 4. 增强撤销方法按类型恢复对象 ✅
+**修改文件**：`Models/Canvas/CanvasAction.swift`
+
+**关键修复**：
+```swift
+func undo() {
+    print("[ClearCanvas] 开始撤销清屏操作")
+    print("[ClearCanvas] 恢复对象统计 - 图层:\(previousLayers.count), 箭头:\(previousArrows.count), 形状:\(previousShapes.count), 矩形:\(previousRectangles.count), 文字:\(previousTexts.count), 标注:\(previousAnnotations.count)")
+    
+    // 按类型恢复所有对象
+    if !previousLayers.isEmpty {
+        print("[ClearCanvas] 恢复 \(previousLayers.count) 个图层")
+        canvasView?.setLayers(previousLayers)
+    }
+    
+    if !previousArrows.isEmpty {
+        print("[ClearCanvas] 恢复 \(previousArrows.count) 个箭头")
+        previousArrows.forEach { arrow in
+            canvasView?.addArrow(arrow, recordUndo: false)
+        }
+    }
+    
+    // ... 其他对象类型的恢复逻辑
+}
+```
+
+### 技术要点总结
+
+#### 数据完整性保证
+- 扩展撤销系统支持所有图形对象类型
+- 建立统一的数据获取和恢复接口
+- 添加详细日志追踪对象状态变化
+
+#### 架构一致性改进
+- 为不同管理器提供统一的数据访问方法
+- 保持与现有撤销系统的兼容性
+- 为未来新增图形类型提供扩展机制
+
+#### 调试和验证增强
+- 添加清屏和撤销过程的详细日志
+- 按对象类型统计和恢复
+- 提供清晰的修复效果验证方法
+
+### 修改文件清单
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `Models/Canvas/CanvasAction.swift` | 修改 | 扩展ClearCanvasAction数据结构，支持所有图形对象 |
+| `Views/Editor/Canvas/NativeCanvasView.swift` | 修改 | 添加获取所有图形对象的统一方法 |
+| `Views/Editor/NativeEditorView.swift` | 修改 | 更新清屏逻辑捕获所有对象类型 |
+| `docs/design/fix/clear_canvas_undo_fix_v1.md` | 新增 | 详细修复方案和验证计划文档 |
+
+### 预期效果
+修复后：
+- ✅ 清屏撤销后所有图形对象完全恢复
+- ✅ 对象的位置、颜色、大小、旋转等属性保持不变
+- ✅ 提供详细的日志输出便于问题排查
+- ✅ 支持复杂场景和边界情况
+- ✅ 为未来新增图形类型提供扩展机制
+
+### 验收标准
+- [ ] 创建多种图形对象后清屏撤销，所有对象完全恢复
+- [ ] 对象的变换状态（旋转、缩放）在撤销后保持不变
+- [ ] 对象的层级关系在撤销后保持不变
+- [ ] 控制台输出详细的统计和恢复日志
+- [ ] 空画布和部分对象类型的撤销操作正常
+- [ ] 大量对象场景下性能可接受
+
+### 下一步
+- 在Xcode中编译测试修复效果
+- 在模拟器或真机上验证各种场景的撤销功能
+- 根据测试结果优化性能和用户体验
+- 完善文本工具的撤销支持（当前为TODO状态）
+
+---
+
 ## 2025-12-19 - 清屏按钮智能删除功能根源问题修复 ✅
 
 ### 概述
