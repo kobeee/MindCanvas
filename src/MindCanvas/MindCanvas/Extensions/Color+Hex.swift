@@ -28,6 +28,11 @@ extension Color {
         )
     }
     
+    /// 从十六进制字符串创建颜色（便利初始化器）
+    init(hex: String) {
+        self = Color.fromHex(hex) ?? .black
+    }
+    
     /// 将 Color 转换为十六进制字符串
     func toHex() -> String? {
         guard let components = UIColor(self).cgColor.components else { return nil }

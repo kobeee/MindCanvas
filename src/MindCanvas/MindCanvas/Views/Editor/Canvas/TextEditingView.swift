@@ -40,7 +40,6 @@ struct TextEditingView: View {
                 .cornerRadius(4)
                 .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 .onAppear {
-                    print("🔧 [TextEditingView] 文字输入框出现，位置: \(textFieldPosition)")
                     editingText = text
                     textFieldPosition = position
                 }
@@ -56,25 +55,19 @@ struct TextEditingView: View {
             // 点击画布时创建文字输入框
             DragGesture(minimumDistance: 0)
                 .onEnded { value in
-                    print("🔧 [TextEditingView] 画布点击，位置: \(value.location)")
                     if !isEditing {
                         position = value.location
                         textFieldPosition = value.location
                         editingText = ""
                         isEditing = true
-                        print("🔧 [TextEditingView] 开始编辑文字: \(value.location)")
                     }
                 }
         )
-        .onAppear {
-            print("🔧 [TextEditingView] 文字编辑视图出现")
-        }
+        .onAppear {}
     }
     
     private func createText() {
-        print("🔧 [TextEditingView] 创建文字: '\(editingText)' 在位置: \(position)")
         guard !editingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            print("🔧 [TextEditingView] 文字为空，取消创建")
             isEditing = false
             return
         }
@@ -82,7 +75,6 @@ struct TextEditingView: View {
         onTextCreated?(position, editingText)
         isEditing = false
         text = ""
-        print("🔧 [TextEditingView] 文字创建完成")
     }
 }
 

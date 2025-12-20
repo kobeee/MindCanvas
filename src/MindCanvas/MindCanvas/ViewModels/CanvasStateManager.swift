@@ -1,21 +1,28 @@
 import Foundation
 import CoreGraphics
 import Observation
-import Combine
 
 /// 画布状态管理器
 /// 负责管理工具状态、选中状态、Magic Frame、撤销/恢复等
+@MainActor
 @Observable
-class CanvasStateManager {
+final class CanvasStateManager {
     // MARK: - Properties
-    
-    /// 用于监听通知的订阅集合
-    private var cancellables = Set<AnyCancellable>()
     
     // MARK: - 工具状态
     
     /// 当前选中的工具
-    var currentTool: CanvasTool = .select
+    var currentTool: CanvasTool = .select {
+        didSet {
+            if oldValue != currentTool {
+                // 发送工具变更通知
+                NotificationCenter.default.post(
+                    name: .toolChanged,
+                    object: currentTool
+                )
+            }
+        }
+    }
     
     /// 初始化
     init() {
@@ -25,13 +32,24 @@ class CanvasStateManager {
     /// 设置通知监听
     private func setupNotifications() {
         // 监听画布操作记录通知
-        NotificationCenter.default.publisher(for: .canvasActionRecorded)
-            .sink { [weak self] notification in
-                if let action = notification.object as? any CanvasAction {
-                    self?.recordAction(action)
-                }
-            }
-            .store(in: &cancellables)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCanvasActionRecorded(_:)),
+            name: .canvasActionRecorded,
+            object: nil
+        )
+    }
+    
+    /// 处理画布操作记录通知
+    @objc private func handleCanvasActionRecorded(_ notification: Notification) {
+        if let action = notification.object as? any CanvasAction {
+            recordAction(action)
+        }
+    }
+    
+    /// 清理通知监听
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     /// 切换工具

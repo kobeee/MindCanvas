@@ -7,4 +7,7 @@ extension Notification.Name {
     
     /// CanvasStateManager中选中状态变化通知
     static let selectionChangedInStateManager = Notification.Name("SelectionChangedInStateManager")
+    
+    /// CanvasStateManager中工具状态变化通知
+    static let toolChanged = Notification.Name("ToolChanged")
 }

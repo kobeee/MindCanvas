@@ -54,11 +54,12 @@ class NativeCanvasView: UIView {
     /// 撤销后加载方案：true=重建PKCanvasView实例，false=使用append方法
     private let shouldRecreateCanvasViewOnLoad = true
 
-    /// 当前工具（新架构）
-    var currentTool: CanvasTool = .select {
-        didSet {
-            updateForTool(currentTool)
-        }
+    /// CanvasStateManager 引用（用于获取文字设置）
+    weak var stateManager: CanvasStateManager?
+    
+    /// 当前工具（从 stateManager 获取）
+    var currentTool: CanvasTool {
+        return stateManager?.currentTool ?? .select
     }
 
     /// 当前工具模式（兼容旧代码，将被移除）
@@ -68,11 +69,11 @@ class NativeCanvasView: UIView {
             switch currentMode {
             case .objectMode:
                 if currentTool != .select && currentTool != .pan && currentTool != .image {
-                    currentTool = .select
+                    stateManager?.currentTool = .select
                 }
             case .drawingMode:
                 if currentTool != .pen && currentTool != .eraser {
-                    currentTool = .pen
+                    stateManager?.currentTool = .pen
                 }
             }
         }
@@ -240,7 +241,7 @@ class NativeCanvasView: UIView {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.centerCanvas()
-            self.updateForTool(self.currentTool)
+            // 移除 self.updateForTool 调用，由外部通过 updateUIView 处理
             self.onZoomChanged?(self.pencilCanvas.zoomScale)
         }
     }
@@ -668,13 +669,31 @@ class NativeCanvasView: UIView {
         // 将点击位置转换为画布内容坐标
         let contentLocation = convertToContentCoordinates(location)
         
-        // 创建默认文字
+        // 从CanvasStateManager获取当前文字设置
+        let fontSize: CGFloat
+        let textColor: String
+        let fontName: String?
+        
+        if let stateManager = stateManager {
+            fontSize = stateManager.textFontSize
+            textColor = stateManager.textColor
+            fontName = stateManager.textFontName
+            print("✅ [NativeCanvasView] 从CanvasStateManager获取文字设置: 字体=\(fontName ?? "默认"), 大小=\(fontSize), 颜色=\(textColor)")
+        } else {
+            // 如果没有CanvasStateManager，使用默认值
+            fontSize = 24
+            textColor = "#000000"
+            fontName = ".SF Pro Display"
+            print("⚠️ [NativeCanvasView] CanvasStateManager不可用，使用默认文字设置")
+        }
+        
+        // 创建文字
         let text = TextLayerNode(
             position: contentLocation,
             text: "新文字",
-            fontSize: 24,
-            color: "#000000",
-            fontName: ".SF Pro Display",
+            fontSize: fontSize,
+            color: textColor,
+            fontName: fontName ?? ".SF Pro Display",
             rotation: 0,
             scale: 1.0,
             zIndex: textLayerManager.getNextZIndex()
@@ -686,7 +705,7 @@ class NativeCanvasView: UIView {
         // 自动选中新创建的文字
         selectedNodeID = text.id
         
-        print("✏️ [NativeCanvasView] 创建文字: \(text.id) at \(contentLocation)")
+        print("✏️ [NativeCanvasView] 创建文字: \(text.id) at \(contentLocation), 字体=\(fontName ?? "默认"), 大小=\(fontSize), 颜色=\(textColor)")
     }
     
     /// 将视图坐标转换为画布内容坐标
@@ -714,7 +733,7 @@ class NativeCanvasView: UIView {
 
     /// 根据工具更新手势处理
     func updateForTool(_ tool: CanvasTool) {
-        print("🔧 [NativeCanvasView] updateForTool: \(tool.displayName) (\(tool.rawValue))")
+        // 移除状态一致性检查，直接使用传入的工具
         
         switch tool {
         case .select:
@@ -812,7 +831,6 @@ class NativeCanvasView: UIView {
             canvasTapGesture.isEnabled = true
 
         case .arrow, .rectangle, .text, .annotation:
-            print("🔧 [NativeCanvasView] 处理工具: \(tool.displayName)")
             pencilCanvas.isUserInteractionEnabled = true
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
@@ -829,7 +847,6 @@ class NativeCanvasView: UIView {
             
             // 特殊处理文字工具
             if tool == .text {
-                print("🔧 [NativeCanvasView] 文字工具已激活，等待用户点击画布创建文字")
                 // 确保所有文字的手势都能正常工作
                 for textView in textViews.values {
                     textView.enableTextGestures()
@@ -841,7 +858,7 @@ class NativeCanvasView: UIView {
     /// 切换绘图工具（兼容旧代码）
     @available(*, deprecated, message: "使用 currentTool = .pen/.eraser 代替")
     func setDrawingTool(isPen: Bool) {
-        currentTool = isPen ? .pen : .eraser
+        stateManager?.currentTool = isPen ? .pen : .eraser
     }
 
     // MARK: - Drawing Operations
@@ -1735,26 +1752,28 @@ extension NativeCanvasView: PKCanvasViewDelegate {
 // MARK: - SwiftUI Wrapper
 
 struct NativeCanvasViewWrapper: UIViewRepresentable {
-    @Binding var currentTool: CanvasTool
     var onCanvasUpdated: (() -> Void)?
     var onViewCreated: ((NativeCanvasView) -> Void)?
     var onZoomChanged: ((CGFloat) -> Void)? = nil
+    var stateManager: CanvasStateManager?
 
     func makeUIView(context: Context) -> NativeCanvasView {
         let view = NativeCanvasView()
-        view.currentTool = currentTool
         view.onCanvasUpdated = onCanvasUpdated
         view.onZoomChanged = onZoomChanged
+        view.stateManager = stateManager  // 设置CanvasStateManager引用
         onViewCreated?(view)
         return view
     }
 
     func updateUIView(_ uiView: NativeCanvasView, context: Context) {
-        if uiView.currentTool != currentTool {
-            uiView.currentTool = currentTool
+        // 通过stateManager获取当前工具，而不是通过binding
+        if let currentTool = stateManager?.currentTool {
+            uiView.updateForTool(currentTool)
         }
         uiView.onCanvasUpdated = onCanvasUpdated
         uiView.onZoomChanged = onZoomChanged
+        uiView.stateManager = stateManager  // 确保stateManager引用是最新的
     }
 
     func makeCoordinator() -> Coordinator {

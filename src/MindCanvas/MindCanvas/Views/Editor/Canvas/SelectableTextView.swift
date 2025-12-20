@@ -1,5 +1,34 @@
 import UIKit
 
+/// 文本控制点类型
+enum TextControlHandle: Int, CaseIterable {
+    case topLeft = 0
+    case topRight = 1
+    case bottomRight = 2
+    case bottomLeft = 3
+    case rotation = 4
+
+    func position(in bounds: CGRect, rotationOffset: CGFloat = 30) -> CGPoint {
+        switch self {
+        case .topLeft: return CGPoint(x: bounds.minX, y: bounds.minY)
+        case .topRight: return CGPoint(x: bounds.maxX, y: bounds.minY)
+        case .bottomRight: return CGPoint(x: bounds.maxX, y: bounds.maxY)
+        case .bottomLeft: return CGPoint(x: bounds.minX, y: bounds.maxY)
+        case .rotation: return CGPoint(x: bounds.midX, y: bounds.minY - rotationOffset)
+        }
+    }
+
+    var oppositeCorner: TextControlHandle? {
+        switch self {
+        case .topLeft: return .bottomRight
+        case .topRight: return .bottomLeft
+        case .bottomRight: return .topLeft
+        case .bottomLeft: return .topRight
+        case .rotation: return nil
+        }
+    }
+}
+
 /// 可选择的文本视图（支持控制点交互）
 /// 完整实现 - 支持选择、移动、旋转、缩放和双击编辑功能
 class SelectableTextView: UIView {
@@ -17,6 +46,18 @@ class SelectableTextView: UIView {
 
     // 选中边框
     private let selectionBorder = CAShapeLayer()
+
+    // 控制点图层
+    private var cornerHandleLayers: [CAShapeLayer] = []
+    private let rotationHandleLayer = CAShapeLayer()
+    private let rotationLineLayer = CAShapeLayer()
+
+    // 控制点配置
+    private let handleSize: CGFloat = 12
+    private let rotationHandleOffset: CGFloat = 30
+
+    // 当前活动的控制点
+    private var activeHandle: TextControlHandle?
 
     // 选中状态
     var isSelected: Bool = false {
@@ -37,8 +78,12 @@ class SelectableTextView: UIView {
     private var tapGesture: UITapGestureRecognizer!
     private var doubleTapGesture: UITapGestureRecognizer!
 
-    // 初始状态
+    // 初始状态（用于旋转和缩放）
     private var initialCenter: CGPoint = .zero
+    private var initialBounds: CGRect = .zero
+    private var initialRotation: CGFloat = 0
+    private var initialTouchAngle: CGFloat = 0
+    private var initialNode: TextLayerNode?
     private var dragStartPoint: CGPoint = .zero
 
     // 编辑相关
@@ -86,6 +131,28 @@ class SelectableTextView: UIView {
         // 添加选中边框
         layer.addSublayer(selectionBorder)
 
+        // 添加旋转连接线
+        rotationLineLayer.fillColor = UIColor.clear.cgColor
+        rotationLineLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationLineLayer.lineWidth = 1.5
+        layer.addSublayer(rotationLineLayer)
+
+        // 添加旋转手柄
+        rotationHandleLayer.fillColor = UIColor.white.cgColor
+        rotationHandleLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationHandleLayer.lineWidth = 2
+        layer.addSublayer(rotationHandleLayer)
+
+        // 添加角点控制点
+        for _ in 0..<4 {
+            let handleLayer = CAShapeLayer()
+            handleLayer.fillColor = UIColor.white.cgColor
+            handleLayer.strokeColor = UIColor.systemBlue.cgColor
+            handleLayer.lineWidth = 2
+            layer.addSublayer(handleLayer)
+            cornerHandleLayers.append(handleLayer)
+        }
+
         updateSelectionStyle()
     }
 
@@ -114,6 +181,23 @@ class SelectableTextView: UIView {
         selectionBorder.strokeColor = UIColor.systemBlue.cgColor
         selectionBorder.lineWidth = 1.5
         selectionBorder.lineDashPattern = [4, 4]
+        
+        // 控制点样式
+        for handleLayer in cornerHandleLayers {
+            handleLayer.fillColor = UIColor.white.cgColor
+            handleLayer.strokeColor = UIColor.systemBlue.cgColor
+            handleLayer.lineWidth = 2
+        }
+        
+        // 旋转连接线样式
+        rotationLineLayer.fillColor = UIColor.clear.cgColor
+        rotationLineLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationLineLayer.lineWidth = 1.5
+        
+        // 旋转手柄样式
+        rotationHandleLayer.fillColor = UIColor.white.cgColor
+        rotationHandleLayer.strokeColor = UIColor.systemBlue.cgColor
+        rotationHandleLayer.lineWidth = 2
     }
 
     // MARK: - Update Methods
@@ -150,17 +234,127 @@ class SelectableTextView: UIView {
         textNode = textNode.updated(
             position: center,
             rotation: currentRotation
+            // scale 已在 handleResize 中更新
         )
         onNodeUpdated?(textNode)
     }
 
     private func updateSelectionAppearance() {
-        selectionBorder.isHidden = !isSelected
+        let showHandles = isSelected && !isEditing
 
-        guard isSelected else { return }
+        selectionBorder.isHidden = !showHandles
+        rotationLineLayer.isHidden = !showHandles
+        rotationHandleLayer.isHidden = !showHandles
+        cornerHandleLayers.forEach { $0.isHidden = !showHandles }
+
+        guard showHandles else { return }
 
         // 更新选中边框
         selectionBorder.path = UIBezierPath(rect: bounds).cgPath
+
+        // 更新角点控制点
+        let corners: [TextControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        for (index, corner) in corners.enumerated() {
+            let position = corner.position(in: bounds)
+            let handleRect = CGRect(
+                x: position.x - handleSize / 2,
+                y: position.y - handleSize / 2,
+                width: handleSize,
+                height: handleSize
+            )
+            cornerHandleLayers[index].path = UIBezierPath(rect: handleRect).cgPath
+        }
+
+        // 更新旋转连接线
+        let linePath = UIBezierPath()
+        linePath.move(to: CGPoint(x: bounds.midX, y: bounds.minY))
+        linePath.addLine(to: CGPoint(x: bounds.midX, y: bounds.minY - rotationHandleOffset))
+        rotationLineLayer.path = linePath.cgPath
+
+        // 更新旋转手柄
+        let rotationPos = TextControlHandle.rotation.position(in: bounds, rotationOffset: rotationHandleOffset)
+        let rotationRect = CGRect(
+            x: rotationPos.x - handleSize / 2,
+            y: rotationPos.y - handleSize / 2,
+            width: handleSize,
+            height: handleSize
+        )
+        rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
+    }
+
+    // MARK: - Hit Testing
+
+    private func hitTestHandle(at point: CGPoint) -> TextControlHandle? {
+        guard isSelected else { return nil }
+
+        let hitRadius: CGFloat = handleSize + 10
+
+        // 坐标转换：将触摸点从旋转后的坐标系转换到本地坐标系
+        let rotationAngle = atan2(transform.b, transform.a)
+        let cosR = cos(-rotationAngle)
+        let sinR = sin(-rotationAngle)
+
+        let centerPoint = CGPoint(x: bounds.midX, y: bounds.midY)
+        let relativePoint = CGPoint(x: point.x - centerPoint.x, y: point.y - centerPoint.y)
+        let rotatedPoint = CGPoint(
+            x: relativePoint.x * cosR - relativePoint.y * sinR,
+            y: relativePoint.x * sinR + relativePoint.y * cosR
+        )
+        let localTouchPoint = CGPoint(x: rotatedPoint.x + centerPoint.x, y: rotatedPoint.y + centerPoint.y)
+
+        // 先检查旋转手柄
+        let rotationPos = TextControlHandle.rotation.position(in: bounds, rotationOffset: rotationHandleOffset)
+        if distance(from: localTouchPoint, to: rotationPos) < hitRadius {
+            return .rotation
+        }
+
+        // 再检查角点
+        let corners: [TextControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        for corner in corners {
+            let cornerPos = corner.position(in: bounds)
+            if distance(from: localTouchPoint, to: cornerPos) < hitRadius {
+                return corner
+            }
+        }
+
+        return nil
+    }
+
+    private func distance(from p1: CGPoint, to p2: CGPoint) -> CGFloat {
+        sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2))
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+        if bounds.contains(point) {
+            return true
+        }
+        
+        // 2. 只有在选中状态下才扩展控制点区域
+        guard isSelected && !isEditing else { 
+            return false
+        }
+        
+        // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+        let controlPointHitRadius: CGFloat = 22
+        
+        // 检查旋转手柄区域
+        let rotationPos = TextControlHandle.rotation.position(in: bounds, rotationOffset: rotationHandleOffset)
+        if distance(from: point, to: rotationPos) <= controlPointHitRadius {
+            return true
+        }
+        
+        // 检查角点控制点区域
+        let corners: [TextControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        for corner in corners {
+            let cornerPos = corner.position(in: bounds)
+            if distance(from: point, to: cornerPos) <= controlPointHitRadius {
+                return true
+            }
+        }
+        
+        // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+        return false
     }
 
     // MARK: - Gesture Handlers
@@ -176,25 +370,96 @@ class SelectableTextView: UIView {
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let locationInSelf = gesture.location(in: self)
+
         switch gesture.state {
         case .began:
+            initialNode = textNode
             onOperationStart?(textNode)
+
+            activeHandle = hitTestHandle(at: locationInSelf)
             initialCenter = center
+            initialBounds = bounds
+            initialRotation = atan2(transform.b, transform.a)
+
+            if activeHandle == .rotation {
+                let touchInSuperview = gesture.location(in: superview)
+                initialTouchAngle = atan2(
+                    touchInSuperview.y - initialCenter.y,
+                    touchInSuperview.x - initialCenter.x
+                )
+            }
             dragStartPoint = gesture.location(in: superview)
 
         case .changed:
             let currentPoint = gesture.location(in: superview)
-            let dx = currentPoint.x - dragStartPoint.x
-            let dy = currentPoint.y - dragStartPoint.y
-            center = CGPoint(x: initialCenter.x + dx, y: initialCenter.y + dy)
+
+            if let handle = activeHandle {
+                switch handle {
+                case .rotation:
+                    handleRotation(currentPoint: currentPoint)
+                default:
+                    handleResize(handle: handle, currentPoint: currentPoint)
+                }
+            } else {
+                handleMove(currentPoint: currentPoint)
+            }
 
         case .ended, .cancelled:
             syncToNode()
-            onOperationEnd?(self, textNode)
+            if let initial = initialNode {
+                onOperationEnd?(self, textNode)
+            }
+            activeHandle = nil
+            initialNode = nil
 
         default:
             break
         }
+    }
+
+    private func handleMove(currentPoint: CGPoint) {
+        let dx = currentPoint.x - dragStartPoint.x
+        let dy = currentPoint.y - dragStartPoint.y
+        center = CGPoint(x: initialCenter.x + dx, y: initialCenter.y + dy)
+    }
+
+    private func handleRotation(currentPoint: CGPoint) {
+        let currentTouchAngle = atan2(
+            currentPoint.y - initialCenter.y,
+            currentPoint.x - initialCenter.x
+        )
+        let deltaAngle = currentTouchAngle - initialTouchAngle
+        let newRotation = initialRotation + deltaAngle
+        transform = CGAffineTransform(rotationAngle: newRotation)
+        updateSelectionAppearance()
+    }
+
+    private func handleResize(handle: TextControlHandle, currentPoint: CGPoint) {
+        // 简化的缩放实现：根据拖拽距离计算缩放因子
+        let dragDeltaX = currentPoint.x - dragStartPoint.x
+        let dragDeltaY = currentPoint.y - dragStartPoint.y
+
+        // 计算拖拽方向上的总距离
+        let totalDelta = sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY)
+        let sign: CGFloat = (dragDeltaX + dragDeltaY) > 0 ? 1 : -1
+
+        // 计算缩放因子（限制在合理范围内）
+        let scaleFactor = 1.0 + (sign * totalDelta) / 200.0
+        let newScale = max(0.5, min(3.0, textNode.scale * scaleFactor))
+
+        // 更新节点
+        textNode = textNode.updated(scale: newScale)
+
+        // 重新计算边界
+        let textBounds = textNode.bounds
+        bounds = CGRect(origin: .zero, size: textBounds.size)
+        textLayer.frame = bounds
+
+        // 保持旋转角度
+        transform = CGAffineTransform(rotationAngle: initialRotation)
+
+        updateSelectionAppearance()
     }
 
     // MARK: - Editing Methods

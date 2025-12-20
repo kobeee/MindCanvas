@@ -482,7 +482,6 @@ private struct NativeCanvasContainer: View {
                 
                 // 原生画布视图
                 NativeCanvasViewWrapper(
-                    currentTool: $viewModel.stateManager.currentTool,
                     onCanvasUpdated: {
                         viewModel.saveCanvasDocument()
                     },
@@ -499,7 +498,8 @@ private struct NativeCanvasContainer: View {
                     },
                     onZoomChanged: { scale in
                         viewModel.stateManager.zoomScale = scale
-                    }
+                    },
+                    stateManager: viewModel.stateManager
                 )
                 
                 // 箭头绘制层
@@ -798,27 +798,30 @@ private struct NativeCanvasContainer: View {
                 VStack {
                     Spacer()
                     CanvasToolbar(
-                        currentTool: $viewModel.stateManager.currentTool,
+                        stateManager: viewModel.stateManager,
                         onImageImport: onImageImport,
                         onShapeSelected: { shapeType in
                             viewModel.selectedShapeType = shapeType
                         },
                         onToolChanged: { newTool in
-                            print("🔧 [NativeEditorView] 工具切换回调: \(newTool.displayName)")
+                            // 验证状态同步
+                            if viewModel.stateManager.currentTool != newTool {
+                                print("⚠️ [NativeEditorView] 状态同步异常：StateManager工具=\(viewModel.stateManager.currentTool.displayName), 回调工具=\(newTool.displayName)")
+                                // 强制同步状态
+                                viewModel.stateManager.selectTool(newTool)
+                            }
                             
                             // 工具切换时取消选中状态
                             viewModel.stateManager.clearSelection()
                             
                             // 文字工具特殊处理：重置文字编辑状态
                             if newTool == .text {
-                                print("✅ [NativeEditorView] 切换到文字工具，重置编辑状态")
                                 isEditingText = false
                                 textPosition = .zero
                                 editingText = ""
                             } else {
                                 // 切换出文字工具时，如果正在编辑文字，取消编辑状态
                                 if isEditingText {
-                                    print("🔧 [NativeEditorView] 切换出文字工具，取消编辑状态")
                                     isEditingText = false
                                     textPosition = .zero
                                     editingText = ""
@@ -854,11 +857,9 @@ private struct NativeCanvasContainer: View {
         .onChange(of: viewModel.stateManager.currentTool) { _, newTool in
             // 监听工具变化，确保文字工具状态正确
             if newTool == .text && previousTool != .text {
-                print("🔧 [NativeCanvasContainer] 进入文字工具模式")
                 // 清除选中状态，避免冲突
                 viewModel.stateManager.clearSelection()
             } else if previousTool == .text && newTool != .text {
-                print("🔧 [NativeCanvasContainer] 退出文字工具模式")
                 // 重置文字编辑状态
                 isEditingText = false
                 textPosition = .zero

@@ -3,7 +3,7 @@ import SwiftUI
 /// 底部工具栏
 /// 参考 Figma/Canva 的工具栏设计，工具切换入口
 struct CanvasToolbar: View {
-    @Binding var currentTool: CanvasTool
+    @Bindable var stateManager: CanvasStateManager
     var onImageImport: () -> Void
     var onShapeSelected: ((ShapeType) -> Void)?  // 形状选择回调
     var onToolChanged: ((CanvasTool) -> Void)?   // 工具切换回调
@@ -25,17 +25,17 @@ struct CanvasToolbar: View {
                     // 图形工具特殊处理 - 弹出选择器
                     ShapeToolButton(
                         tool: tool,
-                        isSelected: currentTool == tool,
+                        isSelected: stateManager.currentTool == tool,
                         showPicker: $showShapePicker,
                         onShapeSelected: { shape in
                             showShapePicker = false
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 if shape.isLineType {
-                                    currentTool = .arrow
+                                    stateManager.currentTool = .arrow
                                 } else {
-                                    currentTool = .rectangle
+                                    stateManager.currentTool = .rectangle
                                 }
-                                onToolChanged?(currentTool)
+                                onToolChanged?(stateManager.currentTool)
                             }
                             onShapeSelected?(shape)
                         }
@@ -45,11 +45,11 @@ struct CanvasToolbar: View {
                     // 画笔工具特殊处理 - 弹出设置面板
                     PenToolButton(
                         tool: tool,
-                        isSelected: currentTool == tool,
+                        isSelected: stateManager.currentTool == tool,
                         showSettings: $showPenSettings,
                         onSelect: {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                currentTool = tool
+                                stateManager.currentTool = tool
                                 onToolChanged?(tool)
                             }
                         },
@@ -58,33 +58,31 @@ struct CanvasToolbar: View {
                     )
                     
                 case .text:
-                    // 文字工具特殊处理 - 弹出字体设置面板
-                    TextToolButton(
+                    // 文字工具 - 点击选中，长按/再次点击显示设置
+                    TextToolButtonView(
                         tool: tool,
-                        isSelected: currentTool == tool,
+                        isSelected: stateManager.currentTool == tool,
                         showSettings: $showFontSettings,
                         onSelect: {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                currentTool = tool
+                                stateManager.currentTool = tool
                                 onToolChanged?(tool)
                             }
-                        }
+                        },
+                        stateManager: stateManager
                     )
                     
                 default:
                     // 其他工具 - 普通按钮
                     ToolButton(
                         tool: tool,
-                        isSelected: currentTool == tool,
+                        isSelected: stateManager.currentTool == tool,
                         action: {
-                            print("🔧 [CanvasToolbar] 点击工具按钮: \(tool.displayName) (\(tool.rawValue))")
                             if tool == .image {
-                                print("🔧 [CanvasToolbar] 触发图片导入")
                                 onImageImport()
-                            } else {
-                                print("🔧 [CanvasToolbar] 切换到工具: \(tool.displayName)")
+                            } else if stateManager.currentTool != tool {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    currentTool = tool
+                                    stateManager.currentTool = tool
                                     onToolChanged?(tool)
                                 }
                             }
@@ -203,48 +201,14 @@ private struct PenToolButton: View {
     }
 }
 
-// MARK: - 图片工具按钮（带弹出选择器）
-
-private struct ImageToolButton: View {
-    let tool: CanvasTool
-    let isSelected: Bool
-    @Binding var showPicker: Bool
-    let onSelect: () -> Void
-    let onImageImport: () -> Void
-
-    var body: some View {
-        Button {
-            // 直接触发图片导入
-            onImageImport()
-        } label: {
-            Image(systemName: tool.iconName)
-                .font(.system(size: 22))
-                .foregroundColor(isSelected ? .white : Theme.Colors.secondaryText)
-                .frame(width: 40, height: 40)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
-                        .fill(isSelected ? Theme.Colors.brandBlue : Color.clear)
-                )
-                .scaleEffect(isSelected ? 1.05 : 1.0)
-        }
-        .buttonStyle(.plain)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
-        .help(tool.displayName)
-    }
-}
-
 // MARK: - 文字工具按钮（带弹出设置面板）
 
-private struct TextToolButton: View {
+private struct TextToolButtonView: View {
     let tool: CanvasTool
     let isSelected: Bool
     @Binding var showSettings: Bool
     let onSelect: () -> Void
-    
-    // 临时文字设置状态（仅用于弹窗显示）
-    @State private var tempFontName: String = ".SF Pro Display"
-    @State private var tempFontSize: CGFloat = 16
-    @State private var tempTextColor: Color = .black
+    let stateManager: CanvasStateManager
 
     var body: some View {
         Button {
@@ -270,22 +234,14 @@ private struct TextToolButton: View {
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
         .help(tool.displayName)
         .popover(isPresented: $showSettings, arrowEdge: .bottom) {
-            FontPickerPopover(
-                selectedFont: $tempFontName,
-                fontSize: $tempFontSize,
-                textColor: $tempTextColor,
-                onConfirm: {
-                    showSettings = false
-                    print("✅ [TextToolButton] 文字设置确认: 字体=\(tempFontName), 大小=\(tempFontSize), 颜色=\(tempTextColor)")
-                },
-                onFontChanged: { fontName, fontSize, textColor in
-                    print("🔧 [TextToolButton] 文字设置实时更新: 字体=\(fontName), 大小=\(fontSize), 颜色=\(textColor)")
-                    // TODO: 这里需要与CanvasStateManager同步
-                }
-            )
+            SimpleFontPickerPopover(stateManager: stateManager, onConfirm: {
+                showSettings = false
+            })
         }
     }
 }
+
+
 
 // MARK: - Preview
 
@@ -293,7 +249,7 @@ private struct TextToolButton: View {
     VStack {
         Spacer()
         CanvasToolbar(
-            currentTool: .constant(.select),
+            stateManager: CanvasStateManager(),
             onImageImport: { print("Import image") },
             onShapeSelected: { shape in print("Selected shape: \(shape.displayName)") },
             penColor: .constant(.black),
@@ -303,4 +259,3 @@ private struct TextToolButton: View {
     }
     .background(Color.gray.opacity(0.1))
 }
-
