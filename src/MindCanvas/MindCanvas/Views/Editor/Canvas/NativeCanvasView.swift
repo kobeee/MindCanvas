@@ -1591,7 +1591,15 @@ class NativeCanvasView: UIView {
     func removeText(id: UUID) {
         guard let text = textLayerManager.getText(id: id) else { return }
         textLayerManager.removeText(id: id)
-        textViews[id]?.removeFromSuperview()
+        
+        // 完全清理SelectableTextView实例
+        if let textView = textViews[id] {
+            // 移除键盘通知监听器
+            textView.removeKeyboardNotifications()
+            // 从父视图移除
+            textView.removeFromSuperview()
+        }
+        
         textViews.removeValue(forKey: id)
         onCanvasUpdated?()
     }
@@ -1994,10 +2002,27 @@ extension NativeCanvasView {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            print("🔧 [Canvas] 工具变化 - 重置所有文本键盘状态")
+            // 🔧 关键修复：工具切换时重置所有文本的键盘状态
+            self?.resetAllTextKeyboardStates()
+            
             if let tool = notification.object as? CanvasTool {
                 self?.updateForTool(tool)
             }
         }
+    }
+    
+    /// 重置所有文本的键盘状态
+    private func resetAllTextKeyboardStates() {
+        for (_, textView) in textViews {
+            if textView.isEditing {
+                print("🧹 [Canvas] 强制结束文本编辑: \(textView.textNode.id)")
+                textView.finishEditing()
+            }
+        }
+        
+        // 🔧 关键修复：重置全局静态状态
+        SelectableTextView.resetGlobalKeyboardState()
     }
 }
 

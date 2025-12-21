@@ -73,6 +73,14 @@ class SelectableTextView: UIView {
     // 占位符状态
     private var isShowingPlaceholder: Bool = false
     private let placeholderText = "输入文本"
+    
+    // 键盘定位状态
+    
+    // 全局状态跟踪（所有SelectableTextView实例共享）
+    private static var isKeyboardVisible = false
+    private static var originalContentOffset: CGPoint = .zero
+    private static var responsibleInstance: SelectableTextView? // 负责键盘定位的实例
+    private static var hasAdjustedForKeyboard = false
 
     // 手势
     private var panGesture: UIPanGestureRecognizer!
@@ -466,6 +474,17 @@ class SelectableTextView: UIView {
 
         isEditing = true
         onEditingStarted?(textNode)
+        
+        print("✏️ [TextView] 开始编辑 - 实例: \(ObjectIdentifier(self))")
+        print("✏️ [TextView] 编辑前全局状态 - hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard), responsibleInstance: \(Self.responsibleInstance != nil ? "\(ObjectIdentifier(Self.responsibleInstance!))" : "无")")
+
+        // 🔧 关键修复：每次开始新编辑时，重置全局状态
+        // 这确保每次编辑都是独立的会话
+        if Self.isKeyboardVisible {
+            print("⚠️ [TextView] 检测到键盘仍然显示，重置全局状态以避免冲突")
+            Self.hasAdjustedForKeyboard = false
+            Self.responsibleInstance = nil
+        }
 
         // 隐藏Label
         textLabel.isHidden = true
@@ -477,6 +496,8 @@ class SelectableTextView: UIView {
     /// 完成编辑文字
     func finishEditing() {
         guard isEditing else { return }
+        
+        print("✏️ [TextView] 完成编辑 - 实例: \(ObjectIdentifier(self))")
 
         let rawText = editingTextView?.text ?? ""
         let originalText = textNode.text
@@ -487,6 +508,13 @@ class SelectableTextView: UIView {
             newText = ""
         } else {
             newText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // 🔧 关键修复：如果当前实例是负责实例，主动清理状态
+        if Self.responsibleInstance === self {
+            print("🧹 [TextView] 清理负责实例状态")
+            Self.responsibleInstance = nil
+            Self.hasAdjustedForKeyboard = false
         }
 
         // 清理编辑视图
@@ -515,6 +543,55 @@ class SelectableTextView: UIView {
         }
         onNodeUpdated?(textNode)
     }
+    
+    /// 计算文本是否被键盘遮挡
+    private func calculateIfTextIsHidden(scrollView: UIScrollView, keyboardFrame: CGRect, textView: UITextView?) -> Bool {
+        guard let textView = textView else { return false }
+        guard let window = scrollView.window else { return false }
+        
+        // 计算键盘顶部在scrollView坐标系中的位置
+        let keyboardFrameInView = scrollView.convert(keyboardFrame, from: window)
+        let keyboardTopInView = keyboardFrameInView.minY
+        
+        // 计算文本框底部在scrollView坐标系中的位置
+        // textView直接添加在overlayContainerView中，需要正确转换坐标
+        let textViewFrameInView = scrollView.convert(textView.frame, from: textView.superview)
+        let textViewBottomInView = textViewFrameInView.maxY
+        
+        // 如果文本框底部低于键盘顶部，则被遮挡
+        return textViewBottomInView > keyboardTopInView
+    }
+    
+        
+    
+        /// 恢复画布位置（如果需要）
+    private func restoreCanvasPositionIfNeeded() {
+        // 只有在之前调整过位置时才恢复
+        guard Self.hasAdjustedForKeyboard else { return }
+        
+        guard let canvasView = findParentCanvasView() else { return }
+        
+        let scrollView = canvasView.pencilCanvas
+        let currentOffset = scrollView.contentOffset
+        
+        // 如果当前位置不等于原始位置，则恢复
+        if currentOffset != Self.originalContentOffset {
+            let animationDuration = 0.3
+            
+            UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut], animations: {
+                scrollView.setContentOffset(Self.originalContentOffset, animated: false)
+            }) { _ in
+                // 恢复完成后，更新UITextView位置并重置所有状态
+                self.updateTextViewPositionAfterScroll()
+                Self.hasAdjustedForKeyboard = false
+                Self.responsibleInstance = nil  // 重要：重置负责实例
+            }
+        } else {
+            // 即使不需要恢复位置，也要重置状态
+            Self.hasAdjustedForKeyboard = false
+            Self.responsibleInstance = nil  // 重要：重置负责实例
+        }
+    }
 
     /// Setup UITextView for editing - Refactored: Use independent editing container
     private func setupEditingTextView() {
@@ -540,8 +617,11 @@ class SelectableTextView: UIView {
     
     /// Create UITextView for true in-place editing
     private func createTextViewInIndependentContainer() {
+        // 开始创建编辑框
+        
         // Get NativeCanvasView reference
         guard let canvasView = findParentCanvasView() else {
+            print("❌ [TextView] 无法找到父级画布视图")
             return
         }
         
@@ -557,6 +637,8 @@ class SelectableTextView: UIView {
         let screenX = (finalTextPosition.x * canvasScale) - canvasContentOffset.x
         let screenY = (finalTextPosition.y * canvasScale) - canvasContentOffset.y
         
+        // TextView坐标计算完成
+        
         // Create UITextView with frame sized for "输入文本" placeholder
         let initialFrame = CGRect(
             x: screenX - 50,  // Increased width to accommodate "输入文本"
@@ -564,6 +646,8 @@ class SelectableTextView: UIView {
             width: 100,
             height: 40
         )
+        
+        // TextView初始frame设置完成
         
         let textView = UITextView(frame: initialFrame)
         
@@ -611,18 +695,30 @@ class SelectableTextView: UIView {
         canvasView.overlayContainerView.bringSubviewToFront(textView)
         editingTextView = textView
         
+        // TextView成功添加到overlayContainerView
+        // 视图frame设置完成
+        
         // Set up dynamic text sizing to match final text appearance
         setupDynamicTextSizing(for: textView)
 
         // Activate keyboard immediately for seamless in-place experience
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isEditing else { return }
-            guard let textView = self.editingTextView else { return }
+            guard let self = self, self.isEditing else { 
+                print("❌ [TextView] 键盘激活失败：编辑状态已改变")
+                return 
+            }
+            guard let textView = self.editingTextView else { 
+                print("❌ [TextView] 键盘激活失败：编辑视图不存在")
+                return 
+            }
 
+            // 开始激活键盘
             let success = textView.becomeFirstResponder()
+            // 键盘激活完成
 
             if success && !textView.text.isEmpty && !self.isShowingPlaceholder {
                 textView.selectAll(nil)
+                // 已选择现有文本
             }
         }
     }
@@ -684,6 +780,9 @@ class SelectableTextView: UIView {
         editingTextView?.resignFirstResponder()
         editingTextView?.removeFromSuperview()
         editingTextView = nil
+        
+        // 重置键盘状态（当前实例完成编辑，但键盘可能仍然显示）
+        // 注意：这里不重置Self.isKeyboardVisible，因为键盘可能仍然显示
     }
 
     /// 更新编辑状态
@@ -802,6 +901,15 @@ extension SelectableTextView: UITextViewDelegate {
 
 extension SelectableTextView {
     
+    /// 重置全局键盘状态（用于工具切换等场景）
+    static func resetGlobalKeyboardState() {
+        print("🔄 [Keyboard] 重置全局键盘状态")
+        isKeyboardVisible = false
+        hasAdjustedForKeyboard = false
+        originalContentOffset = .zero
+        responsibleInstance = nil
+    }
+    
     /// 设置键盘通知监听
     private func setupKeyboardNotifications() {
         NotificationCenter.default.addObserver(
@@ -820,50 +928,207 @@ extension SelectableTextView {
     }
     
     /// 移除键盘通知监听
-    private func removeKeyboardNotifications() {
+    func removeKeyboardNotifications() {
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
     
     @objc private func keyboardWillShow(notification: NSNotification) {
-        guard let keyboardSize = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        print("🎹 [Keyboard] 键盘弹出通知接收 - 实例: \(ObjectIdentifier(self))")
+        guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         guard let canvasView = findParentCanvasView() else { return }
         
-        let keyboardHeight = keyboardSize.height
+        // 标记键盘为显示状态（全局状态）
+        Self.isKeyboardVisible = true
+        print("🎹 [Keyboard] 全局状态 - isKeyboardVisible: \(Self.isKeyboardVisible), hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard)")
+        print("🎹 [Keyboard] 负责实例: \(Self.responsibleInstance != nil ? "\(ObjectIdentifier(Self.responsibleInstance!))" : "无"), 当前实例: \(ObjectIdentifier(self))")
         
-        // 计算文本框在画布坐标系中的位置
-        let textFrameInSelf = bounds.insetBy(dx: -20, dy: -20) // 扩大一些区域，确保完全可见
-        let textFrameInCanvas = convert(textFrameInSelf, to: canvasView.pencilCanvas)
+        // 获取键盘信息和动画时长
+        let keyboardScreenFrame = keyboardFrame
+        let animationDuration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.3
         
-        // 计算键盘在画布坐标系中的位置
-        let canvasVisibleRect = CGRect(
-            origin: canvasView.pencilCanvas.contentOffset,
-            size: canvasView.pencilCanvas.bounds.size
+        // 获取画布当前状态
+        let scrollView = canvasView.pencilCanvas
+        let currentScale = scrollView.zoomScale
+        let currentOffset = scrollView.contentOffset
+        let canvasBounds = scrollView.bounds
+        
+        // 检查文本是否被键盘遮挡
+        let isTextHidden = calculateIfTextIsHidden(
+            scrollView: scrollView,
+            keyboardFrame: keyboardScreenFrame,
+            textView: editingTextView
         )
-        let keyboardTopInCanvas = canvasVisibleRect.maxY - keyboardHeight
         
-        // 检查文本框是否被键盘遮挡
-        let textBottom = textFrameInCanvas.maxY
-        let additionalPadding: CGFloat = 80 // 额外的边距，确保文本框不会紧贴键盘
+        // 只有在文本被遮挡且尚未调整过位置时才继续执行调整逻辑
+        // 但不直接返回，让后面的代码处理所有情况
+        let shouldAdjust = isTextHidden && !Self.hasAdjustedForKeyboard
+        print("🎹 [Keyboard] 调整条件分析:")
+        print("   - 文本被遮挡: \(isTextHidden)")
+        print("   - 已调整过位置: \(Self.hasAdjustedForKeyboard)")
+        print("   - 应该调整: \(shouldAdjust)")
         
-        if textBottom > keyboardTopInCanvas {
-            // 计算需要滚动到的目标矩形
-            let targetRect = CGRect(
-                x: textFrameInCanvas.minX,
-                y: textFrameInCanvas.minY,
-                width: textFrameInCanvas.width,
-                height: textFrameInCanvas.height + additionalPadding
-            )
+        // 只有需要调整时才记录原始位置和执行调整
+        if shouldAdjust {
+            // 记录原始位置（只在第一次调整时记录）
+            Self.originalContentOffset = currentOffset
+            Self.responsibleInstance = self  // 记录负责的实例
+            Self.hasAdjustedForKeyboard = true
+            print("📍 [Keyboard] 记录原始位置: \(Self.originalContentOffset)")
+            print("📍 [Keyboard] 设置负责实例: \(ObjectIdentifier(self))")
+        } else {
+            print("⚠️ [Keyboard] 跳过调整 - 原因: 文本未遮挡(\(!isTextHidden)) 或 已调整过(\(Self.hasAdjustedForKeyboard))")
+        }
+        
+        // 计算键盘高度
+        let keyboardHeight = keyboardScreenFrame.height
+        
+        // 获取UITextView的位置
+        guard let textView = editingTextView else { return }
+        
+        // 关键修复：重新计算UITextView应该在的位置
+        // 基于textNode的画布坐标重新计算屏幕坐标
+        let textNodePosition = textNode.position
+        let screenX = (textNodePosition.x * currentScale) - currentOffset.x
+        let screenY = (textNodePosition.y * currentScale) - currentOffset.y
+        
+        // 更新UITextView位置，确保它跟随画布滚动
+        let textViewFrame = CGRect(
+            x: screenX - textView.frame.width / 2,
+            y: screenY - textView.frame.height / 2,
+            width: textView.frame.width,
+            height: textView.frame.height
+        )
+        textView.frame = textViewFrame
+        
+        // 将UITextView的位置转换到屏幕坐标系
+        guard let window = scrollView.window else { return }
+        let textViewFrameInWindow = textView.convert(textViewFrame, to: window)
+        
+        // 计算文本框底部在屏幕坐标系中的位置
+        let textViewBottomInScreen = textViewFrameInWindow.maxY
+        
+        // 计算键盘顶部在屏幕坐标系中的位置
+        let keyboardTopInScreen = window.bounds.height - keyboardHeight
+        
+        // 计算重叠量
+        let overlapAmount = textViewBottomInScreen - keyboardTopInScreen
+        
+        // 添加舒适的边距，但限制最大滚动距离
+        let comfortableMargin: CGFloat = 30
+        let maxScrollDistance = canvasBounds.height * 0.4 // 最多滚动40%的屏幕高度
+        let requiredOffset = min(max(0, overlapAmount + comfortableMargin), maxScrollDistance)
+        
+        // 键盘定位分析完成
+        
+        // 只有当文本框确实被键盘遮挡且需要调整时才进行调整
+        if shouldAdjust && overlapAmount > 0 {
+            // 计算需要滚动的距离（转换为画布坐标系）
+            let scrollOffset = requiredOffset / currentScale
             
-            // 使用scrollRectToVisible，这是Apple推荐的方法
-            UIView.animate(withDuration: 0.3, animations: {
-                canvasView.pencilCanvas.scrollRectToVisible(targetRect, animated: false)
-            })
+            // 计算新的contentOffset
+            let newOffsetY = currentOffset.y + scrollOffset
+            
+            // 确保不会过度滚动
+            let maxOffsetY = scrollView.contentSize.height - canvasBounds.height
+            let clampedOffsetY = min(newOffsetY, max(0, maxOffsetY))
+            
+            let newOffset = CGPoint(x: currentOffset.x, y: clampedOffsetY)
+            
+            // 执行键盘定位调整
+            
+            // 使用平滑动画进行滚动
+            UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut], animations: {
+                scrollView.setContentOffset(newOffset, animated: false)
+            }) { _ in
+                // 滚动完成后，再次更新UITextView位置
+                self.updateTextViewPositionAfterScroll()
+                // 键盘定位完成
+            }
+        } else {
+            // 文本框可见或已调整过，无需调整画布位置
+            //但仍需要更新UITextView位置，确保跟随画布
+            updateTextViewPositionAfterScroll()
         }
     }
     
+    /// 滚动后更新UITextView位置
+    private func updateTextViewPositionAfterScroll() {
+        guard let textView = editingTextView,
+              let canvasView = findParentCanvasView() else { return }
+        
+        let scrollView = canvasView.pencilCanvas
+        let currentScale = scrollView.zoomScale
+        let currentOffset = scrollView.contentOffset
+        
+        // 重新计算UITextView位置
+        let textNodePosition = textNode.position
+        let screenX = (textNodePosition.x * currentScale) - currentOffset.x
+        let screenY = (textNodePosition.y * currentScale) - currentOffset.y
+        
+        let updatedFrame = CGRect(
+            x: screenX - textView.frame.width / 2,
+            y: screenY - textView.frame.height / 2,
+            width: textView.frame.width,
+            height: textView.frame.height
+        )
+        
+        textView.frame = updatedFrame
+        // 滚动后位置更新完成
+    }
+    
     @objc private func keyboardWillHide(notification: NSNotification) {
-        // 键盘隐藏时可以恢复原来的滚动位置，这里暂时不处理
+        print("🎹 [Keyboard] 键盘隐藏通知接收 - 实例: \(ObjectIdentifier(self))")
+        print("🎹 [Keyboard] 当前负责实例: \(Self.responsibleInstance != nil ? "\(ObjectIdentifier(Self.responsibleInstance!))" : "无")")
+        
+        // 只有负责的实例才执行恢复逻辑
+        guard Self.responsibleInstance === self else { 
+            print("⚠️ [Keyboard] 跳过恢复 - 当前实例不是负责实例")
+            return 
+        }
+        guard let canvasView = findParentCanvasView() else { return }
+        
+        // 标记键盘为隐藏状态（全局状态）
+        Self.isKeyboardVisible = false
+        print("🎹 [Keyboard] 开始恢复位置 - 当前偏移: \(canvasView.pencilCanvas.contentOffset), 原始偏移: \(Self.originalContentOffset)")
+        
+        // 获取键盘隐藏动画时间
+        let animationDuration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.3
+        
+        // 键盘隐藏，开始恢复位置
+        
+        let scrollView = canvasView.pencilCanvas
+        let currentOffset = scrollView.contentOffset
+        
+        // 如果之前调整过位置，现在恢复到原始位置
+        if Self.hasAdjustedForKeyboard && currentOffset != Self.originalContentOffset {
+            // 恢复到原始位置
+            
+            // 使用平滑动画恢复到原始位置
+            UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut], animations: {
+                scrollView.setContentOffset(Self.originalContentOffset, animated: false)
+            }) { _ in
+                // 恢复完成后，更新UITextView位置并重置状态
+                self.updateTextViewPositionAfterScroll()
+                Self.hasAdjustedForKeyboard = false
+                Self.responsibleInstance = nil  // 清理负责实例
+                // 位置恢复完成
+            }
+        } else {
+            // 无需恢复位置
+            
+            // 即使不需要恢复滚动位置，也要更新UITextView位置
+            updateTextViewPositionAfterScroll()
+            
+            UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut]) {
+                // 无需调整
+            } completion: { _ in
+                // 关键修复：即使不需要恢复位置，也要重置状态标志
+                Self.hasAdjustedForKeyboard = false
+                Self.responsibleInstance = nil  // 清理负责实例
+                // 键盘隐藏处理完成
+            }
+        }
     }
     
     /// 查找父级的NativeCanvasView
