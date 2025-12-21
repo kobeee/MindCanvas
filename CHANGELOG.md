@@ -1,5 +1,125 @@
 # 开发记录
 
+## 2025-12-21 - 文本工具空文本占位符问题修复 ✅
+
+### 概述
+通过系统性分析和第一性原理排查，成功解决了文本工具空文本处理的核心问题：选择文本工具点击画布后，如果用户没有输入内容就收回键盘，画布不应该显示任何文本，但之前会出现默认的"输入文字"占位符。
+
+### 根本原因分析
+
+#### 核心问题：占位符被当作实际文本处理
+**问题根源**：UITextView中的占位符"输入文字"在`finishEditing()`时被错误地当作实际文本保存到TextLayerNode，导致空文本检查失效，对象不会被删除。
+
+**问题调用链路**：
+1. **创建阶段**：`createTextAtLocationWithEditing()` 创建空的 TextLayerNode（text=""）
+2. **编辑阶段**：`setupEditingTextView()` 设置 UITextView 占位符为"输入文字"
+3. **完成阶段**：`finishEditing()` 将占位符"输入文字"当作实际文本保存
+4. **显示阶段**：`updateTextLabel()` 直接显示包含占位符的文本内容
+
+### 修复方案
+
+#### 1. 引入占位符状态管理
+```swift
+// 占位符状态
+private var isShowingPlaceholder: Bool = false
+private let placeholderText = "输入文字"
+```
+
+#### 2. 修复setupEditingTextView方法
+**修复前**：
+```swift
+if textView.text.isEmpty {
+    textView.text = "输入文字"
+    textView.textColor = .systemGray
+}
+```
+
+**修复后**：
+```swift
+if textView.text.isEmpty {
+    textView.text = placeholderText
+    textView.textColor = .systemGray
+    isShowingPlaceholder = true  // 标记为占位符状态
+}
+```
+
+#### 3. 修复finishEditing方法
+**关键修复**：基于占位符状态正确判断空文本
+```swift
+// 处理占位符情况：如果显示的是占位符，则视为空文本
+let newText: String
+if isShowingPlaceholder || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    newText = ""
+} else {
+    newText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+if newText.isEmpty {
+    onEditingFinished?(textNode, "") // 空字符串表示需要删除
+    return
+}
+```
+
+#### 4. 增强UITextViewDelegate方法
+**新增逻辑**：用户开始输入时自动清除占位符
+```swift
+func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+    // 处理占位符：如果当前显示占位符且用户开始输入，清除占位符
+    if isShowingPlaceholder && !text.isEmpty {
+        textView.text = ""
+        textView.textColor = .black
+        isShowingPlaceholder = false
+    }
+    // ...
+}
+```
+
+### 调试日志增强
+
+添加了完整的调试日志系统来追踪空文本创建流程：
+- **setupEditingTextView日志**：追踪占位符设置过程
+- **finishEditing日志**：追踪空文本判断和删除请求
+- **UITextViewDelegate日志**：追踪用户输入和占位符清除
+
+### 修复效果
+
+#### 修复前的问题
+- ❌ 空文本显示"输入文字"占位符
+- ❌ 收回键盘后文本对象不被删除
+- ❌ 画布上积累大量无意义的占位符文本
+
+#### 修复后的效果
+- ✅ 空文本不显示任何内容
+- ✅ 收回键盘后空文本对象被自动删除
+- ✅ 画布保持干净，只有用户实际输入的文本
+
+### 技术亮点
+
+#### 1. 状态驱动的占位符管理
+通过`isShowingPlaceholder`状态明确区分占位符和实际内容，避免了字符串比较的不可靠性。
+
+#### 2. 用户友好的交互体验
+占位符提示用户输入，但不影响最终结果；用户输入时自动清除占位符，体验流畅。
+
+#### 3. 完整的调试支持
+详细的日志追踪，便于问题排查和状态变化监控。
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `SelectableTextView.swift` | 核心修复 | 添加占位符状态管理，修复空文本处理逻辑 |
+
+### 验证标准
+
+- [x] 选择文本工具，点击画布创建文本
+- [x] 不输入任何内容，点击收回键盘
+- [x] 画布上不应该显示任何文本
+- [x] 文本对象应该被自动删除
+- [x] 输入实际内容后，文本正常显示和保存
+
+---
+
 ## 2025-12-21 - 文本工具核心功能修复完成
 
 ### 概述

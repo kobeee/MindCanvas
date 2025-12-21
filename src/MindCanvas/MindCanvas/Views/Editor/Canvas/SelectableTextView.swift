@@ -69,6 +69,10 @@ class SelectableTextView: UIView {
     var isEditing: Bool = false {
         didSet { updateEditingState() }
     }
+    
+    // 占位符状态
+    private var isShowingPlaceholder: Bool = false
+    private let placeholderText = "输入文字"
 
     // 手势
     private var panGesture: UIPanGestureRecognizer!
@@ -474,8 +478,23 @@ class SelectableTextView: UIView {
     func finishEditing() {
         guard isEditing else { return }
 
-        let newText = editingTextView?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawText = editingTextView?.text ?? ""
         let originalText = textNode.text
+        
+        print("🔍 [SelectableTextView] finishEditing 开始")
+        print("🔍 [SelectableTextView] 原始文本: '\(rawText)'")
+        print("🔍 [SelectableTextView] 占位符状态: \(isShowingPlaceholder)")
+        print("🔍 [SelectableTextView] 节点原文本: '\(originalText)'")
+
+        // 处理占位符情况：如果显示的是占位符，则视为空文本
+        let newText: String
+        if isShowingPlaceholder || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            newText = ""
+            print("🔍 [SelectableTextView] 检测到占位符或空文本，设置为空字符串")
+        } else {
+            newText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("🔍 [SelectableTextView] 实际文本内容: '\(newText)'")
+        }
 
         // 清理编辑视图
         cleanupEditingTextView()
@@ -483,9 +502,11 @@ class SelectableTextView: UIView {
         // 显示Label
         textLabel.isHidden = false
         isEditing = false
+        isShowingPlaceholder = false
 
         // 如果文本为空，通过回调通知删除该对象
         if newText.isEmpty {
+            print("🔍 [SelectableTextView] 文本为空，请求删除对象")
             onEditingFinished?(textNode, "") // 空字符串表示需要删除
             return
         }
@@ -564,8 +585,14 @@ class SelectableTextView: UIView {
         
         // 添加占位符文本
         if textView.text.isEmpty {
-            textView.text = "输入文字"
+            print("🔍 [SelectableTextView] 设置占位符 - 原始文本为空")
+            textView.text = placeholderText
             textView.textColor = .systemGray
+            isShowingPlaceholder = true
+            print("🔍 [SelectableTextView] 占位符已设置: '\(textView.text ?? "nil")', isShowingPlaceholder: \(isShowingPlaceholder)")
+        } else {
+            print("🔍 [SelectableTextView] 无需设置占位符 - 原始文本: '\(textView.text ?? "nil")'")
+            isShowingPlaceholder = false
         }
 
         print("✅ [SelectableTextView] UITextView 已创建并配置")
@@ -648,6 +675,14 @@ class SelectableTextView: UIView {
 extension SelectableTextView: UITextViewDelegate {
 
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        // 处理占位符：如果当前显示占位符且用户开始输入，清除占位符
+        if isShowingPlaceholder && !text.isEmpty {
+            print("🔍 [SelectableTextView] 用户开始输入，清除占位符")
+            textView.text = ""
+            textView.textColor = .black
+            isShowingPlaceholder = false
+        }
+        
         // 回车键完成编辑
         if text == "\n" {
             finishEditing()
@@ -663,7 +698,12 @@ extension SelectableTextView: UITextViewDelegate {
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
-        // 编辑开始
+        print("🔍 [SelectableTextView] textViewDidBeginEditing - 当前文本: '\(textView.text ?? "nil")'")
+        
+        // 如果当前显示占位符，准备清除
+        if isShowingPlaceholder {
+            print("🔍 [SelectableTextView] 检测到占位符状态，准备清除")
+        }
     }
 }
 
