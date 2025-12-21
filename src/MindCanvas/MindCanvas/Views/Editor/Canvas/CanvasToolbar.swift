@@ -81,6 +81,9 @@ struct CanvasToolbar: View {
                             if tool == .image {
                                 onImageImport()
                             } else if stateManager.currentTool != tool {
+                                // 切换工具时清除选中状态
+                                stateManager.clearSelection()
+
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     stateManager.currentTool = tool
                                     onToolChanged?(tool)

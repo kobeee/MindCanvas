@@ -29,20 +29,21 @@ enum TextControlHandle: Int, CaseIterable {
     }
 }
 
-/// 可选择的文本视图（支持控制点交互）
-/// 完整实现 - 支持选择、移动、旋转、缩放和双击编辑功能
+/// 可选择的文本视图（重构版）
+/// 使用UILabel渲染文字，UITextView进行编辑
 class SelectableTextView: UIView {
 
     // MARK: - Properties
 
     var textNode: TextLayerNode {
-        didSet {
-            updateFromNode()
-        }
+        didSet { updateFromNode() }
     }
 
-    // 文本图层
-    private let textLayer = CATextLayer()
+    // 显示层 - 使用UILabel替代CATextLayer
+    private let textLabel = UILabel()
+
+    // 编辑层 - 使用UITextView替代UITextField
+    private var editingTextView: UITextView?
 
     // 选中边框
     private let selectionBorder = CAShapeLayer()
@@ -61,16 +62,12 @@ class SelectableTextView: UIView {
 
     // 选中状态
     var isSelected: Bool = false {
-        didSet {
-            updateSelectionAppearance()
-        }
+        didSet { updateSelectionAppearance() }
     }
 
     // 编辑状态
     var isEditing: Bool = false {
-        didSet {
-            updateEditingState()
-        }
+        didSet { updateEditingState() }
     }
 
     // 手势
@@ -86,12 +83,6 @@ class SelectableTextView: UIView {
     private var initialNode: TextLayerNode?
     private var dragStartPoint: CGPoint = .zero
 
-    // 编辑相关
-    private var editingTextField: UITextField!
-    private var editingOverlay: UIView!
-    private var originalText: String = ""
-    private var editingStartText: TextLayerNode?
-
     // 回调
     var onNodeUpdated: ((TextLayerNode) -> Void)?
     var onSelected: ((UUID) -> Void)?
@@ -104,10 +95,17 @@ class SelectableTextView: UIView {
 
     init(textNode: TextLayerNode) {
         self.textNode = textNode
-        let bounds = textNode.bounds
-        super.init(frame: bounds)
+        // 修复：使用size初始化frame，不包含position信息
+        // position通过center设置，而不是通过frame.origin
+        let textBounds = textNode.bounds
+        let size = textBounds.size
+        super.init(frame: CGRect(origin: .zero, size: size))
+
         setupViews()
         setupGestures()
+
+        // 设置center位置（必须在添加到父视图后生效）
+        // updateFromNode会正确设置center
         updateFromNode()
     }
 
@@ -122,13 +120,18 @@ class SelectableTextView: UIView {
         isOpaque = false
         clipsToBounds = false
 
-        // 配置文本图层
-        textLayer.contentsScale = UIScreen.main.scale
-        textLayer.alignmentMode = .center
-        textLayer.isWrapped = true
-        layer.addSublayer(textLayer)
+        // 配置UILabel - 替代CATextLayer
+        textLabel.textAlignment = .center
+        textLabel.numberOfLines = 0
+        textLabel.backgroundColor = .clear
+        textLabel.isUserInteractionEnabled = false
+        addSubview(textLabel)
 
         // 添加选中边框
+        selectionBorder.fillColor = UIColor.clear.cgColor
+        selectionBorder.strokeColor = UIColor.systemBlue.cgColor
+        selectionBorder.lineWidth = 1.5
+        selectionBorder.lineDashPattern = [4, 4]
         layer.addSublayer(selectionBorder)
 
         // 添加旋转连接线
@@ -152,8 +155,6 @@ class SelectableTextView: UIView {
             layer.addSublayer(handleLayer)
             cornerHandleLayers.append(handleLayer)
         }
-
-        updateSelectionStyle()
     }
 
     private func setupGestures() {
@@ -175,57 +176,44 @@ class SelectableTextView: UIView {
         addGestureRecognizer(panGesture)
     }
 
-    private func updateSelectionStyle() {
-        // 选中边框样式
-        selectionBorder.fillColor = UIColor.clear.cgColor
-        selectionBorder.strokeColor = UIColor.systemBlue.cgColor
-        selectionBorder.lineWidth = 1.5
-        selectionBorder.lineDashPattern = [4, 4]
-        
-        // 控制点样式
-        for handleLayer in cornerHandleLayers {
-            handleLayer.fillColor = UIColor.white.cgColor
-            handleLayer.strokeColor = UIColor.systemBlue.cgColor
-            handleLayer.lineWidth = 2
-        }
-        
-        // 旋转连接线样式
-        rotationLineLayer.fillColor = UIColor.clear.cgColor
-        rotationLineLayer.strokeColor = UIColor.systemBlue.cgColor
-        rotationLineLayer.lineWidth = 1.5
-        
-        // 旋转手柄样式
-        rotationHandleLayer.fillColor = UIColor.white.cgColor
-        rotationHandleLayer.strokeColor = UIColor.systemBlue.cgColor
-        rotationHandleLayer.lineWidth = 2
-    }
-
     // MARK: - Update Methods
 
     func updateFromNode() {
+        // 重置transform以便正确计算
         transform = .identity
-
-        // 更新文本图层
-        textLayer.string = textNode.text
-
-        let font = UIFont(name: textNode.fontName, size: textNode.fontSize * textNode.scale)
-            ?? UIFont.systemFont(ofSize: textNode.fontSize * textNode.scale)
-        textLayer.font = font.fontName as CFString
-        textLayer.fontSize = font.pointSize
-        textLayer.foregroundColor = UIColor_fromHex(textNode.color).cgColor
 
         // 计算边界
         let textBounds = textNode.bounds
         bounds = CGRect(origin: .zero, size: textBounds.size)
         center = textNode.position
 
-        // 更新文本图层位置
-        textLayer.frame = bounds
+        // 更新UILabel
+        updateTextLabel()
 
         // 应用旋转
         transform = CGAffineTransform(rotationAngle: textNode.rotation)
 
+        // 更新选中外观
         updateSelectionAppearance()
+    }
+
+    private func updateTextLabel() {
+        // 设置文字内容
+        if textNode.text.isEmpty {
+            textLabel.text = "输入文字"
+            textLabel.textColor = .systemGray
+        } else {
+            textLabel.text = textNode.text
+            textLabel.textColor = UIColor(hex: textNode.color) ?? .black
+        }
+
+        // 设置字体
+        let font = UIFont(name: textNode.fontName, size: textNode.fontSize * textNode.scale)
+            ?? UIFont.systemFont(ofSize: textNode.fontSize * textNode.scale)
+        textLabel.font = font
+
+        // 设置frame - 确保UILabel填满整个bounds
+        textLabel.frame = bounds
     }
 
     private func syncToNode() {
@@ -234,8 +222,8 @@ class SelectableTextView: UIView {
         textNode = textNode.updated(
             position: center,
             rotation: currentRotation
-            // scale 已在 handleResize 中更新
         )
+
         onNodeUpdated?(textNode)
     }
 
@@ -325,26 +313,31 @@ class SelectableTextView: UIView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        // 1. 首先检查触摸点是否在原始bounds内（精确点击）
+        // 1. 编辑状态：扩大点击区域，包含 UITextView
+        if isEditing {
+            let expandedBounds = bounds.insetBy(dx: -20, dy: -20)
+            return expandedBounds.contains(point)
+        }
+
+        // 2. 在原始 bounds 内
         if bounds.contains(point) {
             return true
         }
-        
-        // 2. 只有在选中状态下才扩展控制点区域
-        guard isSelected && !isEditing else { 
+
+        // 3. 选中状态：检查控制点区域
+        guard isSelected else {
             return false
         }
-        
-        // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+
         let controlPointHitRadius: CGFloat = 22
-        
-        // 检查旋转手柄区域
+
+        // 检查旋转手柄
         let rotationPos = TextControlHandle.rotation.position(in: bounds, rotationOffset: rotationHandleOffset)
         if distance(from: point, to: rotationPos) <= controlPointHitRadius {
             return true
         }
-        
-        // 检查角点控制点区域
+
+        // 检查角点
         let corners: [TextControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
         for corner in corners {
             let cornerPos = corner.position(in: bounds)
@@ -352,8 +345,7 @@ class SelectableTextView: UIView {
                 return true
             }
         }
-        
-        // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+
         return false
     }
 
@@ -371,6 +363,7 @@ class SelectableTextView: UIView {
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let locationInSelf = gesture.location(in: self)
+        let locationInSuperview = gesture.location(in: superview)
 
         switch gesture.state {
         case .began:
@@ -378,6 +371,7 @@ class SelectableTextView: UIView {
             onOperationStart?(textNode)
 
             activeHandle = hitTestHandle(at: locationInSelf)
+
             initialCenter = center
             initialBounds = bounds
             initialRotation = atan2(transform.b, transform.a)
@@ -407,7 +401,7 @@ class SelectableTextView: UIView {
 
         case .ended, .cancelled:
             syncToNode()
-            if let initial = initialNode {
+            if initialNode != nil {
                 onOperationEnd?(self, textNode)
             }
             activeHandle = nil
@@ -454,7 +448,7 @@ class SelectableTextView: UIView {
         // 重新计算边界
         let textBounds = textNode.bounds
         bounds = CGRect(origin: .zero, size: textBounds.size)
-        textLayer.frame = bounds
+        textLabel.frame = bounds
 
         // 保持旋转角度
         transform = CGAffineTransform(rotationAngle: initialRotation)
@@ -465,126 +459,114 @@ class SelectableTextView: UIView {
     // MARK: - Editing Methods
 
     /// 开始编辑文字
-    private func startEditing() {
+    func startEditing() {
         guard !isEditing else { return }
-        
+
         isEditing = true
-        originalText = textNode.text
-        editingStartText = textNode
-        
         onEditingStarted?(textNode)
-        
-        // 创建编辑界面
-        setupEditingInterface()
-        
-        // 添加动画效果
-        animateEditingStart()
+
+        // 隐藏Label
+        textLabel.isHidden = true
+
+        // 创建UITextView
+        setupEditingTextView()
     }
 
     /// 完成编辑文字
-    private func finishEditing() {
+    func finishEditing() {
         guard isEditing else { return }
-        
-        let newText = editingTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        
-        // 如果文字为空，恢复原文字
-        if newText.isEmpty {
-            cancelEditing()
-            return
-        }
-        
-        // 如果文字有变化，更新节点
+
+        let newText = editingTextView?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let originalText = textNode.text
+
+        // 更新节点
+        textNode = textNode.updated(text: newText)
+
+        // 清理编辑视图
+        cleanupEditingTextView()
+
+        // 显示Label
+        textLabel.isHidden = false
+        isEditing = false
+
+        // 更新显示
+        updateFromNode()
+
+        // 回调
         if newText != originalText {
-            let updatedNode = textNode.updated(text: newText)
-            textNode = updatedNode
-            syncToNode()
             onEditingFinished?(textNode, newText)
         }
-        
-        cleanupEditingInterface()
-        isEditing = false
-        editingStartText = nil
-        
-        // 添加完成动画
-        animateEditingEnd()
+        onNodeUpdated?(textNode)
     }
 
-    /// 取消编辑
-    private func cancelEditing() {
-        guard isEditing else { return }
-        
-        cleanupEditingInterface()
-        isEditing = false
-        editingStartText = nil
-        
-        // 添加取消动画
-        animateEditingEnd()
-    }
+    /// 设置编辑用的UITextView
+    private func setupEditingTextView() {
+        // 安全检查
+        guard bounds.width >= 10 && bounds.height >= 10 else {
+            isEditing = false
+            textLabel.isHidden = false
+            return
+        }
 
-    /// 设置编辑界面
-    private func setupEditingInterface() {
-        // 创建半透明遮罩层
-        editingOverlay = UIView(frame: bounds)
-        editingOverlay.backgroundColor = UIColor.black.withAlphaComponent(0.1)
-        editingOverlay.layer.cornerRadius = 8
-        editingOverlay.layer.borderWidth = 2
-        editingOverlay.layer.borderColor = UIColor.systemBlue.cgColor
-        addSubview(editingOverlay)
+        guard window != nil else {
+            isEditing = false
+            textLabel.isHidden = false
+            return
+        }
 
-        // 创建文本输入框
-        editingTextField = UITextField()
-        editingTextField.text = textNode.text
-        editingTextField.font = UIFont(name: textNode.fontName, size: textNode.fontSize)
-        editingTextField.textColor = UIColor_fromHex(textNode.color)
-        editingTextField.textAlignment = .center
-        editingTextField.backgroundColor = UIColor.white.withAlphaComponent(0.95)
-        editingTextField.layer.cornerRadius = 6
-        editingTextField.layer.borderWidth = 1
-        editingTextField.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.3).cgColor
-        editingTextField.delegate = self
-        
-        // 设置输入框样式
-        editingTextField.layer.shadowColor = UIColor.black.cgColor
-        editingTextField.layer.shadowOffset = CGSize(width: 0, height: 2)
-        editingTextField.layer.shadowOpacity = 0.1
-        editingTextField.layer.shadowRadius = 4
-        editingTextField.layer.masksToBounds = false
-        
-        // 添加内边距
-        let paddingView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: textNode.fontSize + 8))
-        editingTextField.leftView = paddingView
-        editingTextField.leftViewMode = .always
-        editingTextField.rightView = paddingView
-        editingTextField.rightViewMode = .always
-        
-        addSubview(editingTextField)
-        
-        // 设置约束
-        editingTextField.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            editingTextField.centerXAnchor.constraint(equalTo: centerXAnchor),
-            editingTextField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            editingTextField.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
-            editingTextField.heightAnchor.constraint(equalToConstant: textNode.fontSize + 16)
-        ])
-        
-        // 成为第一响应者
-        editingTextField.becomeFirstResponder()
-        
-        // 选中全部文字
-        DispatchQueue.main.async {
-            self.editingTextField.selectAll(nil)
+        // 创建UITextView - 稍微扩大一点以提供编辑空间
+        let textViewFrame = bounds.insetBy(dx: -8, dy: -8)
+        let textView = UITextView(frame: textViewFrame)
+
+        // 配置UITextView
+        textView.text = textNode.text
+        textView.font = textLabel.font
+        textView.textColor = textNode.text.isEmpty ? .black : textLabel.textColor
+        textView.textAlignment = .center
+        textView.backgroundColor = UIColor.white.withAlphaComponent(0.95)
+        textView.layer.cornerRadius = 8
+        textView.layer.borderWidth = 2
+        textView.layer.borderColor = UIColor.systemBlue.cgColor
+        textView.delegate = self
+        textView.autocorrectionType = .no
+        textView.spellCheckingType = .no
+        textView.returnKeyType = .done
+        textView.tintColor = .systemBlue
+
+        // 设置阴影
+        textView.layer.shadowColor = UIColor.black.cgColor
+        textView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        textView.layer.shadowOpacity = 0.15
+        textView.layer.shadowRadius = 6
+        textView.layer.masksToBounds = false
+
+        addSubview(textView)
+        editingTextView = textView
+
+        // 延迟激活键盘
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self = self, self.isEditing else { return }
+            guard let textView = self.editingTextView else { return }
+            guard textView.window != nil else { return }
+
+            let success = textView.becomeFirstResponder()
+
+            if success && !textView.text.isEmpty {
+                textView.selectAll(nil)
+            } else if !success {
+                // 失败重试
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    textView.becomeFirstResponder()
+                }
+            }
         }
     }
 
-    /// 清理编辑界面
-    private func cleanupEditingInterface() {
-        editingTextField?.resignFirstResponder()
-        editingTextField?.removeFromSuperview()
-        editingTextField = nil
-        
-        editingOverlay?.removeFromSuperview()
-        editingOverlay = nil
+    /// 清理编辑用的UITextView
+    private func cleanupEditingTextView() {
+        editingTextView?.resignFirstResponder()
+        editingTextView?.removeFromSuperview()
+        editingTextView = nil
     }
 
     /// 更新编辑状态
@@ -592,31 +574,13 @@ class SelectableTextView: UIView {
         if isEditing {
             // 编辑状态下隐藏选中边框
             selectionBorder.isHidden = true
-            
             // 禁用拖拽手势
             panGesture.isEnabled = false
         } else {
             // 恢复选中状态显示
             updateSelectionAppearance()
-            
             // 启用拖拽手势
             panGesture.isEnabled = true
-        }
-    }
-
-    /// 编辑开始动画
-    private func animateEditingStart() {
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
-            self.transform = self.transform.scaledBy(x: 1.05, y: 1.05)
-            self.editingOverlay?.alpha = 1.0
-        }
-    }
-
-    /// 编辑结束动画
-    private func animateEditingEnd() {
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn]) {
-            self.transform = CGAffineTransform(rotationAngle: self.textNode.rotation)
-            self.editingOverlay?.alpha = 0.0
         }
     }
 
@@ -641,27 +605,27 @@ class SelectableTextView: UIView {
     }
 }
 
-// MARK: - UITextFieldDelegate
+// MARK: - UITextViewDelegate
 
-extension SelectableTextView: UITextFieldDelegate {
-    
-    /// 文本输入完成（按回车键）
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        finishEditing()
+extension SelectableTextView: UITextViewDelegate {
+
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        // 回车键完成编辑
+        if text == "\n" {
+            finishEditing()
+            return false
+        }
         return true
     }
-    
-    /// 文本内容变化
-    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-        // 实时更新预览（可选）
-        return true
-    }
-    
-    /// 点击输入框外部时完成编辑
-    func textFieldDidEndEditing(_ textField: UITextField) {
+
+    func textViewDidEndEditing(_ textView: UITextView) {
         if isEditing {
             finishEditing()
         }
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        // 编辑开始
     }
 }
 
@@ -683,5 +647,34 @@ extension SelectableTextView: UIGestureRecognizerDelegate {
         tapGesture.isEnabled = false
         doubleTapGesture.isEnabled = false
         panGesture.isEnabled = false
+    }
+}
+
+// MARK: - UIColor Extension
+
+extension UIColor {
+    convenience init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+
+        let r, g, b, a: UInt64
+        switch hex.count {
+        case 3:
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6:
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8:
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            return nil
+        }
+
+        self.init(
+            red: CGFloat(r) / 255,
+            green: CGFloat(g) / 255,
+            blue: CGFloat(b) / 255,
+            alpha: CGFloat(a) / 255
+        )
     }
 }

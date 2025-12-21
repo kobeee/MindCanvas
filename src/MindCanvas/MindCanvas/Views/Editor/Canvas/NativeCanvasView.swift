@@ -41,6 +41,9 @@ class NativeCanvasView: UIView {
     /// Layer 1.5: 覆盖层容器视图（与 pencilCanvas 同级，用于承载箭头等对象）
     private let overlayContainerView = UIView()
 
+    /// Layer 3: 文字覆盖层 - 完全独立于 objectLayerView
+    private let textOverlayView = UIView()
+
     /// Layer 2: PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
     var pencilCanvas = PKCanvasView()
 
@@ -116,6 +119,9 @@ class NativeCanvasView: UIView {
     /// 文字图层管理器
     private let textLayerManager = TextLayerManager()
 
+    /// 工具变化观察器
+    private var toolChangeObserver: NSObjectProtocol?
+
     /// 空白区域点击手势识别器
     private lazy var canvasTapGesture: DebugTapGestureRecognizer = {
         let tap = DebugTapGestureRecognizer(target: self, action: #selector(handleCanvasTap(_:)))
@@ -124,8 +130,7 @@ class NativeCanvasView: UIView {
         return tap
     }()
     
-    /// 全局点击监听器（用于监听画布外的点击）
-    private var globalTapObserver: NSObjectProtocol?
+    
 
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
@@ -223,19 +228,27 @@ class NativeCanvasView: UIView {
         objectLayerView.clipsToBounds = false
         objectLayerView.isOpaque = false
 
+        // 新增：配置文字覆盖层
+        textOverlayView.backgroundColor = .clear
+        textOverlayView.isUserInteractionEnabled = true
+        textOverlayView.clipsToBounds = false
+        textOverlayView.isOpaque = false
+        textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)
+
         // 添加视图层级
         addSubview(pencilCanvas)
         addSubview(overlayContainerView)  // 覆盖在 pencilCanvas 上方
         overlayContainerView.addSubview(objectLayerView)
+        addSubview(textOverlayView)  // 新增：作为最顶层
 
         // 添加空白区域点击手势识别器
         addGestureRecognizer(canvasTapGesture)
         
-        // 设置全局点击监听器
-        setupGlobalTapObserver()
-        
         // 设置选中状态同步监听器
         setupSelectionSyncObserver()
+        
+        // 设置工具变化监听器
+        setupToolObserver()
 
         // 初始化完成后设置状态
         DispatchQueue.main.async { [weak self] in
@@ -249,6 +262,7 @@ class NativeCanvasView: UIView {
     private func setupConstraints() {
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
         overlayContainerView.translatesAutoresizingMaskIntoConstraints = false
+        textOverlayView.translatesAutoresizingMaskIntoConstraints = false  // 新增
 
         NSLayoutConstraint.activate([
             // pencilCanvas 填满整个视图
@@ -261,7 +275,13 @@ class NativeCanvasView: UIView {
             overlayContainerView.topAnchor.constraint(equalTo: topAnchor),
             overlayContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             overlayContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // 新增：textOverlayView 约束
+            textOverlayView.topAnchor.constraint(equalTo: topAnchor),
+            textOverlayView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textOverlayView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textOverlayView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -269,6 +289,7 @@ class NativeCanvasView: UIView {
         super.layoutSubviews()
         // 对象图层始终保持画布大小
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
+        textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)  // 新增
         // 同步覆盖层变换
         syncOverlayTransform()
     }
@@ -278,14 +299,16 @@ class NativeCanvasView: UIView {
         let offset = pencilCanvas.contentOffset
         let scale = pencilCanvas.zoomScale
 
-        // 计算 objectLayerView 应该的变换
-        // 原点移动 = -contentOffset
-        // 缩放 = zoomScale
+        // objectLayerView 变换（保持不变）
         objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
         objectLayerView.frame.origin = CGPoint(
             x: -offset.x,
             y: -offset.y
         )
+
+        // 新增：textOverlayView 变换（与 objectLayerView 同步）
+        textOverlayView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        textOverlayView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
     }
 
     // MARK: - Canvas Control
@@ -647,19 +670,27 @@ class NativeCanvasView: UIView {
 
     /// 处理画布点击事件（用于空白区域取消选中或创建文字）
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
-        let location = gesture.location(in: objectLayerView)
-        
-        // 检查点击是否在任何对象上
-        let hitView = objectLayerView.hitTest(location, with: nil)
-        
-        // 如果是文字工具且点击在空白区域，创建新文字
-        if currentTool == .text && (hitView == objectLayerView || !isSelectableObject(hitView)) {
-            createTextAtLocation(location)
+        // 文字工具模式
+        if currentTool == .text {
+            // 获取objectLayerView中的坐标（文字视图现在也在这里）
+            let location = gesture.location(in: objectLayerView)
+            let hitView = objectLayerView.hitTest(location, with: nil)
+
+            // 如果点击在已有文字上，让其自己处理
+            if hitView is SelectableTextView {
+                return
+            }
+
+            // 点击空白区域创建新文字
+            createTextAtLocationWithEditing(location)
             return
         }
-        
-        // 如果点击的是objectLayerView本身（空白区域）或其直接子视图不是可选对象，取消选中
-        if hitView == objectLayerView || (!isSelectableObject(hitView)) {
+
+        // 其他工具：点击空白取消选中
+        let location = gesture.location(in: objectLayerView)
+        let hitView = objectLayerView.hitTest(location, with: nil)
+
+        if hitView == objectLayerView || !isSelectableObject(hitView) {
             selectedNodeID = nil
         }
     }
@@ -678,13 +709,11 @@ class NativeCanvasView: UIView {
             fontSize = stateManager.textFontSize
             textColor = stateManager.textColor
             fontName = stateManager.textFontName
-            print("✅ [NativeCanvasView] 从CanvasStateManager获取文字设置: 字体=\(fontName ?? "默认"), 大小=\(fontSize), 颜色=\(textColor)")
         } else {
             // 如果没有CanvasStateManager，使用默认值
             fontSize = 24
             textColor = "#000000"
             fontName = ".SF Pro Display"
-            print("⚠️ [NativeCanvasView] CanvasStateManager不可用，使用默认文字设置")
         }
         
         // 创建文字
@@ -704,8 +733,40 @@ class NativeCanvasView: UIView {
         
         // 自动选中新创建的文字
         selectedNodeID = text.id
-        
-        print("✏️ [NativeCanvasView] 创建文字: \(text.id) at \(contentLocation), 字体=\(fontName ?? "默认"), 大小=\(fontSize), 颜色=\(textColor)")
+    }
+    
+    /// 在指定位置创建文字并立即进入编辑模式
+    private func createTextAtLocationWithEditing(_ location: CGPoint) {
+        // location是objectLayerView坐标系中的位置
+        // 由于objectLayerView已经应用了transform(scale)，location直接就是画布内容坐标
+        // 不需要再进行额外的坐标转换
+        let contentLocation = location
+
+        let fontSize = stateManager?.textFontSize ?? 24
+        let textColor = stateManager?.textColor ?? "#000000"
+        let fontName = stateManager?.textFontName ?? ".SF Pro Display"
+
+        let text = TextLayerNode(
+            position: contentLocation,
+            text: "",
+            fontSize: fontSize,
+            color: textColor,
+            fontName: fontName,
+            rotation: 0,
+            scale: 1.0,
+            zIndex: textLayerManager.getNextZIndex()
+        )
+
+        addText(text)
+        selectedNodeID = text.id
+
+        // 自动开始编辑
+        if let textView = textViews[text.id] {
+            // 确保视图布局完成后再开始编辑
+            DispatchQueue.main.async {
+                textView.startEditing()
+            }
+        }
     }
     
     /// 将视图坐标转换为画布内容坐标
@@ -728,6 +789,67 @@ class NativeCanvasView: UIView {
                view is SelectableShapeView ||
                view is SelectableTextView
     }
+    
+    /// 打印视图层次结构（调试用）
+    private func printHierarchy(_ view: UIView, level: Int) {
+        let indent = String(repeating: "  ", count: level)
+        let viewInfo = "\(type(of: view))"
+        let frameInfo = "frame: \(view.frame)"
+        let hiddenInfo = view.isHidden ? "hidden" : "visible"
+        let interactionInfo = view.isUserInteractionEnabled ? "enabled" : "disabled"
+        
+        print("\(indent)- \(viewInfo) (\(frameInfo), \(hiddenInfo), \(interactionInfo))")
+        
+        for subview in view.subviews {
+            printHierarchy(subview, level: level + 1)
+        }
+    }
+    
+    /// 打印手势识别器状态（调试用）
+    private func printGestureRecognizers(_ view: UIView) {
+        if let gestureRecognizers = view.gestureRecognizers, !gestureRecognizers.isEmpty {
+            for (index, gesture) in gestureRecognizers.enumerated() {
+                let gestureInfo = "\(type(of: gesture))"
+                let stateInfo = "state: \(gesture.state.rawValue)"
+                let enabledInfo = gesture.isEnabled ? "enabled" : "disabled"
+                print("   [\(index)] \(gestureInfo) (\(stateInfo), \(enabledInfo))")
+                
+                if let tapGesture = gesture as? UITapGestureRecognizer {
+                    print("       - tapsRequired: \(tapGesture.numberOfTapsRequired)")
+                    print("       - touchesRequired: \(tapGesture.numberOfTouchesRequired)")
+                }
+                
+                // 打印手势识别器的依赖关系
+                printGestureDependencies(gesture)
+            }
+        } else {
+            print("   (无手势识别器)")
+        }
+    }
+    
+    /// 打印手势识别器的依赖关系（调试用）
+    private func printGestureDependencies(_ gesture: UIGestureRecognizer) {
+        // 获取手势识别器的delegate信息
+        if let delegate = gesture.delegate {
+            print("       - delegate: \(type(of: delegate))")
+        }
+        
+        // 检查是否是PKCanvasView的内置手势
+        if gesture === pencilCanvas.drawingGestureRecognizer {
+            print("       - PKCanvasView drawingGestureRecognizer")
+        }
+        if gesture === pencilCanvas.panGestureRecognizer {
+            print("       - PKCanvasView panGestureRecognizer")
+        }
+        if let pinchGesture = pencilCanvas.pinchGestureRecognizer, gesture === pinchGesture {
+            print("       - PKCanvasView pinchGestureRecognizer")
+        }
+        
+        // 检查自定义手势
+        if gesture === canvasTapGesture {
+            print("       - NativeCanvasView canvasTapGesture")
+        }
+    }
 
     // MARK: - Tool Management
 
@@ -747,6 +869,7 @@ class NativeCanvasView: UIView {
             // 关键：启用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
+            textOverlayView.isUserInteractionEnabled = true  // 新增：选择时可交互
             
             // 启用空白区域点击手势识别器
             canvasTapGesture.isEnabled = true
@@ -781,6 +904,7 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
             overlayContainerView.isUserInteractionEnabled = false
+            textOverlayView.isUserInteractionEnabled = false  // 新增：平移时不可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -796,6 +920,7 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
+            textOverlayView.isUserInteractionEnabled = false  // 新增：绘图时不可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -811,6 +936,7 @@ class NativeCanvasView: UIView {
 
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
+            textOverlayView.isUserInteractionEnabled = false  // 新增：擦除时不可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -826,6 +952,7 @@ class NativeCanvasView: UIView {
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
+            textOverlayView.isUserInteractionEnabled = true  // 新增：图片工具时可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -840,15 +967,16 @@ class NativeCanvasView: UIView {
 
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
+            textOverlayView.isUserInteractionEnabled = tool == .text  // 新增：只有文字工具时可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
-            objectLayerView.isUserInteractionEnabled = true
+            objectLayerView.isUserInteractionEnabled = false  // 修改：创建形状时不可交互
             
             // 特殊处理文字工具
             if tool == .text {
                 // 确保所有文字的手势都能正常工作
-                for textView in textViews.values {
+                for (_, textView) in textViews {
                     textView.enableTextGestures()
                 }
             }
@@ -1556,13 +1684,11 @@ class NativeCanvasView: UIView {
         
         // 设置编辑回调
         textView.onEditingStarted = { [weak self] startText in
-            print("🔧 [NativeCanvasView] 文字编辑开始: \(startText.text)")
             // 编辑开始时可以选择性地禁用全局手势
         }
         
         textView.onEditingFinished = { [weak self] updatedText, newText in
             guard let self = self else { return }
-            print("🔧 [NativeCanvasView] 文字编辑完成: '\(newText)'")
             
             // 更新文字节点
             self.textLayerManager.updateText(updatedText)
@@ -1583,7 +1709,7 @@ class NativeCanvasView: UIView {
         }
         
         textViews[text.id] = textView
-        objectLayerView.addSubview(textView)
+        objectLayerView.addSubview(textView)  // 修改：添加到objectLayerView，与箭头/形状保持一致
         
         // 根据当前工具状态设置手势
         if currentTool == .select || currentTool == .text {
@@ -1593,13 +1719,15 @@ class NativeCanvasView: UIView {
         // 关键修复：强制立即布局，确保视图可见
         textView.setNeedsLayout()
         textView.layoutIfNeeded()
-        objectLayerView.setNeedsLayout()
-        objectLayerView.layoutIfNeeded()
+        textOverlayView.setNeedsLayout()
+        textOverlayView.layoutIfNeeded()
     }
     
     /// 清理资源
     deinit {
-        cleanupGlobalTapObserver()
+        if let observer = toolChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         cleanupSelectionSyncObserver()
     }
     
@@ -1612,68 +1740,113 @@ class NativeCanvasView: UIView {
 // MARK: - UIGestureRecognizerDelegate
 
 extension NativeCanvasView: UIGestureRecognizerDelegate {
+
+    
+
     /// 处理手势识别器是否应该接收触摸事件
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        
-        // 只处理空白点击手势的冲突
-        guard gestureRecognizer == canvasTapGesture else {
+        guard gestureRecognizer == canvasTapGesture else { return true }
+
+        // 文字工具时，检查触摸是否在 textOverlayView 的文字视图上
+        if currentTool == .text {
+            let textLocation = touch.location(in: textOverlayView)
+            let textHitView = textOverlayView.hitTest(textLocation, with: nil)
+
+            // 如果点击在已有的 SelectableTextView 上，让其自己处理
+            if textHitView is SelectableTextView {
+                return false
+            }
+            // 其他区域由 canvasTapGesture 处理（创建新文字）
             return true
         }
-        
+
+        // 其他工具的处理保持不变
         let location = touch.location(in: objectLayerView)
         let hitView = objectLayerView.hitTest(location, with: nil)
-        
-        
-        // 如果点击在可选择对象上，不让空白点击手势处理
+
         if isSelectableObject(hitView) {
             return false
         }
-        
+
         return true
     }
+
     
+
     /// 处理手势识别器是否应该开始识别
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        
-        if gestureRecognizer == canvasTapGesture {
-        }
-        
         return true
     }
+
     
+
     /// 处理手势识别器之间的同时识别
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        
-        // 空白点击手势不与其他手势同时识别
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                       shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 与 UITextField 的手势兼容
+        if let view = otherGestureRecognizer.view, view is UITextField {
+            return true
+        }
+
+        // 与系统文本交互手势兼容
+        let otherClassName = String(describing: type(of: otherGestureRecognizer))
+        if otherClassName.contains("UITextInteraction") ||
+           otherClassName.contains("UITextSelectionInteraction") {
+            return true
+        }
+
         if gestureRecognizer == canvasTapGesture || otherGestureRecognizer == canvasTapGesture {
             return false
         }
-        
+
         return true
     }
+
     
+
     /// 处理手势识别器是否应该接收按压事件
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive press: UIPress) -> Bool {
-        return true
+        print("🔍 [NativeCanvasView] shouldReceive press")
+        print("   - 手势识别器: \(type(of: gestureRecognizer))")
+        print("   - 按压类型: \(press.type.rawValue)")
+        
+        let shouldReceive = true
+        print("   - 返回: \(shouldReceive)")
+        return shouldReceive
     }
+
     
+
     /// 处理手势识别器是否需要失败才能开始
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        print("🔍 [NativeCanvasView] shouldBeRequiredToFailBy")
+        print("   - 手势识别器1: \(type(of: gestureRecognizer))")
+        print("   - 手势识别器2: \(type(of: otherGestureRecognizer))")
         
-        if gestureRecognizer == canvasTapGesture {
-        }
-        
-        return false
+        let shouldBeRequired = false
+        print("   - 返回: \(shouldBeRequired)")
+        return shouldBeRequired
     }
+
     
+
     /// 处理手势识别器是否需要其他手势失败
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        
-        if gestureRecognizer == canvasTapGesture {
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                       shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // UITextField 的手势优先
+        if let view = otherGestureRecognizer.view, view is UITextField {
+            return true
         }
-        
+
         return false
     }
+
 }
 
 // MARK: - PKCanvasViewDelegate
@@ -1783,13 +1956,12 @@ struct NativeCanvasViewWrapper: UIViewRepresentable {
     class Coordinator {}
 }
 
-// MARK: - Global Tap Observer Extension
+// MARK: - Selection Sync Extension
 
 extension NativeCanvasView {
     
     /// 设置选中状态同步监听器
     private func setupSelectionSyncObserver() {
-        
         NotificationCenter.default.addObserver(
             forName: .selectionChangedInStateManager,
             object: nil,
@@ -1798,7 +1970,6 @@ extension NativeCanvasView {
                 self?.handleSelectionChangedInStateManager(notification)
             }
         )
-        
     }
     
     /// 处理CanvasStateManager中选中状态变化的通知
@@ -1807,161 +1978,24 @@ extension NativeCanvasView {
             return
         }
         
-        
         // 同步选中状态到NativeCanvasView
         if selectedNodeID != newSelectedID {
             selectedNodeID = newSelectedID
-        } else {
         }
     }
     
-    /// 设置全局点击监听器
-    private func setupGlobalTapObserver() {
-        
-        // 使用UITapGestureRecognizer监听整个窗口的点击
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self,
-                  let window = self.findWindow() else {
-                return
+    /// 设置工具变化监听器
+    private func setupToolObserver() {
+        toolChangeObserver = NotificationCenter.default.addObserver(
+            forName: .toolChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            if let tool = notification.object as? CanvasTool {
+                self?.updateForTool(tool)
             }
-            
-            
-            // 检查是否已经有全局手势
-            if let existingGesture = objc_getAssociatedObject(window, &AssociatedKeys.globalTapGesture) as? UITapGestureRecognizer {
-                return
-            }
-            
-            let globalTapGesture = UITapGestureRecognizer(target: self, action: #selector(self.handleGlobalTap(_:)))
-            globalTapGesture.cancelsTouchesInView = false  // 不阻止其他手势
-            globalTapGesture.delegate = self
-            
-            window.addGestureRecognizer(globalTapGesture)
-            
-            // 保存全局手势引用
-            objc_setAssociatedObject(window, &AssociatedKeys.globalTapGesture, globalTapGesture, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            
-        }
-    }
-    
-    /// 查找当前窗口
-    private func findWindow() -> UIWindow? {
-        // 优先使用自己的窗口
-        if let window = self.window {
-            return window
-        }
-        
-        // 使用父视图的窗口
-        if let parentWindow = self.superview?.window {
-            return parentWindow
-        }
-        
-        // 使用应用的第一个窗口
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = scene.windows.first {
-            return window
-        }
-        
-        // 备选方案：遍历所有窗口
-        for window in UIApplication.shared.windows {
-            if window.isKeyWindow {
-                return window
-            }
-        }
-        
-        return UIApplication.shared.windows.first
-    }
-    
-    /// 处理全局点击事件
-    @objc private func handleGlobalTap(_ gesture: UITapGestureRecognizer) {
-        
-        // 如果没有选中对象，不需要处理
-        guard selectedNodeID != nil else {
-            return
-        }
-        
-        guard let gestureView = gesture.view else {
-            return
-        }
-        
-        let location = gesture.location(in: gestureView)
-        
-        // 检查点击是否在当前画布视图内
-        let locationInCanvas = gesture.location(in: self)
-        let isTapInCanvas = bounds.contains(locationInCanvas)
-        
-        
-        if isTapInCanvas {
-            // 在画布内的点击，让画布自己的手势处理
-            return
-        }
-        
-        // 获取点击的视图层级信息
-        let hitView = gestureView.hitTest(location, with: nil)
-        
-        // 检查点击的是否是工具栏或其他UI控件
-        if isUIControl(hitView) {
-        } else {
-        }
-        
-        // 在画布外的点击，直接取消选中
-        selectedNodeID = nil
-    }
-    
-    /// 检查视图是否是UI控件（工具栏、按钮等）
-    private func isUIControl(_ view: UIView?) -> Bool {
-        guard let view = view else { return false }
-        
-        // 检查是否是常见的UI控件类型
-        if view is UIButton || 
-           view is UIToolbar || 
-           view is UINavigationBar || 
-           view is UITabBar ||
-           view is UISlider ||
-           view is UISwitch ||
-           view is UIStepper ||
-           view is UISegmentedControl {
-            return true
-        }
-        
-        // 检查视图类名是否包含常见的UI控件标识
-        let className = String(describing: type(of: view))
-        let uiControlKeywords = [
-            "Button", "Toolbar", "Bar", "Control", "Slider", "Switch", "Stepper",
-            "SegmentedControl", "TextField", "TextView", "Label", "ImageView",
-            "CanvasToolbar", "ToolButton", "ShapeToolButton", "PenToolButton"
-        ]
-        
-        for keyword in uiControlKeywords {
-            if className.contains(keyword) {
-                return true
-            }
-        }
-        
-        // 检查背景视图类型（通常表示UI容器）
-        if className.contains("Background") || className.contains("Container") {
-            return true
-        }
-        
-        return false
-    }
-    
-    /// 清理全局监听器
-    private func cleanupGlobalTapObserver() {
-        if let observer = globalTapObserver {
-            NotificationCenter.default.removeObserver(observer)
-            globalTapObserver = nil
-        }
-        
-        // 清理全局手势
-        if let window = self.window ?? self.superview?.window ?? UIApplication.shared.windows.first,
-           let globalGesture = objc_getAssociatedObject(window, &AssociatedKeys.globalTapGesture) as? UITapGestureRecognizer {
-            window.removeGestureRecognizer(globalGesture)
-            objc_setAssociatedObject(window, &AssociatedKeys.globalTapGesture, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
 }
 
-// MARK: - Associated Keys
-private struct AssociatedKeys {
-    static var globalTapGesture = "globalTapGesture"
-}
+

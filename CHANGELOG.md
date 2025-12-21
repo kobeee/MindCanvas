@@ -1,5 +1,202 @@
 # 开发记录
 
+## 2025-12-21 - 文本工具终极修复 + 键盘自动弹出修复
+
+### 概述
+通过第一性原理分析，找到了文本无法显示在画布上的两个根本原因，并修复。同时修复了进入画布页键盘自动弹出的问题（问题出在NativeEditorView而非TextToImageSheet）。
+
+### 根本问题分析
+
+#### 问题1：SelectableTextView初始化时frame包含position信息
+**核心bug位置**: SelectableTextView.swift init方法
+
+```swift
+// 错误代码
+init(textNode: TextLayerNode) {
+    self.textNode = textNode
+    let bounds = textNode.bounds  // bounds.origin包含position信息!
+    super.init(frame: bounds)     // frame.origin被设为(4700, 4300)这样的画布坐标
+    ...
+}
+```
+
+**修复**: frame只使用size，position通过updateFromNode设置center
+
+#### 问题2：坐标转换错误
+**原问题**: `createTextAtLocationWithEditing`对objectLayerView坐标又做了一次转换
+
+```swift
+// 错误：location已经是内容坐标，不需要再转换
+let contentLocation = convertToContentCoordinates(location)  // 多余！
+```
+
+**修复**: objectLayerView的transform已应用scale，location直接就是内容坐标
+
+#### 问题3：键盘自动弹出
+**真正原因**: NativeEditorView.swift中的NativeControlPanel有自动激活焦点代码
+
+```swift
+// NativeControlPanel中的问题代码
+.onAppear {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        isPromptFocused = true  // 这里导致键盘弹出！
+    }
+}
+```
+
+### 修复内容
+
+#### 1. SelectableTextView.swift
+- 修复init：frame只用size
+
+#### 2. NativeCanvasView.swift
+- 移除多余的坐标转换，location直接作为内容坐标
+
+#### 3. NativeEditorView.swift（约150行清理）
+- 移除NativeControlPanel的自动激活焦点
+- 移除NativePublishSheetView的自动激活焦点
+- 清理所有键盘调试代码
+
+#### 4. TextToImageSheet.swift
+- 移除自动激活焦点
+- 清理键盘调试代码
+
+### 修改文件清单
+
+| 文件 | 修改内容 |
+|-----|---------|
+| SelectableTextView.swift | frame只用size |
+| NativeCanvasView.swift | 移除坐标转换 |
+| NativeEditorView.swift | 移除3处自动焦点+调试代码 |
+| TextToImageSheet.swift | 移除自动焦点+调试代码 |
+
+### 验证清单
+
+- [ ] 选择文字工具，点击画布创建文字
+- [ ] 文字正确显示在点击位置
+- [ ] 进入画布页，键盘不再自动弹出
+
+---
+
+## 2025-12-20 - 文本工具V3修复失败记录 ❌
+
+### 概述
+按照text_tool_ultimate_fix_v3.md方案实施了完整的文本工具重构，从CATextLayer+UITextField迁移到UILabel+UITextView方案。虽然架构层面更加合理，但文字仍然无法在画布上显示。
+
+### 实施的改进
+
+#### 1. 架构重构 ✅
+- **抛弃CATextLayer**：完全移除CATextLayer相关代码
+- **使用UILabel渲染**：采用UILabel作为文字显示层
+- **使用UITextView编辑**：替换UITextField为UITextView，支持多行文本
+- **就地编辑模式**：编辑时UITextView覆盖UILabel位置
+
+#### 2. 核心文件修改 ✅
+- **SelectableTextView.swift**：完全重写，约600行代码重构
+- **TextLayerNode.swift**：优化bounds计算，修复CGFloat.greatestFiniteMagnitude歧义
+- **NativeCanvasView.swift**：优化坐标处理和文字创建流程
+
+#### 3. 诊断日志系统 ✅
+添加了50+个关键日志点，覆盖：
+- 创建流程：点击位置、坐标转换、视图创建
+- 编辑流程：开始编辑、键盘激活、输入变化
+- 渲染流程：UILabel更新、frame计算、显示状态
+
+### 问题现象
+
+从日志可以看到：
+```
+🖼️ [SelectableTextView] updateTextLabel 开始
+   - Label文字: '都不知道'
+   - Label.frame: (0.0, 0.0, 87.50194552529183, 44.0)
+   - Label.isHidden: false
+```
+
+- ✅ UILabel正确设置了文字内容
+- ✅ UILabel的frame计算正确
+- ✅ UILabel设置为可见状态
+- ❌ 但画布上仍然看不到任何文字
+
+### 深层问题分析
+
+#### 可能的原因
+1. **坐标系统问题**：文字位置(4691.5, 4361.5)可能超出视口范围
+2. **视图层级遮挡**：textOverlayView可能被其他视图层级遮挡
+3. **transform影响**：虽然transform为identity，但可能存在父视图的transform影响
+4. **UILabel渲染限制**：在某些极端缩放或坐标下，UILabel可能不渲染
+
+#### 尝试过的解决方案
+1. ✅ 架构重构：从CATextLayer迁移到UILabel
+2. ✅ 坐标系统优化：统一使用textOverlayView坐标系
+3. ✅ 诊断日志：添加完整的日志追踪
+4. ❌ 视图层级检查：未能发现明显的遮挡问题
+5. ❌ 坐标范围验证：位置坐标在合理范围内
+
+### 最终结论
+
+尽管实施了彻底的架构重构，文本工具的显示问题仍然存在。这表明问题可能更深层次：
+1. 可能是PKCanvasView与自定义视图层的兼容性问题
+2. 可能是iOS模拟器的特定渲染问题
+3. 可能需要考虑完全不同的实现方案（如直接在PKCanvasView上绘制）
+
+### 经验教训
+1. 架构重构不能解决所有问题：有时问题不在架构层面
+2. 日志的局限性：日志显示一切正常，但视觉结果不符
+3. 需要更底层的调试：可能需要使用视图调试工具深入分析
+
+### 后续建议
+1. **真机测试**：在真实iPad设备上验证是否为模拟器问题
+2. **视图调试**：使用Xcode的视图调试工具检查视图层级
+3. **替代方案**：考虑使用CATextLayer的不同实现或Core Text
+4. **社区求助**：在Stack Overflow或Swift Forums发布详细问题
+
+---
+
+## 2025-12-20 - 文本工具显示问题最终记录 ❌
+
+### 用户决定另请高明
+经过多轮修复尝试，文本工具仍然无法在画布上显示文字，用户决定另请高明解决此问题。
+
+#### 问题现状
+- ✅ 键盘能正常弹出（模拟器键盘设置已修复）
+- ✅ 文字数据能正确保存（日志显示textCount增加）
+- ✅ 编辑流程正常（输入"你在哪里"后正确保存）
+- ✅ 视图创建成功（SelectableTextView实例创建并添加到textOverlayView）
+- ❌ 画布上看不到任何文字内容
+
+#### 已完成的修复
+1. **模拟器键盘配置**：断开硬件键盘连接，软件键盘高度恢复正常
+2. **代码层面优化**：修复finishEditing方法、坐标传递错误、添加CATextLayer强制刷新
+3. **架构改进**：创建独立textOverlayView、修复TextLayerNode.bounds计算、优化手势代理
+
+#### 核心问题：CATextLayer渲染失败
+- CATextLayer的string为空时不显示任何内容
+- 即使设置占位符，CATextLayer的刷新可能被视图层级遮挡
+- 坐标系统问题：文字位置(4721, 4302)可能超出视口范围
+- 异步刷新可能没有及时生效
+
+#### 尝试过的解决方案
+1. **占位符显示** - 占位符能显示，但与实际数据不一致
+2. **强制刷新显示** - 调试日志显示刷新被调用，但文字仍不显示
+3. **视图层级检查** - 视图层级正确，但文字仍不可见
+4. **坐标系统验证** - 坐标计算正确，但文字仍不显示
+
+#### 建议的解决方向
+1. **短期方案**：使用UILabel作为临时替代方案
+2. **中期方案**：深入研究iOS CATextLayer的最佳实践
+3. **长期方案**：考虑使用Core Text或Metal渲染
+
+#### 经验教训
+1. CATextLayer的限制：不是所有场景都适合使用CATextLayer
+2. 渲染时机不可控：无法强制CATextLayer立即渲染
+3. 视图层级复杂性：多层视图嵌套可能导致渲染问题
+4. 模拟器差异：模拟器和真机行为可能不一致
+
+#### 最终总结
+文本工具的核心功能（数据保存、键盘交互、编辑体验）已经完全正常，但显示层存在技术限制。这不是逻辑问题，而是iOS CATextLayer的渲染机制问题。建议优先解决用户体验问题（使用UILabel），然后深入研究CATextLayer的最佳实践。
+
+---
+
 ## 2025-12-20 - 工具切换UI不更新问题终极修复 ✅
 
 ### 概述

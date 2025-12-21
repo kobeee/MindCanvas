@@ -19,23 +19,37 @@ struct TextLayerNode: Codable, Identifiable, Equatable {
     
     /// 计算精确的边界框
     var bounds: CGRect {
+        // 使用占位符计算尺寸（确保空文字时也有有效尺寸）
+        let displayText = text.isEmpty ? "输入文字" : text
+        let nsString = displayText as NSString
+
         let font = UIFont(name: fontName, size: fontSize * scale)
             ?? UIFont.systemFont(ofSize: fontSize * scale)
 
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        let nsString = text as NSString
-        let size = nsString.boundingRect(
-            with: CGSize(width: CGFloat.infinity, height: CGFloat.infinity),
+
+        var size = nsString.boundingRect(
+            with: CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude), // 限制最大宽度
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: attributes,
             context: nil
         ).size
 
+        // 添加padding
+        size.width += 24
+        size.height += 16
+
+        // 确保最小尺寸
+        let minWidth: CGFloat = 80
+        let minHeight: CGFloat = 44
+        let finalWidth = max(size.width, minWidth)
+        let finalHeight = max(size.height, minHeight)
+
         return CGRect(
-            x: position.x - size.width / 2,
-            y: position.y - size.height / 2,
-            width: size.width,
-            height: size.height
+            x: position.x - finalWidth / 2,
+            y: position.y - finalHeight / 2,
+            width: finalWidth,
+            height: finalHeight
         )
     }
     

@@ -99,8 +99,7 @@ struct TextToImageSheet: View {
 
             TextEditor(text: $prompt)
                 .focused($isPromptFocused)
-                .frame(height: 120)
-                .frame(minHeight: 120)
+                .frame(minHeight: 120, maxHeight: 200)
                 .padding(Theme.Spacing.md)
                 .scrollContentBackground(.hidden)
                 .background(Theme.Colors.appBackground)

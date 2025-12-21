@@ -462,11 +462,6 @@ private struct NativeCanvasContainer: View {
     @State private var rectangleStartPoint: CGPoint?
     @State private var rectangleEndPoint: CGPoint?
     
-    // 文字编辑状态
-    @State private var isEditingText = false
-    @State private var textPosition: CGPoint = .zero
-    @State private var editingText: String = ""
-    
     // 文字工具状态监听
     @State private var previousTool: CanvasTool = .select
     
@@ -635,47 +630,7 @@ private struct NativeCanvasContainer: View {
                 // 箭头由 NativeCanvasView 中的 SelectableArrowView 渲染
                 // 不再使用 SwiftUI ForEach 渲染，避免遮挡 UIKit 手势
                 
-                // 文字编辑层
-                if viewModel.stateManager.currentTool == .text {
-                    TextEditingView(
-                        isEditing: $isEditingText,
-                        position: $textPosition,
-                        text: $editingText,
-                        fontSize: viewModel.stateManager.textFontSize,
-                        color: Color.fromHex(viewModel.stateManager.textColor) ?? .black
-                    ) { position, text in
-                        // 创建文字图层
-                        guard let canvasView = viewModel.canvasView else {
-                            print("❌ [NativeEditorView] 画布视图不可用，无法创建文字")
-                            return
-                        }
-                        
-                        // 坐标转换：SwiftUI 坐标 + contentOffset = 画布内容坐标
-                        let offset = canvasView.pencilCanvas.contentOffset
-                        let scale = canvasView.pencilCanvas.zoomScale
-                        let contentPosition = CGPoint(
-                            x: (position.x + offset.x) / scale,
-                            y: (position.y + offset.y) / scale
-                        )
-                        
-                        let textLayer = TextLayerNode(
-                            position: contentPosition,
-                            text: text,
-                            fontSize: viewModel.stateManager.textFontSize,
-                            color: viewModel.stateManager.textColor,
-                            fontName: viewModel.stateManager.textFontName ?? ".SF Pro Display",
-                            zIndex: canvasView.getTextLayerManager().getNextZIndex()
-                        )
-                        
-                        print("✅ [NativeEditorView] 创建文字图层: '\(text)' at \(contentPosition)")
-                        canvasView.addText(textLayer)
-                        
-                        // 创建完成后自动切换回选择工具
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            viewModel.stateManager.currentTool = .pan
-                        }
-                    }
-                }
+                
                 
                 // 显示所有矩形
                 ForEach(viewModel.canvasView?.getRectangleLayerManager().rectangles ?? []) { rectangle in
@@ -813,20 +768,6 @@ private struct NativeCanvasContainer: View {
                             
                             // 工具切换时取消选中状态
                             viewModel.stateManager.clearSelection()
-                            
-                            // 文字工具特殊处理：重置文字编辑状态
-                            if newTool == .text {
-                                isEditingText = false
-                                textPosition = .zero
-                                editingText = ""
-                            } else {
-                                // 切换出文字工具时，如果正在编辑文字，取消编辑状态
-                                if isEditingText {
-                                    isEditingText = false
-                                    textPosition = .zero
-                                    editingText = ""
-                                }
-                            }
                         },
                         penColor: Binding(
                             get: { Color(hex: viewModel.stateManager.penColor) },
@@ -854,19 +795,7 @@ private struct NativeCanvasContainer: View {
                 }
             }
         }
-        .onChange(of: viewModel.stateManager.currentTool) { _, newTool in
-            // 监听工具变化，确保文字工具状态正确
-            if newTool == .text && previousTool != .text {
-                // 清除选中状态，避免冲突
-                viewModel.stateManager.clearSelection()
-            } else if previousTool == .text && newTool != .text {
-                // 重置文字编辑状态
-                isEditingText = false
-                textPosition = .zero
-                editingText = ""
-            }
-            previousTool = newTool
-        }
+        
     }
 }
 
@@ -876,30 +805,32 @@ private struct NativeControlPanel: View {
     @Bindable var viewModel: NativeEditorViewModel
     let onImageToImageTapped: () -> Void
     let onTextToImageTapped: () -> Void
-    
+
+    @FocusState private var isPromptFocused: Bool
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // API 配置
                 configSection
-                
+
                 Divider()
-                
+
                 // 模型选择
                 modelSection
-                
+
                 Divider()
-                
+
                 // Prompt 输入
                 promptSection
-                
+
                 Divider()
-                
+
                 // 生成按钮
                 generateSection
-                
+
                 Divider()
-                
+
                 // 提示信息
                 infoSection
             }
@@ -956,16 +887,21 @@ private struct NativeControlPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("生成描述", systemImage: "text.bubble")
                 .font(.headline)
-            
+
             TextEditor(text: $viewModel.prompt)
-                .frame(height: 120)
+                .focused($isPromptFocused)
+                .frame(minHeight: 120, maxHeight: 200)
                 .padding(8)
                 .background(Color.gray.opacity(0.05))
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        .stroke(
+                            isPromptFocused ? Color.blue : Color.gray.opacity(0.2),
+                            lineWidth: isPromptFocused ? 2 : 1
+                        )
                 )
+                .scrollContentBackground(.hidden)
         }
     }
     
@@ -1265,7 +1201,9 @@ private struct NativePublishSheetView: View {
     @Binding var title: String
     let onPublish: () -> Void
     let onCancel: () -> Void
-    
+
+    @FocusState private var isTitleFocused: Bool
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
@@ -1278,10 +1216,11 @@ private struct NativePublishSheetView: View {
                 }
                 .frame(height: 200)
                 .cornerRadius(12)
-                
+
                 TextField("添加标题", text: $title)
+                    .focused($isTitleFocused)
                     .textFieldStyle(.roundedBorder)
-                
+
                 Spacer()
             }
             .padding()
