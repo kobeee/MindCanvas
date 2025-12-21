@@ -39,7 +39,7 @@ class NativeCanvasView: UIView {
     private let objectLayerView = UIView()
 
     /// Layer 1.5: 覆盖层容器视图（与 pencilCanvas 同级，用于承载箭头等对象）
-    private let overlayContainerView = UIView()
+    internal let overlayContainerView = UIView()
 
     /// Layer 3: 文字覆盖层 - 完全独立于 objectLayerView
     private let textOverlayView = UIView()

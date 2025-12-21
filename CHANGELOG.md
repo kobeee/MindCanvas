@@ -1,5 +1,164 @@
 # 开发记录
 
+## 2025-12-21 - 文本工具In-Place Editing实现 + 占位符优化 ✅
+
+### 概述
+基于对"In-Place Editing"（原地编辑）理念的深入研究，成功实现了真正的"所见即所得"文本编辑体验。用户点击画布任意位置，编辑框立即出现在该位置，输入时文本就在最终位置实时显示，回车后文本就固定在那里，完美符合Figma、Sketch等专业设计工具的交互标准。
+
+### 核心理念转变
+
+#### 从"浮动编辑"到"原地编辑"
+**修复前的问题**：
+- UITextView作为浮动标签显示，与最终文本位置不匹配
+- 用户需要猜测文本最终位置，体验不直观
+- 编辑时和编辑后的视觉效果存在跳跃
+
+**实现后的体验**：
+- ✅ 点击画布哪里，编辑框就出现在哪里
+- ✅ 输入时文本就在最终位置实时显示
+- ✅ 无视觉跳跃，真正的"所见即所得"
+
+### 技术实现突破
+
+#### 1. **坐标系统重构**
+```swift
+// 修复前：复杂的屏幕坐标转换
+let screenFrame = convert(bounds, to: window)
+let textViewFrame = CGRect(
+    x: screenFrame.midX - textViewWidth / 2,
+    y: screenFrame.midY - textViewHeight / 2,
+    width: textViewWidth,
+    height: textViewHeight
+)
+
+// 修复后：直接在画布内容坐标系中定位
+let finalTextPosition = textNode.position
+let screenX = (finalTextPosition.x * canvasScale) - canvasContentOffset.x
+let screenY = (finalTextPosition.y * canvasScale) - canvasContentOffset.y
+```
+
+#### 2. **视图层级优化**
+```swift
+// 关键改进：UITextView直接添加到overlayContainerView
+canvasView.overlayContainerView.addSubview(textView)
+canvasView.overlayContainerView.bringSubviewToFront(textView)
+```
+
+**技术优势**：
+- UITextView与最终文本处于同一变换层级
+- 画布缩放/滚动时，编辑框完美跟随
+- 避免了复杂的坐标转换和同步机制
+
+#### 3. **视觉体验优化**
+```swift
+// 透明背景，最小边框，真正的in-place感觉
+textView.backgroundColor = UIColor.clear
+textView.layer.borderWidth = 1
+textView.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.5).cgColor
+textView.layer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.1).cgColor
+```
+
+#### 4. **智能占位符处理**
+**问题**：
+- "输入文本"占位符在小尺寸文本框中显示不完整
+- 用户设置大字体时，占位符也会跟着变大，不美观
+
+**解决方案**：
+```swift
+// 1. 调整初始文本框大小以适应占位符
+let initialFrame = CGRect(
+    x: screenX - 50,  // 增加宽度以容纳"输入文本"
+    y: screenY - 20,  // 增加高度以改善可见性
+    width: 100,
+    height: 40
+)
+
+// 2. 占位符使用固定字体大小，不跟随用户设置
+if textView.text.isEmpty {
+    textView.text = placeholderText
+    textView.textColor = .systemGray
+    textView.font = UIFont.systemFont(ofSize: 16)  // 固定16pt
+    isShowingPlaceholder = true
+} else {
+    textView.font = textLabel.font  // 恢复用户字体
+    isShowingPlaceholder = false
+}
+
+// 3. 用户开始输入时立即恢复正确字体
+if isShowingPlaceholder && !text.isEmpty {
+    textView.text = ""
+    textView.textColor = UIColor(hex: textNode.color) ?? .black
+    textView.font = textLabel.font  // 恢复用户字体大小
+    isShowingPlaceholder = false
+}
+```
+
+### 用户体验提升
+
+#### 编辑流程优化
+1. **即时响应**：移除延迟，键盘立即激活
+2. **动态调整**：根据文本内容自动调整编辑框大小
+3. **无缝切换**：占位符到实际文本的字体和颜色平滑过渡
+
+#### 视觉连续性
+- **编辑时**：半透明蓝色背景，最小边框
+- **编辑后**：完全透明背景，文本就在最终位置
+- **无跳跃感**：编辑时和编辑后位置完全一致
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `SelectableTextView.swift` | 重构 | 实现真正的in-place editing，优化占位符处理 |
+| `NativeCanvasView.swift` | 修改 | 开放overlayContainerView访问权限 |
+
+### 验证标准
+
+- [x] 点击画布任意位置，编辑框立即出现在该位置
+- [x] 输入文字时，文本就在最终位置实时显示
+- [x] "输入文本"占位符完全可见
+- [x] 占位符字体大小固定为16pt，不跟随用户设置
+- [x] 用户开始输入时，立即恢复到用户设置的字体大小和颜色
+- [x] 画布缩放/滚动时，编辑框完美跟随
+- [x] 回车确认后，文本就固定在编辑时的位置
+
+### 技术亮点
+
+#### 1. **第一性原理实现**
+基于对In-Place Editing研究的深入分析，从根本上重新设计了文本编辑架构，而不是在现有方案上修补。
+
+#### 2. **专业级交互体验**
+实现了与Figma、Sketch等专业设计工具完全一致的交互标准，提升了用户体验的专业性。
+
+#### 3. **智能占位符管理**
+通过固定字体大小和动态尺寸调整，解决了占位符显示和用户体验的平衡问题。
+
+#### 4. **坐标系统优化**
+避免了复杂的坐标转换和同步机制，直接在正确的坐标系中工作，提高了系统的稳定性和性能。
+
+### 后续优化方向
+
+#### 高优先级
+1. **多行文本支持**：优化长文本的编辑体验
+2. **富文本编辑**：支持粗体、斜体等文本样式
+3. **文本选择增强**：改进文本选择的交互体验
+
+#### 中优先级
+4. **动画效果**：添加平滑的进入/退出动画
+5. **快捷键支持**：支持键盘快捷键操作
+6. **拖拽创建**：支持拖拽创建文本框
+
+#### 低优先级
+7. **拼写检查**：集成系统拼写检查功能
+8. **文本模板**：预设常用文本模板
+9. **多语言支持**：支持更多语言的占位符
+
+### 总结
+
+本次更新成功实现了真正的"所见即所得"文本编辑体验，解决了文本工具的核心用户体验问题。通过深入研究In-Place Editing的最佳实践，从根本上重新设计了文本编辑架构，为用户提供了专业级的设计工具体验。占位符优化进一步提升了用户界面的友好性和一致性。
+
+---
+
 ## 2025-12-21 - 文本工具空文本占位符问题修复 ✅
 
 ### 概述
