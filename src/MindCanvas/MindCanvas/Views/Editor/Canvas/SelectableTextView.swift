@@ -480,20 +480,13 @@ class SelectableTextView: UIView {
 
         let rawText = editingTextView?.text ?? ""
         let originalText = textNode.text
-        
-        print("🔍 [SelectableTextView] finishEditing 开始")
-        print("🔍 [SelectableTextView] 原始文本: '\(rawText)'")
-        print("🔍 [SelectableTextView] 占位符状态: \(isShowingPlaceholder)")
-        print("🔍 [SelectableTextView] 节点原文本: '\(originalText)'")
 
         // 处理占位符情况：如果显示的是占位符，则视为空文本
         let newText: String
         if isShowingPlaceholder || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             newText = ""
-            print("🔍 [SelectableTextView] 检测到占位符或空文本，设置为空字符串")
         } else {
             newText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-            print("🔍 [SelectableTextView] 实际文本内容: '\(newText)'")
         }
 
         // 清理编辑视图
@@ -506,7 +499,6 @@ class SelectableTextView: UIView {
 
         // 如果文本为空，通过回调通知删除该对象
         if newText.isEmpty {
-            print("🔍 [SelectableTextView] 文本为空，请求删除对象")
             onEditingFinished?(textNode, "") // 空字符串表示需要删除
             return
         }
@@ -526,18 +518,14 @@ class SelectableTextView: UIView {
 
     /// Setup UITextView for editing - Refactored: Use independent editing container
     private func setupEditingTextView() {
-        print("🟢 [SelectableTextView] setupEditingTextView started (refactored)")
-        
         // Safety check
         guard bounds.width >= 10 && bounds.height >= 10 else {
-            print("⚠️ [SelectableTextView] bounds too small, cancel editing: \(bounds)")
             isEditing = false
             textLabel.isHidden = false
             return
         }
 
         guard window != nil else {
-            print("⚠️ [SelectableTextView] window is nil, cancel editing")
             isEditing = false
             textLabel.isHidden = false
             return
@@ -552,11 +540,8 @@ class SelectableTextView: UIView {
     
     /// Create UITextView for true in-place editing
     private func createTextViewInIndependentContainer() {
-        print("🔧 [SelectableTextView] Creating in-place editing experience")
-        
         // Get NativeCanvasView reference
         guard let canvasView = findParentCanvasView() else {
-            print("❌ [SelectableTextView] Unable to find NativeCanvasView")
             return
         }
         
@@ -579,10 +564,6 @@ class SelectableTextView: UIView {
             width: 100,
             height: 40
         )
-        
-        print("📐 [SelectableTextView] In-place editing frame: \(initialFrame)")
-        print("📐 [SelectableTextView] Text position: \(finalTextPosition)")
-        print("📐 [SelectableTextView] Canvas scale: \(canvasScale), offset: \(canvasContentOffset)")
         
         let textView = UITextView(frame: initialFrame)
         
@@ -630,9 +611,6 @@ class SelectableTextView: UIView {
         canvasView.overlayContainerView.bringSubviewToFront(textView)
         editingTextView = textView
         
-        print("✅ [SelectableTextView] UITextView added to overlayContainerView for true in-place editing")
-        print("👁️ [SelectableTextView] UITextView parent view: \(textView.superview?.description ?? "nil")")
-        
         // Set up dynamic text sizing to match final text appearance
         setupDynamicTextSizing(for: textView)
 
@@ -642,7 +620,6 @@ class SelectableTextView: UIView {
             guard let textView = self.editingTextView else { return }
 
             let success = textView.becomeFirstResponder()
-            print("⌨️ [SelectableTextView] In-place keyboard activation: \(success)")
 
             if success && !textView.text.isEmpty && !self.isShowingPlaceholder {
                 textView.selectAll(nil)
@@ -651,9 +628,7 @@ class SelectableTextView: UIView {
     }
             
             /// Setup dynamic text sizing for true in-place editing experience
-                private func setupDynamicTextSizing(for textView: UITextView) {
-                    print("🔧 [SelectableTextView] Setting up dynamic text sizing for in-place editing")
-                    
+                private func setupDynamicTextSizing(for textView: UITextView) {                    
                     // Observe text changes to adjust frame dynamically
                     NotificationCenter.default.addObserver(
                         forName: UITextView.textDidChangeNotification,
@@ -694,7 +669,7 @@ class SelectableTextView: UIView {
                         height: newSize.height
                     )
                     
-                    print("📐 [SelectableTextView] Updated UITextView size: \(newSize)")
+                    
                 }
 
     /// Clean up UITextView after in-place editing
@@ -732,7 +707,7 @@ class SelectableTextView: UIView {
     private func adjustTextViewPositionForVisibility(_ textView: UITextView) {
         guard let window = window else { return }
         
-        print("🔧 [SelectableTextView] 开始调整UITextView位置以确保可见性")
+        
         
         // 获取当前在屏幕坐标系中的frame
         let currentScreenFrame = convert(textView.frame, to: window)
@@ -742,37 +717,30 @@ class SelectableTextView: UIView {
         var adjustedFrame = textView.frame
         
         // 水平方向调整
-        if currentScreenFrame.maxX > windowBounds.maxX {
-            let overflow = currentScreenFrame.maxX - windowBounds.maxX
-            adjustedFrame.origin.x -= overflow
-            print("🔧 [SelectableTextView] 水平向左调整: \(overflow)")
-        } else if currentScreenFrame.minX < windowBounds.minX {
-            let overflow = windowBounds.minX - currentScreenFrame.minX
-            adjustedFrame.origin.x += overflow
-            print("🔧 [SelectableTextView] 水平向右调整: \(overflow)")
-        }
-        
-        // 垂直方向调整
-        if currentScreenFrame.maxY > windowBounds.maxY {
-            let overflow = currentScreenFrame.maxY - windowBounds.maxY
-            adjustedFrame.origin.y -= overflow
-            print("🔧 [SelectableTextView] 垂直向上调整: \(overflow)")
-        } else if currentScreenFrame.minY < windowBounds.minY {
-            let overflow = windowBounds.minY - currentScreenFrame.minY
-            adjustedFrame.origin.y += overflow
-            print("🔧 [SelectableTextView] 垂直向下调整: \(overflow)")
-        }
-        
-        // 应用调整
-        if adjustedFrame != textView.frame {
-            textView.frame = adjustedFrame
-            print("📐 [SelectableTextView] UITextView frame已调整: \(adjustedFrame)")
-            
-            // 再次验证调整后的可见性
-            let newScreenFrame = convert(textView.frame, to: window)
-            let isNowVisible = windowBounds.intersects(newScreenFrame)
-            print("👁️ [SelectableTextView] 调整后是否可见: \(isNowVisible)")
-        }
+                    if currentScreenFrame.maxX > windowBounds.maxX {
+                        let overflow = currentScreenFrame.maxX - windowBounds.maxX
+                        adjustedFrame.origin.x -= overflow
+                    } else if currentScreenFrame.minX < windowBounds.minX {
+                        let overflow = windowBounds.minX - currentScreenFrame.minX
+                        adjustedFrame.origin.x += overflow
+                    }
+                    
+                    // 垂直方向调整
+                    if currentScreenFrame.maxY > windowBounds.maxY {
+                        let overflow = currentScreenFrame.maxY - windowBounds.maxY
+                        adjustedFrame.origin.y -= overflow
+                    } else if currentScreenFrame.minY < windowBounds.minY {
+                        let overflow = windowBounds.minY - currentScreenFrame.minY
+                        adjustedFrame.origin.y += overflow
+                    }        
+// 应用调整
+            if adjustedFrame != textView.frame {
+                textView.frame = adjustedFrame
+                
+                // 再次验证调整后的可见性
+                let newScreenFrame = convert(textView.frame, to: window)
+                let isNowVisible = window.bounds.intersects(newScreenFrame)
+            }
     }
 
     private func UIColor_fromHex(_ hex: String) -> UIColor {
@@ -801,7 +769,6 @@ extension SelectableTextView: UITextViewDelegate {
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
         // 处理占位符：如果当前显示占位符且用户开始输入，清除占位符并恢复用户字体
         if isShowingPlaceholder && !text.isEmpty {
-            print("🔍 [SelectableTextView] 用户开始输入，清除占位符")
             textView.text = ""
             textView.textColor = UIColor(hex: textNode.color) ?? .black
             // Restore user's font size when they start typing
@@ -824,11 +791,9 @@ extension SelectableTextView: UITextViewDelegate {
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
-        print("🔍 [SelectableTextView] textViewDidBeginEditing - 当前文本: '\(textView.text ?? "nil")'")
-        
         // 如果当前显示占位符，准备清除
         if isShowingPlaceholder {
-            print("🔍 [SelectableTextView] 检测到占位符状态，准备清除")
+            // 准备清除占位符状态
         }
     }
 }

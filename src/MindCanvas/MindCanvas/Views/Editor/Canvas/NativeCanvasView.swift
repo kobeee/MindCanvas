@@ -737,20 +737,14 @@ class NativeCanvasView: UIView {
     
     /// 在指定位置创建文字并立即进入编辑模式
     private func createTextAtLocationWithEditing(_ location: CGPoint) {
-        print("🆕 [NativeCanvasView] createTextAtLocationWithEditing 开始")
-        print("📍 [NativeCanvasView] 点击位置: \(location)")
-        
         // location是objectLayerView坐标系中的位置
         // 由于objectLayerView已经应用了transform(scale)，location直接就是画布内容坐标
         // 不需要再进行额外的坐标转换
         let contentLocation = location
-        print("📍 [NativeCanvasView] 内容位置: \(contentLocation)")
 
         let fontSize = stateManager?.textFontSize ?? 24
         let textColor = stateManager?.textColor ?? "#000000"
         let fontName = stateManager?.textFontName ?? ".SF Pro Display"
-        
-        print("⚙️ [NativeCanvasView] 文本配置 - 字体大小: \(fontSize), 颜色: \(textColor), 字体: \(fontName)")
 
         let text = TextLayerNode(
             position: contentLocation,
@@ -762,28 +756,18 @@ class NativeCanvasView: UIView {
             scale: 1.0,
             zIndex: textLayerManager.getNextZIndex()
         )
-        
-        print("📝 [NativeCanvasView] 创建文本节点: \(text.id)")
 
         addText(text)
-        print("✅ [NativeCanvasView] 文本已添加到画布")
         
         // 不立即选中文本，避免在编辑时显示控制点
         // selectedNodeID = text.id
 
         // 自动开始编辑
         if let textView = textViews[text.id] {
-            print("🔍 [NativeCanvasView] 找到文本视图，准备开始编辑")
-            print("🔍 [NativeCanvasView] 文本视图frame: \(textView.frame)")
-            print("🔍 [NativeCanvasView] 文本视图父视图: \(textView.superview?.description ?? "nil")")
-            
             // 确保视图布局完成后再开始编辑
             DispatchQueue.main.async {
-                print("📝 [NativeCanvasView] 开始编辑文本")
                 textView.startEditing()
             }
-        } else {
-            print("❌ [NativeCanvasView] 未找到文本视图！")
         }
     }
     
@@ -830,7 +814,7 @@ class NativeCanvasView: UIView {
                 let gestureInfo = "\(type(of: gesture))"
                 let stateInfo = "state: \(gesture.state.rawValue)"
                 let enabledInfo = gesture.isEnabled ? "enabled" : "disabled"
-                print("   [\(index)] \(gestureInfo) (\(stateInfo), \(enabledInfo))")
+                
                 
                 if let tapGesture = gesture as? UITapGestureRecognizer {
                     print("       - tapsRequired: \(tapGesture.numberOfTapsRequired)")
@@ -1839,12 +1823,7 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
     /// 处理手势识别器是否应该接收按压事件
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive press: UIPress) -> Bool {
-        print("🔍 [NativeCanvasView] shouldReceive press")
-        print("   - 手势识别器: \(type(of: gestureRecognizer))")
-        print("   - 按压类型: \(press.type.rawValue)")
-        
         let shouldReceive = true
-        print("   - 返回: \(shouldReceive)")
         return shouldReceive
     }
 
@@ -1853,12 +1832,7 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
     /// 处理手势识别器是否需要失败才能开始
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        print("🔍 [NativeCanvasView] shouldBeRequiredToFailBy")
-        print("   - 手势识别器1: \(type(of: gestureRecognizer))")
-        print("   - 手势识别器2: \(type(of: otherGestureRecognizer))")
-        
         let shouldBeRequired = false
-        print("   - 返回: \(shouldBeRequired)")
         return shouldBeRequired
     }
 
