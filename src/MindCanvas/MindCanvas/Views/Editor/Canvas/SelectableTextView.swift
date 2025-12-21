@@ -198,14 +198,9 @@ class SelectableTextView: UIView {
     }
 
     private func updateTextLabel() {
-        // 设置文字内容
-        if textNode.text.isEmpty {
-            textLabel.text = "输入文字"
-            textLabel.textColor = .systemGray
-        } else {
-            textLabel.text = textNode.text
-            textLabel.textColor = UIColor(hex: textNode.color) ?? .black
-        }
+        // 设置文字内容 - 不显示占位符，只显示实际内容
+        textLabel.text = textNode.text
+        textLabel.textColor = UIColor(hex: textNode.color) ?? .black
 
         // 设置字体
         let font = UIFont(name: textNode.fontName, size: textNode.fontSize * textNode.scale)
@@ -214,6 +209,9 @@ class SelectableTextView: UIView {
 
         // 设置frame - 确保UILabel填满整个bounds
         textLabel.frame = bounds
+        
+        // 如果文本为空，隐藏视图
+        isHidden = textNode.text.isEmpty
     }
 
     private func syncToNode() {
@@ -479,15 +477,21 @@ class SelectableTextView: UIView {
         let newText = editingTextView?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let originalText = textNode.text
 
-        // 更新节点
-        textNode = textNode.updated(text: newText)
-
         // 清理编辑视图
         cleanupEditingTextView()
 
         // 显示Label
         textLabel.isHidden = false
         isEditing = false
+
+        // 如果文本为空，通过回调通知删除该对象
+        if newText.isEmpty {
+            onEditingFinished?(textNode, "") // 空字符串表示需要删除
+            return
+        }
+
+        // 更新节点
+        textNode = textNode.updated(text: newText)
 
         // 更新显示
         updateFromNode()
@@ -501,31 +505,49 @@ class SelectableTextView: UIView {
 
     /// 设置编辑用的UITextView
     private func setupEditingTextView() {
+        print("🟢 [SelectableTextView] setupEditingTextView 开始")
+        
         // 安全检查
         guard bounds.width >= 10 && bounds.height >= 10 else {
+            print("⚠️ [SelectableTextView] bounds太小，取消编辑: \(bounds)")
             isEditing = false
             textLabel.isHidden = false
             return
         }
 
         guard window != nil else {
+            print("⚠️ [SelectableTextView] window为nil，取消编辑")
             isEditing = false
             textLabel.isHidden = false
             return
         }
 
-        // 创建UITextView - 稍微扩大一点以提供编辑空间
-        let textViewFrame = bounds.insetBy(dx: -8, dy: -8)
+        // 设置键盘通知监听
+        setupKeyboardNotifications()
+
+        // 创建UITextView - 确保有足够的编辑空间
+        let minSize: CGFloat = 60
+        let textViewWidth = max(bounds.width + 40, minSize)
+        let textViewHeight = max(bounds.height + 20, minSize)
+        let textViewFrame = CGRect(
+            x: -20,
+            y: -10,
+            width: textViewWidth,
+            height: textViewHeight
+        )
+        
+        print("📐 [SelectableTextView] UITextView frame: \(textViewFrame)")
+        
         let textView = UITextView(frame: textViewFrame)
 
         // 配置UITextView
         textView.text = textNode.text
         textView.font = textLabel.font
-        textView.textColor = textNode.text.isEmpty ? .black : textLabel.textColor
+        textView.textColor = .black  // 强制使用黑色，确保可见
         textView.textAlignment = .center
-        textView.backgroundColor = UIColor.white.withAlphaComponent(0.95)
+        textView.backgroundColor = UIColor.systemBackground  // 使用系统背景色，确保在深色模式下也可见
         textView.layer.cornerRadius = 8
-        textView.layer.borderWidth = 2
+        textView.layer.borderWidth = 3  // 增加边框宽度
         textView.layer.borderColor = UIColor.systemBlue.cgColor
         textView.delegate = self
         textView.autocorrectionType = .no
@@ -533,15 +555,30 @@ class SelectableTextView: UIView {
         textView.returnKeyType = .done
         textView.tintColor = .systemBlue
 
-        // 设置阴影
+        // 设置更明显的阴影
         textView.layer.shadowColor = UIColor.black.cgColor
-        textView.layer.shadowOffset = CGSize(width: 0, height: 2)
-        textView.layer.shadowOpacity = 0.15
-        textView.layer.shadowRadius = 6
+        textView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        textView.layer.shadowOpacity = 0.3
+        textView.layer.shadowRadius = 8
         textView.layer.masksToBounds = false
+        
+        // 添加占位符文本
+        if textView.text.isEmpty {
+            textView.text = "输入文字"
+            textView.textColor = .systemGray
+        }
+
+        print("✅ [SelectableTextView] UITextView 已创建并配置")
+        print("🎨 [SelectableTextView] UITextView 背景色已设置")
+        print("🎨 [SelectableTextView] UITextView 文字颜色已设置")
+        print("📐 [SelectableTextView] UITextView 最终frame: \(textView.frame)")
 
         addSubview(textView)
+        bringSubviewToFront(textView)  // 确保在最上层
         editingTextView = textView
+        
+        print("👁️ [SelectableTextView] UITextView 已添加到视图层级")
+        print("👁️ [SelectableTextView] 父视图: \(textView.superview?.description ?? "nil")")
 
         // 延迟激活键盘
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -564,6 +601,7 @@ class SelectableTextView: UIView {
 
     /// 清理编辑用的UITextView
     private func cleanupEditingTextView() {
+        removeKeyboardNotifications()
         editingTextView?.resignFirstResponder()
         editingTextView?.removeFromSuperview()
         editingTextView = nil
@@ -626,6 +664,87 @@ extension SelectableTextView: UITextViewDelegate {
 
     func textViewDidBeginEditing(_ textView: UITextView) {
         // 编辑开始
+    }
+}
+
+// MARK: - Keyboard Handling
+
+extension SelectableTextView {
+    
+    /// 设置键盘通知监听
+    private func setupKeyboardNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShow),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+    
+    /// 移除键盘通知监听
+    private func removeKeyboardNotifications() {
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+    
+    @objc private func keyboardWillShow(notification: NSNotification) {
+        guard let keyboardSize = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        guard let canvasView = findParentCanvasView() else { return }
+        
+        let keyboardHeight = keyboardSize.height
+        
+        // 计算文本框在画布坐标系中的位置
+        let textFrameInSelf = bounds.insetBy(dx: -20, dy: -20) // 扩大一些区域，确保完全可见
+        let textFrameInCanvas = convert(textFrameInSelf, to: canvasView.pencilCanvas)
+        
+        // 计算键盘在画布坐标系中的位置
+        let canvasVisibleRect = CGRect(
+            origin: canvasView.pencilCanvas.contentOffset,
+            size: canvasView.pencilCanvas.bounds.size
+        )
+        let keyboardTopInCanvas = canvasVisibleRect.maxY - keyboardHeight
+        
+        // 检查文本框是否被键盘遮挡
+        let textBottom = textFrameInCanvas.maxY
+        let additionalPadding: CGFloat = 80 // 额外的边距，确保文本框不会紧贴键盘
+        
+        if textBottom > keyboardTopInCanvas {
+            // 计算需要滚动到的目标矩形
+            let targetRect = CGRect(
+                x: textFrameInCanvas.minX,
+                y: textFrameInCanvas.minY,
+                width: textFrameInCanvas.width,
+                height: textFrameInCanvas.height + additionalPadding
+            )
+            
+            // 使用scrollRectToVisible，这是Apple推荐的方法
+            UIView.animate(withDuration: 0.3, animations: {
+                canvasView.pencilCanvas.scrollRectToVisible(targetRect, animated: false)
+            })
+        }
+    }
+    
+    @objc private func keyboardWillHide(notification: NSNotification) {
+        // 键盘隐藏时可以恢复原来的滚动位置，这里暂时不处理
+    }
+    
+    /// 查找父级的NativeCanvasView
+    private func findParentCanvasView() -> NativeCanvasView? {
+        var view: UIView? = superview
+        while view != nil {
+            if let canvasView = view as? NativeCanvasView {
+                return canvasView
+            }
+            view = view?.superview
+        }
+        return nil
     }
 }
 

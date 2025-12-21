@@ -737,14 +737,20 @@ class NativeCanvasView: UIView {
     
     /// 在指定位置创建文字并立即进入编辑模式
     private func createTextAtLocationWithEditing(_ location: CGPoint) {
+        print("🆕 [NativeCanvasView] createTextAtLocationWithEditing 开始")
+        print("📍 [NativeCanvasView] 点击位置: \(location)")
+        
         // location是objectLayerView坐标系中的位置
         // 由于objectLayerView已经应用了transform(scale)，location直接就是画布内容坐标
         // 不需要再进行额外的坐标转换
         let contentLocation = location
+        print("📍 [NativeCanvasView] 内容位置: \(contentLocation)")
 
         let fontSize = stateManager?.textFontSize ?? 24
         let textColor = stateManager?.textColor ?? "#000000"
         let fontName = stateManager?.textFontName ?? ".SF Pro Display"
+        
+        print("⚙️ [NativeCanvasView] 文本配置 - 字体大小: \(fontSize), 颜色: \(textColor), 字体: \(fontName)")
 
         let text = TextLayerNode(
             position: contentLocation,
@@ -756,16 +762,28 @@ class NativeCanvasView: UIView {
             scale: 1.0,
             zIndex: textLayerManager.getNextZIndex()
         )
+        
+        print("📝 [NativeCanvasView] 创建文本节点: \(text.id)")
 
         addText(text)
-        selectedNodeID = text.id
+        print("✅ [NativeCanvasView] 文本已添加到画布")
+        
+        // 不立即选中文本，避免在编辑时显示控制点
+        // selectedNodeID = text.id
 
         // 自动开始编辑
         if let textView = textViews[text.id] {
+            print("🔍 [NativeCanvasView] 找到文本视图，准备开始编辑")
+            print("🔍 [NativeCanvasView] 文本视图frame: \(textView.frame)")
+            print("🔍 [NativeCanvasView] 文本视图父视图: \(textView.superview?.description ?? "nil")")
+            
             // 确保视图布局完成后再开始编辑
             DispatchQueue.main.async {
+                print("📝 [NativeCanvasView] 开始编辑文本")
                 textView.startEditing()
             }
+        } else {
+            print("❌ [NativeCanvasView] 未找到文本视图！")
         }
     }
     
@@ -967,17 +985,17 @@ class NativeCanvasView: UIView {
 
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
-            textOverlayView.isUserInteractionEnabled = tool == .text  // 新增：只有文字工具时可交互
+            textOverlayView.isUserInteractionEnabled = true  // 修复：确保文本工具时可交互
             
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
-            objectLayerView.isUserInteractionEnabled = false  // 修改：创建形状时不可交互
+            objectLayerView.isUserInteractionEnabled = false  // 创建形状时不可交互
             
             // 特殊处理文字工具
             if tool == .text {
-                // 确保所有文字的手势都能正常工作
+                // 禁用文本选择手势，只允许创建新文本
                 for (_, textView) in textViews {
-                    textView.enableTextGestures()
+                    textView.disableTextGestures()
                 }
             }
         }
@@ -1690,8 +1708,17 @@ class NativeCanvasView: UIView {
         textView.onEditingFinished = { [weak self] updatedText, newText in
             guard let self = self else { return }
             
+            // 如果文本为空，删除该文本对象
+            if newText.isEmpty {
+                self.removeText(id: updatedText.id)
+                return
+            }
+            
             // 更新文字节点
             self.textLayerManager.updateText(updatedText)
+            
+            // 编辑完成后选中文本，显示控制点
+            self.selectedNodeID = updatedText.id
             
             // 记录撤销操作
             if let startText = operationStartText, startText.text != updatedText.text {
@@ -1709,11 +1736,13 @@ class NativeCanvasView: UIView {
         }
         
         textViews[text.id] = textView
-        objectLayerView.addSubview(textView)  // 修改：添加到objectLayerView，与箭头/形状保持一致
+        textOverlayView.addSubview(textView)  // 修复：添加到textOverlayView，确保正确的交互层级
         
         // 根据当前工具状态设置手势
-        if currentTool == .select || currentTool == .text {
+        if currentTool == .select {
             textView.enableTextGestures()
+        } else {
+            textView.disableTextGestures()
         }
         
         // 关键修复：强制立即布局，确保视图可见
