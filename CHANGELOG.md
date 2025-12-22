@@ -1,5 +1,87 @@
 # 开发记录
 
+## 2025-12-22 - 文本工具键盘定位遗留问题修复完成 ✅
+
+### 概述
+修复了上一轮修复后遗留的两个问题：
+1. 键盘弹出后点击非遮挡区域时画布错误还原
+2. 工具栏高度未纳入遮挡面积计算
+
+### 问题1修复：矫枉过正的画布还原行为 ✅
+
+**问题描述**：
+键盘弹出后，画布上移。如果用户再次点击画布的某块区域（该区域在原始位置不会被键盘遮挡），画布会错误地还原到原始位置。
+
+**根本原因**：
+`finishEditing()`在结束编辑时无条件恢复画布位置，即使用户只是切换编辑位置（键盘保持显示）。
+
+**修复方案**：
+1. **移除finishEditing中的主动恢复逻辑**：不再在finishEditing中主动恢复画布位置
+2. **恢复逻辑完全由keyboardWillHide负责**：只有当键盘真正收起时才恢复
+3. **修复cleanupEditingTextView的执行顺序**：先resignFirstResponder（触发keyboardWillHide），再异步移除监听器
+
+**代码修改**：
+```swift
+// finishEditing() - 移除主动恢复逻辑
+// 只有当没有调整过位置时，才清理状态
+if !Self.hasAdjustedForKeyboard {
+    Self.responsibleInstance = nil
+    Self.originalContentOffset = .zero
+}
+
+// cleanupEditingTextView() - 修复执行顺序
+editingTextView?.resignFirstResponder()  // 先触发键盘隐藏
+DispatchQueue.main.async { [weak self] in
+    self?.removeKeyboardNotifications()  // 延迟移除监听器
+}
+```
+
+### 问题2修复：工具栏遮挡计算缺失 ✅
+
+**问题描述**：
+当文本编辑位置正好在键盘上方时，键盘弹出会把工具栏往上顶，工具栏可能会遮挡文本框。
+
+**根本原因**：
+`calculateIfTextIsHidden()`只考虑键盘高度，没有考虑工具栏的高度。
+
+**修复方案**：
+将工具栏高度（约60点，包含内边距）和舒适边距（20点）纳入遮挡面积计算。
+
+**代码修改**：
+```swift
+// calculateIfTextIsHidden() - 增加工具栏高度计算
+let toolbarHeight: CGFloat = 60
+let comfortMargin: CGFloat = 20
+let effectiveOcclusionTop = keyboardTopInWindow - toolbarHeight - comfortMargin
+let isHidden = textViewBottomInWindow > effectiveOcclusionTop
+
+// keyboardWillShow() - 滚动距离计算也要考虑工具栏
+let toolbarHeight: CGFloat = 60
+let effectiveOcclusionTop = keyboardTopInScreen - toolbarHeight
+let overlapAmount = textViewBottomInScreen - effectiveOcclusionTop
+```
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `SelectableTextView.swift` | 核心修复 | finishEditing逻辑、cleanupEditingTextView顺序、遮挡计算 |
+
+### 验证标准
+
+- [x] 首次点击画布底部编辑文本：键盘弹出，画布上移
+- [x] 键盘弹出后点击画布上方区域编辑：画布不再移动
+- [x] 收起键盘（回车/工具切换/收起按钮）：画布恢复到原始位置
+- [x] 文本编辑位置在键盘上方时：考虑工具栏高度，避免被工具栏遮挡
+
+### 技术要点
+
+1. **事件驱动的状态管理**：画布位置恢复完全由keyboardWillHide事件驱动，避免在finishEditing中提前恢复
+2. **异步监听器移除**：确保keyboardWillHide有机会被接收后再移除监听器
+3. **统一的遮挡区域计算**：键盘高度 + 工具栏高度 + 舒适边距
+
+---
+
 ## 2025-12-22 - 文本工具键盘定位状态管理修复完成 ✅ + 遗留问题记录 ⚠️
 
 ### 概述

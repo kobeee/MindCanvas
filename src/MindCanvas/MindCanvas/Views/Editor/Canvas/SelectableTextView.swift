@@ -520,25 +520,25 @@ class SelectableTextView: UIView {
             newText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        // 关键修复：在移除监听器之前，主动执行画布位置恢复
-        // 因为resignFirstResponder会触发键盘隐藏，但此时监听器即将被移除
-        if Self.hasAdjustedForKeyboard {
-            let savedOffset = Self.originalContentOffset
-            print("📍 [TextView] finishEditing - 主动恢复画布位置到: \(savedOffset)")
-
-            if let canvasView = findParentCanvasView() {
-                let scrollView = canvasView.pencilCanvas
-                UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
-                    scrollView.setContentOffset(savedOffset, animated: false)
-                }
-            }
+        // 关键修复：finishEditing不再主动恢复画布位置
+        // 恢复逻辑完全由keyboardWillHide负责
+        // 这样可以正确处理"切换编辑位置"（键盘保持）和"真正收起键盘"的区别
+        //
+        // 注意：我们需要在resignFirstResponder之前保持监听器存活
+        // 只有这样才能接收到keyboardWillHide通知
+        //
+        // 状态保留逻辑：
+        // - hasAdjustedForKeyboard: 保留（由keyboardWillHide负责重置）
+        // - responsibleInstance: 保留（由keyboardWillHide负责重置）
+        // - originalContentOffset: 保留（由keyboardWillHide负责重置）
+        // - isKeyboardVisible: 保留（由keyboardWillHide负责重置）
+        //
+        // 只有当没有调整过位置时，才清理状态
+        if !Self.hasAdjustedForKeyboard {
+            Self.responsibleInstance = nil
+            Self.originalContentOffset = .zero
         }
-
-        // 重置全局状态
-        Self.hasAdjustedForKeyboard = false
-        Self.responsibleInstance = nil
-        Self.isKeyboardVisible = false
-        Self.originalContentOffset = .zero
+        // 注意：不要在这里重置isKeyboardVisible，由keyboardWillHide负责
 
         // 清理编辑视图
         cleanupEditingTextView()
@@ -567,22 +567,38 @@ class SelectableTextView: UIView {
         onNodeUpdated?(textNode)
     }
     
-    /// 计算文本是否被键盘遮挡
+    /// 计算文本是否被键盘（及其上方的工具栏）遮挡
+    ///
+    /// 遮挡区域包括：
+    /// 1. 键盘本身的高度
+    /// 2. 键盘上方的工具栏高度（约60点，包含内边距）
+    /// 3. 舒适边距
     private func calculateIfTextIsHidden(scrollView: UIScrollView, keyboardFrame: CGRect, textView: UITextView?) -> Bool {
         guard let textView = textView else { return false }
         guard let window = scrollView.window else { return false }
-        
-        // 计算键盘顶部在scrollView坐标系中的位置
-        let keyboardFrameInView = scrollView.convert(keyboardFrame, from: window)
-        let keyboardTopInView = keyboardFrameInView.minY
-        
-        // 计算文本框底部在scrollView坐标系中的位置
-        // textView直接添加在overlayContainerView中，需要正确转换坐标
-        let textViewFrameInView = scrollView.convert(textView.frame, from: textView.superview)
-        let textViewBottomInView = textViewFrameInView.maxY
-        
-        // 如果文本框底部低于键盘顶部，则被遮挡
-        return textViewBottomInView > keyboardTopInView
+
+        // 工具栏高度（包含padding）
+        // CanvasToolbar高度约50点，加上安全区域和内边距
+        let toolbarHeight: CGFloat = 60
+
+        // 舒适边距，确保文本框与工具栏有足够间距
+        let comfortMargin: CGFloat = 20
+
+        // 计算有效遮挡区域顶部 = 键盘顶部 - 工具栏高度 - 舒适边距
+        // 这个区域是键盘弹出后，文本框不应该出现的区域
+        let keyboardTopInWindow = window.bounds.height - keyboardFrame.height
+        let effectiveOcclusionTop = keyboardTopInWindow - toolbarHeight - comfortMargin
+
+        // 计算文本框底部在window坐标系中的位置
+        let textViewFrameInWindow = textView.convert(textView.bounds, to: window)
+        let textViewBottomInWindow = textViewFrameInWindow.maxY
+
+        // 如果文本框底部低于有效遮挡区域顶部，则需要调整
+        let isHidden = textViewBottomInWindow > effectiveOcclusionTop
+
+        print("🎹 [Keyboard] 遮挡计算: textViewBottom=\(textViewBottomInWindow), effectiveOcclusionTop=\(effectiveOcclusionTop) (keyboardTop=\(keyboardTopInWindow), toolbar=\(toolbarHeight)), isHidden=\(isHidden)")
+
+        return isHidden
     }
     
         
@@ -793,19 +809,24 @@ class SelectableTextView: UIView {
 
     /// Clean up UITextView after in-place editing
     private func cleanupEditingTextView() {
-        removeKeyboardNotifications()
-        
         // Clean up text change observer
         if let textView = editingTextView {
             NotificationCenter.default.removeObserver(self, name: UITextView.textDidChangeNotification, object: textView)
         }
-        
+
+        // 关键修复：先resignFirstResponder，让keyboardWillHide有机会被触发
+        // 然后再移除键盘通知监听器
+        // 这样可以正确接收到键盘隐藏通知并执行画布位置恢复
         editingTextView?.resignFirstResponder()
+
+        // 延迟移除监听器，确保keyboardWillHide有机会被接收和处理
+        // 使用异步执行，让当前RunLoop周期完成后再移除
+        DispatchQueue.main.async { [weak self] in
+            self?.removeKeyboardNotifications()
+        }
+
         editingTextView?.removeFromSuperview()
         editingTextView = nil
-        
-        // 重置键盘状态（当前实例完成编辑，但键盘可能仍然显示）
-        // 注意：这里不重置Self.isKeyboardVisible，因为键盘可能仍然显示
     }
 
     /// 更新编辑状态
@@ -1054,12 +1075,20 @@ extension SelectableTextView {
             )
             textView.frame = textViewFrame
 
-            // 计算重叠量
+            // 计算重叠量（包含工具栏高度）
             let textViewFrameInWindow = textView.convert(textViewFrame, to: window)
             let textViewBottomInScreen = textViewFrameInWindow.maxY
             let keyboardHeight = keyboardFrame.height
             let keyboardTopInScreen = window.bounds.height - keyboardHeight
-            let overlapAmount = textViewBottomInScreen - keyboardTopInScreen
+
+            // 工具栏高度（与calculateIfTextIsHidden保持一致）
+            let toolbarHeight: CGFloat = 60
+
+            // 有效遮挡区域顶部 = 键盘顶部 - 工具栏高度
+            let effectiveOcclusionTop = keyboardTopInScreen - toolbarHeight
+
+            // 计算需要滚动的距离：文本框底部到有效遮挡区域顶部
+            let overlapAmount = textViewBottomInScreen - effectiveOcclusionTop
 
             if overlapAmount > 0 {
                 let comfortableMargin: CGFloat = 30
