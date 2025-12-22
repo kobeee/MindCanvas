@@ -1709,8 +1709,8 @@ class NativeCanvasView: UIView {
             // 更新文字节点
             self.textLayerManager.updateText(updatedText)
             
-            // 编辑完成后选中文本，显示控制点
-            self.selectedNodeID = updatedText.id
+            // 编辑完成后不再自动选中文本，避免显示控制点和旋转点
+            // 用户需要手动切换到选择工具才能操作文本
             
             // 记录撤销操作
             if let startText = operationStartText, startText.text != updatedText.text {
