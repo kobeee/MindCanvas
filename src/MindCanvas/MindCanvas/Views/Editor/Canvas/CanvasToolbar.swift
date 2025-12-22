@@ -204,7 +204,7 @@ private struct PenToolButton: View {
     }
 }
 
-// MARK: - 文字工具按钮（带弹出设置面板）
+// MARK: - 文字工具按钮（简化版，无设置面板）
 
 private struct TextToolButtonView: View {
     let tool: CanvasTool
@@ -215,13 +215,8 @@ private struct TextToolButtonView: View {
 
     var body: some View {
         Button {
-            if isSelected {
-                // 已选中时，点击弹出设置
-                showSettings.toggle()
-            } else {
-                // 未选中时，先选中工具
-                onSelect()
-            }
+            // 简化行为：只选中工具，不弹出设置
+            onSelect()
         } label: {
             Image(systemName: tool.iconName)
                 .font(.system(size: 22))
@@ -236,11 +231,12 @@ private struct TextToolButtonView: View {
         .buttonStyle(.plain)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
         .help(tool.displayName)
-        .popover(isPresented: $showSettings, arrowEdge: .bottom) {
-            SimpleFontPickerPopover(stateManager: stateManager, onConfirm: {
-                showSettings = false
-            })
-        }
+        // 注释掉字体设置弹窗
+        // .popover(isPresented: $showSettings, arrowEdge: .bottom) {
+        //     SimpleFontPickerPopover(stateManager: stateManager, onConfirm: {
+        //         showSettings = false
+        //     })
+        // }
     }
 }
 

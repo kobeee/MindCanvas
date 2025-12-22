@@ -745,16 +745,17 @@ class NativeCanvasView: UIView {
         // 不需要再进行额外的坐标转换
         let contentLocation = location
 
-        let fontSize = stateManager?.textFontSize ?? 24
-        let textColor = stateManager?.textColor ?? "#000000"
-        let fontName = stateManager?.textFontName ?? ".SF Pro Display"
+        // 简化：使用默认字体和黑色
+        let defaultFontSize: CGFloat = 24
+        let defaultTextColor = "#000000"  // 黑色
+        let defaultFontName = ".SF Pro Display"
 
         let text = TextLayerNode(
             position: contentLocation,
             text: "",
-            fontSize: fontSize,
-            color: textColor,
-            fontName: fontName,
+            fontSize: defaultFontSize,
+            color: defaultTextColor,
+            fontName: defaultFontName,
             rotation: 0,
             scale: 1.0,
             zIndex: textLayerManager.getNextZIndex()
