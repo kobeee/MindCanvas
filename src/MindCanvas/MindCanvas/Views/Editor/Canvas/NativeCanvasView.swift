@@ -2014,14 +2014,17 @@ extension NativeCanvasView {
     
     /// 重置所有文本的键盘状态
     private func resetAllTextKeyboardStates() {
+        // 先获取是否需要恢复位置的信息（在finishEditing之前）
+        // 因为finishEditing现在会主动恢复位置，这里不需要额外处理
+
         for (_, textView) in textViews {
             if textView.isEditing {
                 print("🧹 [Canvas] 强制结束文本编辑: \(textView.textNode.id)")
-                textView.finishEditing()
+                textView.finishEditing()  // finishEditing现在会主动恢复位置
             }
         }
-        
-        // 🔧 关键修复：重置全局静态状态
+
+        // 确保全局状态被重置（finishEditing应该已经处理了，这是防御性代码）
         SelectableTextView.resetGlobalKeyboardState()
     }
 }
