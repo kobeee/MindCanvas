@@ -672,14 +672,17 @@ class NativeCanvasView: UIView {
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
         // 文字工具模式
         if currentTool == .text {
-            // 获取objectLayerView中的坐标（文字视图现在也在这里）
-            let location = gesture.location(in: objectLayerView)
-            let hitView = objectLayerView.hitTest(location, with: nil)
-
-            // 如果点击在已有文字上，让其自己处理
-            if hitView is SelectableTextView {
+            // 关键修复：在textOverlayView中检查文本点击
+            let textLocation = gesture.location(in: textOverlayView)
+            let hitTextView = textOverlayView.hitTest(textLocation, with: nil)
+            
+            // 如果点击在已有文字上，让其自己处理（进入编辑模式）
+            if hitTextView is SelectableTextView {
                 return
             }
+            
+            // 获取objectLayerView中的坐标用于创建新文本
+            let location = gesture.location(in: objectLayerView)
 
             // 点击空白区域创建新文字
             createTextAtLocationWithEditing(location)
