@@ -475,18 +475,10 @@ class SelectableTextView: UIView {
         isEditing = true
         onEditingStarted?(textNode)
 
-        print("=== START EDITING ===")
-        print("✏️ [TextView] 开始编辑 - 实例: \(ObjectIdentifier(self))")
-        print("[State] isKeyboardVisible: \(Self.isKeyboardVisible)")
-        print("[State] hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard)")
-        print("[State] originalContentOffset: \(Self.originalContentOffset)")
-        print("[State] responsibleInstance: \(Self.responsibleInstance.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
-
         // 关键修复：键盘已显示时，保留原始位置信息
         // 不重置 hasAdjustedForKeyboard 和 responsibleInstance
         // 这些信息需要保留到键盘真正收起时使用
         if Self.isKeyboardVisible {
-            print("ℹ️ [TextView] 键盘已显示，保留原始位置信息用于最终恢复")
             // 注意：不清除 hasAdjustedForKeyboard 和 responsibleInstance
             // 这些信息需要保留到键盘真正收起时使用
         }
@@ -501,13 +493,6 @@ class SelectableTextView: UIView {
     /// 完成编辑文字
     func finishEditing() {
         guard isEditing else { return }
-
-        print("=== FINISH EDITING ===")
-        print("✏️ [TextView] 完成编辑 - 实例: \(ObjectIdentifier(self))")
-        print("[State] isKeyboardVisible: \(Self.isKeyboardVisible)")
-        print("[State] hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard)")
-        print("[State] originalContentOffset: \(Self.originalContentOffset)")
-        print("[State] responsibleInstance: \(Self.responsibleInstance.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
 
         let rawText = editingTextView?.text ?? ""
         let originalText = textNode.text
@@ -596,7 +581,7 @@ class SelectableTextView: UIView {
         // 如果文本框底部低于有效遮挡区域顶部，则需要调整
         let isHidden = textViewBottomInWindow > effectiveOcclusionTop
 
-        print("🎹 [Keyboard] 遮挡计算: textViewBottom=\(textViewBottomInWindow), effectiveOcclusionTop=\(effectiveOcclusionTop) (keyboardTop=\(keyboardTopInWindow), toolbar=\(toolbarHeight)), isHidden=\(isHidden)")
+        
 
         return isHidden
     }
@@ -660,7 +645,6 @@ class SelectableTextView: UIView {
         
         // Get NativeCanvasView reference
         guard let canvasView = findParentCanvasView() else {
-            print("❌ [TextView] 无法找到父级画布视图")
             return
         }
         
@@ -743,21 +727,16 @@ class SelectableTextView: UIView {
         // Activate keyboard immediately for seamless in-place experience
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isEditing else { 
-                print("❌ [TextView] 键盘激活失败：编辑状态已改变")
                 return 
             }
             guard let textView = self.editingTextView else { 
-                print("❌ [TextView] 键盘激活失败：编辑视图不存在")
                 return 
             }
 
-            // 开始激活键盘
             let success = textView.becomeFirstResponder()
-            // 键盘激活完成
 
             if success && !textView.text.isEmpty && !self.isShowingPlaceholder {
                 textView.selectAll(nil)
-                // 已选择现有文本
             }
         }
     }
@@ -947,32 +926,19 @@ extension SelectableTextView {
     
     /// 重置全局键盘状态（仅重置状态，不恢复位置）
     static func resetGlobalKeyboardState() {
-        print("=== RESET GLOBAL STATE ===")
-        print("🔄 [Keyboard] 重置全局键盘状态")
-        print("[State] 重置前 - isKeyboardVisible: \(isKeyboardVisible)")
-        print("[State] 重置前 - hasAdjustedForKeyboard: \(hasAdjustedForKeyboard)")
-        print("[State] 重置前 - originalContentOffset: \(originalContentOffset)")
-        print("[State] 重置前 - responsibleInstance: \(responsibleInstance.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
-        
         isKeyboardVisible = false
         hasAdjustedForKeyboard = false
         originalContentOffset = .zero
         responsibleInstance = nil
-        
-        print("[State] 重置完成 - 所有状态已清零")
     }
 
     /// 重置全局键盘状态并恢复画布位置
     /// - Parameter canvasView: 画布视图引用，用于执行位置恢复
     static func resetGlobalKeyboardStateAndRestorePosition(canvasView: NativeCanvasView?) {
-        print("🔄 [Keyboard] 重置全局键盘状态并恢复位置")
-
         // 如果有调整过位置，先执行恢复
         if hasAdjustedForKeyboard, let canvasView = canvasView {
             let scrollView = canvasView.pencilCanvas
             let savedOffset = originalContentOffset
-
-            print("📍 [Keyboard] 主动恢复画布位置到: \(savedOffset)")
 
             UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
                 scrollView.setContentOffset(savedOffset, animated: false)
@@ -1010,25 +976,15 @@ extension SelectableTextView {
     }
     
     @objc private func keyboardWillShow(notification: NSNotification) {
-        print("=== KEYBOARD WILL SHOW ===")
-        print("🎹 [Keyboard] 键盘弹出通知接收 - 实例: \(ObjectIdentifier(self))")
-        print("[State] isKeyboardVisible: \(Self.isKeyboardVisible)")
-        print("[State] hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard)")
-        print("[State] originalContentOffset: \(Self.originalContentOffset)")
-        print("[State] responsibleInstance: \(Self.responsibleInstance.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
-        
         guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         guard let canvasView = findParentCanvasView() else { return }
 
         // 标记键盘为显示状态
         Self.isKeyboardVisible = true
 
-        print("🎹 [Keyboard] 全局状态 - hasAdjusted: \(Self.hasAdjustedForKeyboard), responsible: \(Self.responsibleInstance.map { "\(ObjectIdentifier($0))" } ?? "无")")
-
         // 关键修复：如果已经有责任实例且已调整过位置，后续实例不应该重复处理
         // 这保证了originalContentOffset始终是第一次调整前的真实位置
         if Self.hasAdjustedForKeyboard && Self.responsibleInstance != nil {
-            print("ℹ️ [Keyboard] 已有责任实例处理过画布调整，当前实例跳过处理")
             // 只需要更新当前UITextView的位置
             updateTextViewPositionAfterScroll()
             return
@@ -1047,16 +1003,12 @@ extension SelectableTextView {
             textView: editingTextView
         )
 
-        print("🎹 [Keyboard] 遮挡检测: isTextHidden=\(isTextHidden)")
-
         // 需要调整且尚未调整过
         if isTextHidden {
             // 记录原始位置（这是第一次调整，记录真实的原始位置）
             Self.originalContentOffset = currentOffset
             Self.responsibleInstance = self
             Self.hasAdjustedForKeyboard = true
-
-            print("📍 [Keyboard] 记录原始位置: \(Self.originalContentOffset)")
 
             guard let textView = editingTextView else { return }
             guard let window = scrollView.window else { return }
@@ -1101,8 +1053,6 @@ extension SelectableTextView {
                 let clampedOffsetY = min(newOffsetY, max(0, maxOffsetY))
                 let newOffset = CGPoint(x: currentOffset.x, y: clampedOffsetY)
 
-                print("🎯 [Keyboard] 调整画布: \(currentOffset) -> \(newOffset)")
-
                 UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut]) {
                     scrollView.setContentOffset(newOffset, animated: false)
                 } completion: { _ in
@@ -1140,19 +1090,11 @@ extension SelectableTextView {
     }
     
     @objc private func keyboardWillHide(notification: NSNotification) {
-        print("=== KEYBOARD WILL HIDE ===")
-        print("🎹 [Keyboard] 键盘隐藏通知接收 - 实例: \(ObjectIdentifier(self))")
-        print("[State] isKeyboardVisible: \(Self.isKeyboardVisible)")
-        print("[State] hasAdjustedForKeyboard: \(Self.hasAdjustedForKeyboard)")
-        print("[State] originalContentOffset: \(Self.originalContentOffset)")
-        print("[State] responsibleInstance: \(Self.responsibleInstance.map { String(describing: ObjectIdentifier($0)) } ?? "nil")")
-
         // 重置键盘可见状态
         Self.isKeyboardVisible = false
 
         // 防御性检查：如果没有调整过位置，无需恢复
         guard Self.hasAdjustedForKeyboard else {
-            print("ℹ️ [Keyboard] 未调整过画布位置，跳过恢复")
             Self.responsibleInstance = nil  // 清理可能的残留状态
             return
         }
@@ -1168,15 +1110,12 @@ extension SelectableTextView {
         let currentOffset = scrollView.contentOffset
         let animationDuration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.3
 
-        print("📍 [Keyboard] 准备恢复位置: 当前=\(currentOffset), 原始=\(Self.originalContentOffset)")
-
         // 恢复画布位置
         if currentOffset != Self.originalContentOffset {
             UIView.animate(withDuration: animationDuration, delay: 0, options: [.curveEaseOut]) {
                 scrollView.setContentOffset(Self.originalContentOffset, animated: false)
             } completion: { _ in
                 self.updateTextViewPositionAfterScroll()
-                print("✅ [Keyboard] 画布位置恢复完成")
             }
         }
 

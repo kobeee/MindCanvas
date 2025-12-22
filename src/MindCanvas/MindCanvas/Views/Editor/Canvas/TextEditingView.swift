@@ -44,21 +44,17 @@ struct TextEditingView: View {
                 .cornerRadius(4)
                 .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 .onAppear {
-                    print("🟢 [TextEditingView] TextField onAppear - 位置: \(textFieldPosition)")
                     editingText = text
                     textFieldPosition = position
                     setupKeyboardNotifications()
                 }
                 .onDisappear {
-                    print("🔴 [TextEditingView] TextField onDisappear")
                     removeKeyboardNotifications()
                 }
                 .onSubmit {
-                    print("⌨️ [TextEditingView] onSubmit 被调用 - 文本: '\(editingText)'")
                     createText()
                 }
                 .onTapGesture {
-                    print("👆 [TextEditingView] TextField 被点击")
                     // 点击输入框内部时不处理，避免与背景手势冲突
                     checkFirstResponderStatus()
                 }
@@ -69,24 +65,17 @@ struct TextEditingView: View {
             DragGesture(minimumDistance: 0)
                 .onEnded { value in
                     if !isEditing {
-                        print("👆 [TextEditingView] 画布点击 - 位置: \(value.location)")
                         position = value.location
                         textFieldPosition = value.location
                         editingText = ""
                         isEditing = true
-                        print("⌨️ [TextEditingView] 激活文字编辑模式")
                     }
                 }
         )
-        .onAppear {
-            print("🟢 [TextEditingView] 文字编辑视图出现")
-        }
     }
     
     private func createText() {
-        print("⌨️ [TextEditingView] createText 被调用 - 文本: '\(editingText)'")
         guard !editingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            print("⚠️ [TextEditingView] 文本为空，取消创建")
             isEditing = false
             return
         }
@@ -94,26 +83,18 @@ struct TextEditingView: View {
         onTextCreated?(position, editingText)
         isEditing = false
         text = ""
-        print("✅ [TextEditingView] 文字创建完成")
     }
     
     // MARK: - 键盘调试方法
     
     private func setupKeyboardNotifications() {
-        print("⌨️ [TextEditingView] 设置键盘通知监听")
-        
         NotificationCenter.default.addObserver(
             forName: UIResponder.keyboardWillShowNotification,
             object: nil,
             queue: .main
         ) { notification in
-            print("⌨️ [TextEditingView] 键盘即将显示通知")
             if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
                 keyboardHeight = frame.height
-                print("⌨️ [TextEditingView] 键盘高度: \(frame.height)")
-            }
-            if let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double {
-                print("⌨️ [TextEditingView] 键盘动画时长: \(duration)")
             }
         }
         
@@ -122,7 +103,6 @@ struct TextEditingView: View {
             object: nil,
             queue: .main
         ) { _ in
-            print("⌨️ [TextEditingView] 键盘已显示通知")
             checkFirstResponderStatus()
         }
         
@@ -130,8 +110,7 @@ struct TextEditingView: View {
             forName: UIResponder.keyboardWillHideNotification,
             object: nil,
             queue: .main
-        ) { notification in
-            print("⌨️ [TextEditingView] 键盘即将隐藏通知")
+        ) { _ in
             keyboardHeight = 0
         }
         
@@ -140,13 +119,11 @@ struct TextEditingView: View {
             object: nil,
             queue: .main
         ) { _ in
-            print("⌨️ [TextEditingView] 键盘已隐藏通知")
             checkFirstResponderStatus()
         }
     }
     
     private func removeKeyboardNotifications() {
-        print("⌨️ [TextEditingView] 移除键盘通知监听")
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardDidShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
@@ -161,17 +138,8 @@ struct TextEditingView: View {
             if let firstResponder = findFirstResponder(in: window) {
                 let className = String(describing: type(of: firstResponder))
                 firstResponderStatus = "第一响应者: \(className)"
-                print("⌨️ [TextEditingView] \(firstResponderStatus)")
-                
-                // 如果是 UITextField 或 UITextView，输出详细信息
-                if let textField = firstResponder as? UITextField {
-                    print("⌨️ [TextEditingView] UITextField 详情 - 文本: '\(textField.text ?? "")', 是否编辑中: \(textField.isEditing)")
-                } else if let textView = firstResponder as? UITextView {
-                    print("⌨️ [TextEditingView] UITextView 详情 - 文本: '\(textView.text)', 是否编辑中: \(textView.isEditable)")
-                }
             } else {
                 firstResponderStatus = "无第一响应者"
-                print("⌨️ [TextEditingView] 当前无第一响应者")
             }
         }
     }

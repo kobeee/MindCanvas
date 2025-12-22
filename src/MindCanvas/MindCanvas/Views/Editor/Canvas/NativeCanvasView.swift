@@ -2005,7 +2005,7 @@ extension NativeCanvasView {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            print("🔧 [Canvas] 工具变化 - 重置所有文本键盘状态")
+            
             // 🔧 关键修复：工具切换时重置所有文本的键盘状态
             self?.resetAllTextKeyboardStates()
             
@@ -2022,7 +2022,7 @@ extension NativeCanvasView {
 
         for (_, textView) in textViews {
             if textView.isEditing {
-                print("🧹 [Canvas] 强制结束文本编辑: \(textView.textNode.id)")
+                
                 textView.finishEditing()  // finishEditing现在会主动恢复位置
             }
         }
