@@ -1,16 +1,31 @@
-import UIKit
-import SwiftUI
-import Foundation
+//
+//  SelectableImageView.swift
+//  MindCanvas
+//
+//  Created by Elvis on 2025/12/23.
+//
 
-/// 可选择的通用形状视图（支持控制点交互）
-class SelectableShapeView: UIView {
+import UIKit
+
+/// 可选择的图片视图（支持专业级控制点交互）
+class SelectableImageView: UIView {
 
     // MARK: - Properties
 
-    var shapeNode: ShapeLayerNode
+    var layerNode: LayerNode {
+        didSet {
+            updateFromNode()
+        }
+    }
 
     // 图层
-    private let shapeLayer = CAShapeLayer()
+    private let imageView: UIImageView = {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFit
+        view.clipsToBounds = true
+        return view
+    }()
+    
     private let selectionBorder = CAShapeLayer()
     private var cornerHandleLayers: [CAShapeLayer] = []
     private let rotationHandleLayer = CAShapeLayer()
@@ -31,14 +46,12 @@ class SelectableShapeView: UIView {
     private var activeHandle: ControlHandle?
     private var dragStartPoint: CGPoint = .zero
     
-    
-    
     // 初始状态 (手势开始时保存)
     private var initialBounds: CGRect = .zero
     private var initialCenter: CGPoint = .zero
     private var initialRotation: CGFloat = 0
     private var initialTouchAngle: CGFloat = 0  // 旋转手势: 初始触摸角度
-    private var initialNode: ShapeLayerNode?
+    private var initialNode: LayerNode?
     
     // 拖动开始时的角点实际位置（不是触摸点，是角点本身的位置）
     private var initialHandlePosition: CGPoint = .zero
@@ -48,18 +61,19 @@ class SelectableShapeView: UIView {
     private var tapGesture: UITapGestureRecognizer!
 
     // 回调
-    var onNodeUpdated: ((ShapeLayerNode) -> Void)?
+    var onNodeUpdated: ((LayerNode) -> Void)?
     var onSelected: ((UUID) -> Void)?
-    var onOperationStart: ((ShapeLayerNode) -> Void)?
-    var onOperationEnd: ((ShapeLayerNode, ShapeLayerNode) -> Void)?
+    var onOperationStart: ((LayerNode) -> Void)?
+    var onOperationEnd: ((LayerNode, LayerNode) -> Void)?
 
     // MARK: - Initialization
 
-    init(shapeNode: ShapeLayerNode) {
-        self.shapeNode = shapeNode
-        super.init(frame: shapeNode.frame)
+    init(layerNode: LayerNode) {
+        self.layerNode = layerNode
+        super.init(frame: layerNode.frame)
         setupViews()
         setupGestures()
+        loadImage()
         updateFromNode()
     }
 
@@ -75,8 +89,8 @@ class SelectableShapeView: UIView {
         isOpaque = false
         clipsToBounds = false
 
-        // 添加形状图层
-        layer.addSublayer(shapeLayer)
+        // 添加图片视图
+        addSubview(imageView)
         
         // 添加选中边框
         layer.addSublayer(selectionBorder)
@@ -95,7 +109,6 @@ class SelectableShapeView: UIView {
         layer.addSublayer(rotationHandleLayer)
         
         // 设置默认样式
-        updateShapeStyle()
         updateSelectionStyle()
     }
 
@@ -108,16 +121,6 @@ class SelectableShapeView: UIView {
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         panGesture.delegate = self
         addGestureRecognizer(panGesture)
-    }
-
-    // MARK: - Style Updates
-
-    private func updateShapeStyle() {
-        shapeLayer.fillColor = shapeNode.isFilled ? UIColor_fromHex(shapeNode.color).cgColor : UIColor.clear.cgColor
-        shapeLayer.strokeColor = UIColor_fromHex(shapeNode.color).cgColor
-        shapeLayer.lineWidth = shapeNode.lineWidth
-        shapeLayer.lineCap = .round
-        shapeLayer.lineJoin = .round
     }
 
     private func updateSelectionStyle() {
@@ -145,100 +148,49 @@ class SelectableShapeView: UIView {
         rotationHandleLayer.lineWidth = 2
     }
 
-    // MARK: - Shape Path
-
-    private func updateShapePath() {
-        let path = createShapePath(for: shapeNode.shapeType, in: bounds)
-        shapeLayer.path = path.cgPath
-    }
-
-    private func createShapePath(for shapeType: ShapeType, in rect: CGRect) -> UIBezierPath {
-        switch shapeType {
-        case .rectangle:
-            return UIBezierPath(rect: rect)
-            
-        case .circle:
-            // 修复：圆形强制正方形，避免椭圆变形
-            let size = min(rect.width, rect.height)
-            let circleRect = CGRect(
-                x: rect.midX - size / 2,
-                y: rect.midY - size / 2,
-                width: size,
-                height: size
-            )
-            return UIBezierPath(ovalIn: circleRect)
-            
-        case .ellipse:
-            return UIBezierPath(ovalIn: rect)
-            
-        case .triangle:
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            path.close()
-            return path
-            
-        case .diamond:
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-            path.close()
-            return path
-            
-        case .pentagon:
-            return createPolygonPath(in: rect, sides: 5)
-            
-        case .hexagon:
-            return createPolygonPath(in: rect, sides: 6)
-            
-        case .star:
-            return createStarPath(in: rect, points: 5)
-            
-        case .roundedRectangle:
-            let path = UIBezierPath(roundedRect: rect, cornerRadius: 12)
-            return path
-            
-        case .line:
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: 0, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-            return path
-            
-        case .arrow:
-            // Arrow is handled by SelectableArrowView, not SelectableShapeView
-            return UIBezierPath()
+    // MARK: - Image Loading
+    
+    private func loadImage() {
+        guard let urlString = layerNode.url else { return }
+        
+        // 本地图片
+        if let url = URL(string: urlString), url.isFileURL {
+            if let data = try? Data(contentsOf: url),
+               let image = UIImage(data: data) {
+                imageView.image = image
+            }
+        }
+        // 远程图片 (简单实现，生产环境应使用 Kingfisher 等库)
+        else if let url = URL(string: urlString) {
+            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                guard let data = data, let image = UIImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self?.imageView.image = image
+                }
+            }.resume()
         }
     }
 
     // MARK: - Sync Methods
 
     /// 从数据模型更新视图
-    internal func updateFromNode() {
-        
+    private func updateFromNode() {
         // 重置 transform 为 identity
         transform = .identity
 
-        var finalWidth = shapeNode.frame.width
-        var finalHeight = shapeNode.frame.height
-
-        // 修复：圆形的宽高（防止加载已损坏的数据） - 使用较小值避免逐渐变大
-        if shapeNode.shapeType == .circle {
-            let size = min(finalWidth, finalHeight)
-            finalWidth = size
-            finalHeight = size
-        }
-
         // 设置 bounds 和 center
-        bounds = CGRect(x: 0, y: 0, width: finalWidth, height: finalHeight)
-        center = CGPoint(x: shapeNode.frame.midX, y: shapeNode.frame.midY)
+        bounds = CGRect(x: 0, y: 0, width: layerNode.frame.width, height: layerNode.frame.height)
+        center = CGPoint(x: layerNode.frame.midX, y: layerNode.frame.midY)
 
         // 应用旋转
-        transform = CGAffineTransform(rotationAngle: shapeNode.rotation)
+        transform = CGAffineTransform(rotationAngle: layerNode.rotation)
+        
+        // 更新透明度
+        alpha = layerNode.opacity
+        
+        // 更新用户交互
+        isUserInteractionEnabled = !layerNode.isLocked
 
-        updateShapePath()
         updateSelectionAppearance()
     }
 
@@ -250,21 +202,11 @@ class SelectableShapeView: UIView {
         let currentRotation = atan2(transform.b, transform.a)
 
         // 从 center 和 bounds 重建 frame
-        var finalWidth = bounds.width
-        var finalHeight = bounds.height
-        
-        // 修复：在数据同步时也强制圆形保持正方形 - 使用较小值避免逐渐变大
-        if shapeNode.shapeType == .circle {
-            let size = min(finalWidth, finalHeight)
-            finalWidth = size
-            finalHeight = size
-        }
-
         let newFrame = CGRect(
-            x: center.x - finalWidth / 2,
-            y: center.y - finalHeight / 2,
-            width: finalWidth,
-            height: finalHeight
+            x: center.x - bounds.width / 2,
+            y: center.y - bounds.height / 2,
+            width: bounds.width,
+            height: bounds.height
         )
 
         // 防护：如果与上次同步的 frame 几乎相同，不再更新（防抖机制）
@@ -275,11 +217,12 @@ class SelectableShapeView: UIView {
         }
 
         lastSyncedFrame = newFrame
-        shapeNode = shapeNode.updated(
+        layerNode = layerNode.updated(
             frame: newFrame,
-            rotation: currentRotation
+            rotation: currentRotation,
+            opacity: Double(alpha)
         )
-        onNodeUpdated?(shapeNode)
+        onNodeUpdated?(layerNode)
     }
 
     // MARK: - Selection Appearance
@@ -288,7 +231,6 @@ class SelectableShapeView: UIView {
         // 角点在选中状态或操作过程中显示，提升交互体验
         let showHandles = isSelected || activeHandle != nil
         
-
         selectionBorder.isHidden = !showHandles
         rotationLineLayer.isHidden = !showHandles
         rotationHandleLayer.isHidden = !showHandles
@@ -302,8 +244,7 @@ class SelectableShapeView: UIView {
         let borderRect = bounds
         selectionBorder.path = UIBezierPath(rect: borderRect).cgPath
 
-        // 更新角点控制点
-        let corners: [ControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        let corners: [ControlHandle] = [ControlHandle.topLeft, ControlHandle.topRight, ControlHandle.bottomRight, ControlHandle.bottomLeft]
         for (index, corner) in corners.enumerated() {
             let position = corner.position(in: bounds)
             let handleRect = CGRect(
@@ -331,7 +272,11 @@ class SelectableShapeView: UIView {
         )
         rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
         
-        
+        // 更新锁定标识
+        viewWithTag(999)?.removeFromSuperview()
+        if layerNode.isLocked {
+            addLockIndicator()
+        }
     }
 
     // MARK: - Hit Testing
@@ -347,11 +292,11 @@ class SelectableShapeView: UIView {
         // 先检查旋转手柄（优先级更高）
         let rotationPos = ControlHandle.rotation.position(in: bounds, rotationHandleOffset: rotationHandleOffset)
         if distance(from: point, to: rotationPos) < hitRadius {
-            return .rotation
+            return ControlHandle.rotation
         }
 
         // 再检查角点
-        let corners: [ControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        let corners: [ControlHandle] = [ControlHandle.topLeft, ControlHandle.topRight, ControlHandle.bottomRight, ControlHandle.bottomLeft]
         for corner in corners {
             let cornerPos = corner.position(in: bounds)
             if distance(from: point, to: cornerPos) < hitRadius {
@@ -389,7 +334,7 @@ class SelectableShapeView: UIView {
         }
         
         // 检查角点控制点区域
-        let corners: [ControlHandle] = [.topLeft, .topRight, .bottomRight, .bottomLeft]
+        let corners: [ControlHandle] = [ControlHandle.topLeft, ControlHandle.topRight, ControlHandle.bottomRight, ControlHandle.bottomLeft]
         for corner in corners {
             let cornerPos = corner.position(in: bounds)
             if distance(from: point, to: cornerPos) <= controlPointHitRadius {
@@ -404,7 +349,7 @@ class SelectableShapeView: UIView {
     // MARK: - Gesture Handlers
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        onSelected?(shapeNode.id)
+        onSelected?(layerNode.id)
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -413,8 +358,8 @@ class SelectableShapeView: UIView {
         switch gesture.state {
         case .began:
             // 保存初始状态
-            initialNode = shapeNode
-            onOperationStart?(shapeNode)
+            initialNode = layerNode
+            onOperationStart?(layerNode)
 
             activeHandle = hitTestHandle(at: locationInSelf)
             
@@ -427,7 +372,7 @@ class SelectableShapeView: UIView {
             initialRotation = atan2(transform.b, transform.a)
 
             // 如果是缩放，保存被拖动角点的实际位置（不是触摸点）
-            if let handle = activeHandle, handle != .rotation {
+            if let handle = activeHandle, handle != ControlHandle.rotation {
                 // 计算角点在 superview 坐标系中的位置
                 let handleLocalOffset = handleOffset(for: handle)
                 let cosR = cos(initialRotation)
@@ -439,7 +384,7 @@ class SelectableShapeView: UIView {
             }
 
             // 如果是旋转，计算初始触摸角度
-            if activeHandle == .rotation {
+            if activeHandle == ControlHandle.rotation {
                 let touchInSuperview = gesture.location(in: superview)
                 initialTouchAngle = atan2(
                     touchInSuperview.y - initialCenter.y,
@@ -454,7 +399,7 @@ class SelectableShapeView: UIView {
 
             if let handle = activeHandle {
                 switch handle {
-                case .rotation:
+                case ControlHandle.rotation:
                     handleRotationImproved(currentPoint: currentPoint)
                 default:
                     handleResizeFixed(handle: handle, currentPoint: currentPoint)
@@ -472,7 +417,7 @@ class SelectableShapeView: UIView {
             syncToNode()
             
             if let initial = initialNode {
-                onOperationEnd?(initial, shapeNode)
+                onOperationEnd?(initial, layerNode)
             }
             initialNode = nil
 
@@ -494,8 +439,6 @@ class SelectableShapeView: UIView {
             y: initialCenter.y + dy
         )
     }
-
-    
 
     /// 修复后的缩放方法 - 使用增量计算，避免第一帧跳变
     private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
@@ -523,8 +466,8 @@ class SelectableShapeView: UIView {
 
         // Step 4: 计算新尺寸（增量计算，不是绝对计算）
         // 根据拖动方向决定符号
-        let widthSign: CGFloat = (handle == .topLeft || handle == .bottomLeft) ? -1 : 1
-        let heightSign: CGFloat = (handle == .topLeft || handle == .topRight) ? -1 : 1
+        let widthSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.bottomLeft) ? -1 : 1
+        let heightSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.topRight) ? -1 : 1
 
         var newWidth = initialBounds.width + localDeltaX * widthSign
         var newHeight = initialBounds.height + localDeltaY * heightSign
@@ -533,13 +476,6 @@ class SelectableShapeView: UIView {
         let minSize: CGFloat = 20
         newWidth = max(newWidth, minSize)
         newHeight = max(newHeight, minSize)
-
-        // 修复：圆形强制正方形比例 - 使用较小值避免逐渐变大
-        if shapeNode.shapeType == .circle {
-            let size = min(newWidth, newHeight)
-            newWidth = size
-            newHeight = size
-        }
 
         // Step 5: 计算新中心点
         // 锚点固定不动，中心点根据新尺寸移动
@@ -579,16 +515,12 @@ class SelectableShapeView: UIView {
         // Step 7: 保持旋转角度不变
         transform = CGAffineTransform(rotationAngle: initialRotation)
 
-        // Step 8: 更新内容
-        updateShapePath()
+        // Step 8: 更新选中外观 (控制点位置需要随缩放和旋转更新)
         updateSelectionAppearance()
     }
 
     /// 改进的旋转方法
     private func handleRotationImproved(currentPoint: CGPoint) {
-        // 关键: 使用 initialCenter 而非 frame.mid
-        // 因为 frame 在有 transform 时是不可靠的
-
         // 计算当前触摸角度
         let currentTouchAngle = atan2(
             currentPoint.y - initialCenter.y,
@@ -614,15 +546,15 @@ class SelectableShapeView: UIView {
         let halfHeight = initialBounds.height / 2
 
         switch corner {
-        case .topLeft:
+        case ControlHandle.topLeft:
             return CGPoint(x: -halfWidth, y: -halfHeight)
-        case .topRight:
+        case ControlHandle.topRight:
             return CGPoint(x: halfWidth, y: -halfHeight)
-        case .bottomRight:
+        case ControlHandle.bottomRight:
             return CGPoint(x: halfWidth, y: halfHeight)
-        case .bottomLeft:
+        case ControlHandle.bottomLeft:
             return CGPoint(x: -halfWidth, y: halfHeight)
-        case .rotation:
+        case ControlHandle.rotation:
             return .zero
         }
     }
@@ -633,117 +565,64 @@ class SelectableShapeView: UIView {
         let halfHeight = initialBounds.height / 2
 
         switch handle {
-        case .topLeft:
+        case ControlHandle.topLeft:
             return CGPoint(x: -halfWidth, y: -halfHeight)
-        case .topRight:
+        case ControlHandle.topRight:
             return CGPoint(x: halfWidth, y: -halfHeight)
-        case .bottomRight:
+        case ControlHandle.bottomRight:
             return CGPoint(x: halfWidth, y: halfHeight)
-        case .bottomLeft:
+        case ControlHandle.bottomLeft:
             return CGPoint(x: -halfWidth, y: halfHeight)
-        case .rotation:
+        case ControlHandle.rotation:
             return .zero
         }
     }
 
     // MARK: - Public Methods
 
-    func enableShapeGestures() {
+    func enableImageGestures() {
         isUserInteractionEnabled = true
         panGesture.isEnabled = true
         tapGesture.isEnabled = true
     }
-
-    // MARK: - Helper Methods
-
-    private func createStarPath(in rect: CGRect, points: Int) -> UIBezierPath {
-        let path = UIBezierPath()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outerRadius = min(rect.width, rect.height) / 2
-        let innerRadius = outerRadius * 0.4
-
-        for i in 0..<(points * 2) {
-            let radius = i % 2 == 0 ? outerRadius : innerRadius
-            let angle = CGFloat(i) * .pi / CGFloat(points) - .pi / 2
-            let point = CGPoint(
-                x: center.x + radius * cos(angle),
-                y: center.y + radius * sin(angle)
-            )
-            if i == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
-        }
-        path.close()
-        return path
+    
+    func disableImageGestures() {
+        isUserInteractionEnabled = false
+        panGesture.isEnabled = false
+        tapGesture.isEnabled = false
+    }
+    
+    /// 让"画布缩放"优先：当 scrollView pinch 能识别时，本对象的 pinch 应当失败
+    func requireObjectPinchToFail(_ gesture: UIGestureRecognizer) {
+        // 图片对象不需要 pinch 手势，使用控制点进行缩放
     }
 
-    private func createPolygonPath(in rect: CGRect, sides: Int) -> UIBezierPath {
-        let path = UIBezierPath()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-
-        for i in 0..<sides {
-            let angle = CGFloat(i) * 2 * .pi / CGFloat(sides) - .pi / 2
-            let point = CGPoint(
-                x: center.x + radius * cos(angle),
-                y: center.y + radius * sin(angle)
-            )
-            if i == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
-        }
-        path.close()
-        return path
+    // MARK: - Helper Methods
+    
+    private func addLockIndicator() {
+        let lockIcon = UIImageView(image: UIImage(systemName: "lock.fill"))
+        lockIcon.tintColor = .systemRed
+        lockIcon.backgroundColor = .white
+        lockIcon.layer.cornerRadius = 12
+        lockIcon.clipsToBounds = true
+        lockIcon.tag = 999
+        lockIcon.frame = CGRect(x: 8, y: 8, width: 24, height: 24)
+        addSubview(lockIcon)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        // 防护：如果正在手势中，跳过 updateShapePath
-        // 因为 handleResizeFixed 已经调用过了
+        // 防护：如果正在手势中，跳过更新
         guard activeHandle == nil else { return }
 
-        // 修复：圆形约束防护 - 使用较小值避免逐渐变大
-        if shapeNode.shapeType == .circle && abs(bounds.width - bounds.height) > 0.1 {
-            let size = min(bounds.width, bounds.height)
-            bounds = CGRect(x: 0, y: 0, width: size, height: size)
-        }
-
-        updateShapePath()
+        // 更新图片视图 frame
+        imageView.frame = bounds
+        
+        // 更新选中外观
         if isSelected {
             updateSelectionAppearance()
         }
-    }
-    
-    // MARK: - Private Helper Functions
-    
-    /// Convert hex string to UIColor
-    private func UIColor_fromHex(_ hex: String) -> UIColor {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3: // RGB (12-bit)
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (255, 0, 0, 0)
-        }
-        
-        return UIColor(
-            red: CGFloat(r) / 255,
-            green: CGFloat(g) / 255,
-            blue: CGFloat(b) / 255,
-            alpha: CGFloat(a) / 255
-        )
     }
     
     // MARK: - UIGestureRecognizerDelegate
@@ -755,5 +634,5 @@ class SelectableShapeView: UIView {
 
 // MARK: - UIGestureRecognizerDelegate
 
-extension SelectableShapeView: UIGestureRecognizerDelegate {
+extension SelectableImageView: UIGestureRecognizerDelegate {
 }

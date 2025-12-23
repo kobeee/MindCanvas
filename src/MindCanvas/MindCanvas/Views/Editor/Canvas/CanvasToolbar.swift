@@ -78,10 +78,8 @@ struct CanvasToolbar: View {
                         tool: tool,
                         isSelected: stateManager.currentTool == tool,
                         action: {
-                            if tool == .image {
-                                onImageImport()
-                            } else if stateManager.currentTool != tool {
-                                // 切换工具时清除选中状态
+                            // 所有工具都需要先切换工具状态
+                            if stateManager.currentTool != tool {
                                 stateManager.clearSelection()
 
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -89,6 +87,13 @@ struct CanvasToolbar: View {
                                     onToolChanged?(tool)
                                 }
                             }
+
+                            // 图片工具额外触发导入（这是资源库导入，不是画布点击创建）
+                            // 注意：画布点击创建图片是在 NativeCanvasView 中处理的
+                            // 这里的 onImageImport 可能是用于资源库面板的
+                            // if tool == .image {
+                            //     onImageImport()
+                            // }
                         }
                     )
                 }

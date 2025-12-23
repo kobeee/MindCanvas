@@ -494,7 +494,8 @@ private struct NativeCanvasContainer: View {
                     onZoomChanged: { scale in
                         viewModel.stateManager.zoomScale = scale
                     },
-                    stateManager: viewModel.stateManager
+                    stateManager: viewModel.stateManager,
+                    assets: viewModel.assets
                 )
                 
                 // 箭头绘制层

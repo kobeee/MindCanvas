@@ -90,6 +90,21 @@ struct LayerNode: Identifiable, Codable {
             zIndex: zIndex
         )
     }
+    
+    /// 创建更新后的节点
+    func updated(frame: CGRect? = nil, rotation: Double? = nil, opacity: Double? = nil) -> LayerNode {
+        LayerNode(
+            id: self.id,
+            type: self.type,
+            url: self.url,
+            frame: frame ?? self.frame,
+            rotation: rotation ?? self.rotation,
+            isLocked: self.isLocked,
+            zIndex: self.zIndex,
+            opacity: opacity ?? self.opacity,
+            createdAt: self.createdAt
+        )
+    }
 }
 
 // MARK: - Hashable
