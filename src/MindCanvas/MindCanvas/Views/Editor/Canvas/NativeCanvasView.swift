@@ -985,14 +985,26 @@ class NativeCanvasView: UIView {
         print("[ImageData] 数据大小: \(imageData.count) bytes")
         print("[ImageData] 位置: \(location)")
 
-        let contentLocation = location
-        let imageSize = CGSize(width: 300, height: 300)
+        // 先加载图片获取实际尺寸
+        guard let image = UIImage(data: imageData) else {
+            print("❌ [ImageData] 无法解析图片数据")
+            return
+        }
+        
+        let originalSize = image.size
+        print("[ImageData] 图片原始尺寸: \(originalSize)")
+        
+        // 限制最大尺寸，避免图片过大
+        let maxSize: CGFloat = 600
+        let scaledSize = scaleImageSizeToFit(originalSize, maxSize: maxSize)
+        print("[ImageData] 缩放后尺寸: \(scaledSize)")
 
+        let contentLocation = location
         let imageFrame = CGRect(
-            x: contentLocation.x - imageSize.width / 2,
-            y: contentLocation.y - imageSize.height / 2,
-            width: imageSize.width,
-            height: imageSize.height
+            x: contentLocation.x - scaledSize.width / 2,
+            y: contentLocation.y - scaledSize.height / 2,
+            width: scaledSize.width,
+            height: scaledSize.height
         )
         print("[ImageData] 计算的 frame: \(imageFrame)")
 
@@ -1006,6 +1018,7 @@ class NativeCanvasView: UIView {
             type: .userImage,
             url: tempURL?.absoluteString ?? "",
             frame: imageFrame,
+            originalSize: originalSize,
             rotation: 0,
             isLocked: false,
             zIndex: getNextImageZIndex(),
@@ -1024,6 +1037,19 @@ class NativeCanvasView: UIView {
 
         print("[ImageData] 处理完成!")
         print("========================================")
+    }
+    
+    /// 缩放图片尺寸以适应最大尺寸限制
+    private func scaleImageSizeToFit(_ size: CGSize, maxSize: CGFloat) -> CGSize {
+        if size.width <= maxSize && size.height <= maxSize {
+            return size
+        }
+        
+        let scale = min(maxSize / size.width, maxSize / size.height)
+        return CGSize(
+            width: size.width * scale,
+            height: size.height * scale
+        )
     }
     
     /// 保存图片数据到临时文件

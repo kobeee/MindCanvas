@@ -163,6 +163,7 @@ class SelectableImageView: UIView {
             if let data = try? Data(contentsOf: url),
                let image = UIImage(data: data) {
                 imageView.image = image
+                updateViewSizeForImage(image)
             }
         }
         // 远程图片 (简单实现，生产环境应使用 Kingfisher 等库)
@@ -171,9 +172,50 @@ class SelectableImageView: UIView {
                 guard let data = data, let image = UIImage(data: data) else { return }
                 DispatchQueue.main.async {
                     self?.imageView.image = image
+                    self?.updateViewSizeForImage(image)
                 }
             }.resume()
         }
+    }
+    
+    /// 根据图片实际尺寸更新视图尺寸
+    private func updateViewSizeForImage(_ image: UIImage) {
+        let imageSize = image.size
+        
+        // 限制最大尺寸，避免图片过大
+        let maxSize: CGFloat = 600
+        let scaledSize = scaleSizeToFit(imageSize, maxSize: maxSize)
+        
+        print("🖼️ [ImageView] 更新尺寸 - 原始: \(imageSize), 缩放后: \(scaledSize)")
+        
+        // 更新 layerNode 的 frame
+        let newFrame = CGRect(
+            x: layerNode.frame.midX - scaledSize.width / 2,
+            y: layerNode.frame.midY - scaledSize.height / 2,
+            width: scaledSize.width,
+            height: scaledSize.height
+        )
+        
+        layerNode = layerNode.updated(frame: newFrame)
+        
+        // 更新视图
+        updateFromNode()
+        
+        // 通知父视图更新
+        onNodeUpdated?(layerNode)
+    }
+    
+    /// 缩放尺寸以适应最大尺寸限制
+    private func scaleSizeToFit(_ size: CGSize, maxSize: CGFloat) -> CGSize {
+        if size.width <= maxSize && size.height <= maxSize {
+            return size
+        }
+        
+        let scale = min(maxSize / size.width, maxSize / size.height)
+        return CGSize(
+            width: size.width * scale,
+            height: size.height * scale
+        )
     }
 
     // MARK: - Sync Methods
@@ -452,8 +494,21 @@ class SelectableImageView: UIView {
         )
     }
 
-    /// 修复后的缩放方法 - 使用增量计算，避免第一帧跳变
+    /// 平滑的比例缩放方法 - 基于原始尺寸但使用增量计算
     private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
+        guard let oppositeCorner = handle.oppositeCorner else { return }
+        
+        // 如果有原始尺寸，使用基于原始尺寸的缩放
+        if let originalSize = layerNode.originalSize {
+            handleResizeWithOriginalSize(handle: handle, currentPoint: currentPoint, originalSize: originalSize)
+        } else {
+            // 如果没有原始尺寸，使用增量缩放方式
+            handleResizeIncremental(handle: handle, currentPoint: currentPoint)
+        }
+    }
+    
+    /// 基于原始尺寸的平滑缩放
+    private func handleResizeWithOriginalSize(handle: ControlHandle, currentPoint: CGPoint, originalSize: CGSize) {
         guard let oppositeCorner = handle.oppositeCorner else { return }
 
         // Step 1: 计算锚点位置（对角点）
@@ -466,7 +521,7 @@ class SelectableImageView: UIView {
             y: initialCenter.y + anchorLocalOffset.x * sinR + anchorLocalOffset.y * cosR
         )
 
-        // Step 2: 计算拖动增量（关键修复：使用 dragStartPoint 而非 anchorInSuperview）
+        // Step 2: 计算拖动增量（使用增量而不是绝对位置）
         let dragDeltaX = currentPoint.x - dragStartPoint.x
         let dragDeltaY = currentPoint.y - dragStartPoint.y
 
@@ -476,8 +531,106 @@ class SelectableImageView: UIView {
         let localDeltaX = dragDeltaX * cosNegR - dragDeltaY * sinNegR
         let localDeltaY = dragDeltaX * sinNegR + dragDeltaY * cosNegR
 
-        // Step 4: 计算新尺寸（增量计算，不是绝对计算）
-        // 根据拖动方向决定符号
+        // Step 4: 计算当前缩放比例（基于初始尺寸）
+        let currentScale = initialBounds.width / originalSize.width
+        
+        // Step 5: 根据拖动方向计算增量缩放
+        let widthSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.bottomLeft) ? -1 : 1
+        let heightSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.topRight) ? -1 : 1
+        
+        // 计算增量缩放因子（基于拖动距离和原始尺寸）
+        let scaleFactorX = (localDeltaX * widthSign) / originalSize.width
+        let scaleFactorY = (localDeltaY * heightSign) / originalSize.height
+        
+        // 使用平均缩放因子保持宽高比
+        let avgScaleFactor = (scaleFactorX + scaleFactorY) / 2
+        
+        // 新的缩放比例
+        let newScale = currentScale + avgScaleFactor
+        
+        // 限制缩放范围
+        let minScale: CGFloat = 0.1
+        let maxScale: CGFloat = 5.0
+        let clampedScale = max(minScale, min(maxScale, newScale))
+
+        // Step 6: 计算新的显示尺寸
+        let newWidth = originalSize.width * clampedScale
+        let newHeight = originalSize.height * clampedScale
+
+        // 最小尺寸限制
+        let minSize: CGFloat = 20
+        let finalWidth = max(newWidth, minSize)
+        let finalHeight = max(newHeight, minSize)
+
+        // Step 7: 计算新中心点
+        let newHalfWidth = finalWidth / 2
+        let newHalfHeight = finalHeight / 2
+
+        // 新中心相对于锚点的本地偏移
+        let newCenterLocalOffsetX = newHalfWidth * (-anchorLocalOffset.x / abs(anchorLocalOffset.x + 0.001))
+        let newCenterLocalOffsetY = newHalfHeight * (-anchorLocalOffset.y / abs(anchorLocalOffset.y + 0.001))
+
+        // 安全处理：如果锚点偏移接近0，使用默认方向
+        let safeCenterOffsetX: CGFloat
+        let safeCenterOffsetY: CGFloat
+
+        if abs(anchorLocalOffset.x) < 0.001 {
+            safeCenterOffsetX = 0
+        } else {
+            safeCenterOffsetX = anchorLocalOffset.x < 0 ? newHalfWidth : -newHalfWidth
+        }
+
+        if abs(anchorLocalOffset.y) < 0.001 {
+            safeCenterOffsetY = 0
+        } else {
+            safeCenterOffsetY = anchorLocalOffset.y < 0 ? newHalfHeight : -newHalfHeight
+        }
+
+        // 将新中心偏移旋转回世界坐标系
+        let newCenter = CGPoint(
+            x: anchorInSuperview.x + safeCenterOffsetX * cosR - safeCenterOffsetY * sinR,
+            y: anchorInSuperview.y + safeCenterOffsetX * sinR + safeCenterOffsetY * cosR
+        )
+
+        // Step 8: 更新视图（使用 bounds + center）
+        bounds = CGRect(x: 0, y: 0, width: finalWidth, height: finalHeight)
+        center = newCenter
+
+        // Step 9: 保持旋转角度不变
+        transform = CGAffineTransform(rotationAngle: initialRotation)
+
+        // Step 10: 立即更新图片视图 frame，确保图像跟着缩放
+        imageView.frame = bounds
+
+        // Step 11: 更新选中外观 (控制点位置需要随缩放和旋转更新)
+        updateSelectionAppearance()
+    }
+    
+    /// 增量缩放方法（备用，当没有原始尺寸时使用）
+    private func handleResizeIncremental(handle: ControlHandle, currentPoint: CGPoint) {
+        guard let oppositeCorner = handle.oppositeCorner else { return }
+
+        // Step 1: 计算锚点位置（对角点）
+        let anchorLocalOffset = anchorOffset(for: oppositeCorner)
+        let cosR = cos(initialRotation)
+        let sinR = sin(initialRotation)
+
+        let anchorInSuperview = CGPoint(
+            x: initialCenter.x + anchorLocalOffset.x * cosR - anchorLocalOffset.y * sinR,
+            y: initialCenter.y + anchorLocalOffset.x * sinR + anchorLocalOffset.y * cosR
+        )
+
+        // Step 2: 计算拖动增量
+        let dragDeltaX = currentPoint.x - dragStartPoint.x
+        let dragDeltaY = currentPoint.y - dragStartPoint.y
+
+        // Step 3: 将拖动增量逆旋转到本地坐标系
+        let cosNegR = cos(-initialRotation)
+        let sinNegR = sin(-initialRotation)
+        let localDeltaX = dragDeltaX * cosNegR - dragDeltaY * sinNegR
+        let localDeltaY = dragDeltaX * sinNegR + dragDeltaY * cosNegR
+
+        // Step 4: 计算新尺寸（增量计算）
         let widthSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.bottomLeft) ? -1 : 1
         let heightSign: CGFloat = (handle == ControlHandle.topLeft || handle == ControlHandle.topRight) ? -1 : 1
 
@@ -490,11 +643,10 @@ class SelectableImageView: UIView {
         newHeight = max(newHeight, minSize)
 
         // Step 5: 计算新中心点
-        // 锚点固定不动，中心点根据新尺寸移动
         let newHalfWidth = newWidth / 2
         let newHalfHeight = newHeight / 2
 
-        // 新中心相对于锚点的本地偏移（注意符号与锚点相反）
+        // 新中心相对于锚点的本地偏移
         let newCenterLocalOffsetX = newHalfWidth * (-anchorLocalOffset.x / abs(anchorLocalOffset.x + 0.001))
         let newCenterLocalOffsetY = newHalfHeight * (-anchorLocalOffset.y / abs(anchorLocalOffset.y + 0.001))
 
@@ -527,7 +679,10 @@ class SelectableImageView: UIView {
         // Step 7: 保持旋转角度不变
         transform = CGAffineTransform(rotationAngle: initialRotation)
 
-        // Step 8: 更新选中外观 (控制点位置需要随缩放和旋转更新)
+        // Step 8: 立即更新图片视图 frame，确保图像跟着缩放
+        imageView.frame = bounds
+
+        // Step 9: 更新选中外观
         updateSelectionAppearance()
     }
 
@@ -556,6 +711,25 @@ class SelectableImageView: UIView {
     private func anchorOffset(for corner: ControlHandle) -> CGPoint {
         let halfWidth = initialBounds.width / 2
         let halfHeight = initialBounds.height / 2
+
+        switch corner {
+        case ControlHandle.topLeft:
+            return CGPoint(x: -halfWidth, y: -halfHeight)
+        case ControlHandle.topRight:
+            return CGPoint(x: halfWidth, y: -halfHeight)
+        case ControlHandle.bottomRight:
+            return CGPoint(x: halfWidth, y: halfHeight)
+        case ControlHandle.bottomLeft:
+            return CGPoint(x: -halfWidth, y: halfHeight)
+        case ControlHandle.rotation:
+            return .zero
+        }
+    }
+    
+    /// 计算锚点相对于中心的偏移量（基于原始尺寸）
+    private func anchorOffset(for corner: ControlHandle, originalSize: CGSize) -> CGPoint {
+        let halfWidth = originalSize.width / 2
+        let halfHeight = originalSize.height / 2
 
         switch corner {
         case ControlHandle.topLeft:
@@ -639,10 +813,7 @@ class SelectableImageView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        // 防护：如果正在手势中，跳过更新
-        guard activeHandle == nil else { return }
-
-        // 更新图片视图 frame
+        // 更新图片视图 frame - 即使在手势中也要更新，确保图像跟着缩放
         imageView.frame = bounds
         
         // 更新选中外观

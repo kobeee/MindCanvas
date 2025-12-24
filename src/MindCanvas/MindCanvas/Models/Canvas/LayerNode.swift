@@ -21,6 +21,9 @@ struct LayerNode: Identifiable, Codable {
     /// 位置和尺寸 (相对于画布坐标系)
     var frame: CGRect
     
+    /// 原始图像尺寸 (用于比例缩放)
+    var originalSize: CGSize?
+    
     /// 旋转角度 (弧度)
     var rotation: Double
     
@@ -43,6 +46,7 @@ struct LayerNode: Identifiable, Codable {
         type: NodeType,
         url: String? = nil,
         frame: CGRect = CGRect(x: 0, y: 0, width: 200, height: 200),
+        originalSize: CGSize? = nil,
         rotation: Double = 0,
         isLocked: Bool = false,
         zIndex: Int = 0,
@@ -53,6 +57,7 @@ struct LayerNode: Identifiable, Codable {
         self.type = type
         self.url = url
         self.frame = frame
+        self.originalSize = originalSize
         self.rotation = rotation
         self.isLocked = isLocked
         self.zIndex = zIndex
@@ -73,20 +78,22 @@ struct LayerNode: Identifiable, Codable {
     }
     
     /// 创建用户上传图片节点
-    static func userImage(url: String, at position: CGPoint, size: CGSize) -> LayerNode {
+    static func userImage(url: String, at position: CGPoint, size: CGSize, originalSize: CGSize? = nil) -> LayerNode {
         LayerNode(
             type: .userImage,
             url: url,
-            frame: CGRect(origin: position, size: size)
+            frame: CGRect(origin: position, size: size),
+            originalSize: originalSize ?? size
         )
     }
     
     /// 创建 AI 生成图片节点
-    static func aiGenerated(url: String, frame: CGRect, zIndex: Int) -> LayerNode {
+    static func aiGenerated(url: String, frame: CGRect, zIndex: Int, originalSize: CGSize? = nil) -> LayerNode {
         LayerNode(
             type: .aiGenerated,
             url: url,
             frame: frame,
+            originalSize: originalSize ?? frame.size,
             zIndex: zIndex
         )
     }
@@ -98,6 +105,7 @@ struct LayerNode: Identifiable, Codable {
             type: self.type,
             url: self.url,
             frame: frame ?? self.frame,
+            originalSize: self.originalSize,
             rotation: rotation ?? self.rotation,
             isLocked: self.isLocked,
             zIndex: self.zIndex,
@@ -141,6 +149,27 @@ extension CGRect: @retroactive Codable {
         try container.encode(origin.y, forKey: .y)
         try container.encode(size.width, forKey: .width)
         try container.encode(size.height, forKey: .height)
+    }
+}
+
+// MARK: - CGSize Codable Extension
+
+extension CGSize: @retroactive Codable {
+    enum CodingKeys: String, CodingKey {
+        case width, height
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let width = try container.decode(CGFloat.self, forKey: .width)
+        let height = try container.decode(CGFloat.self, forKey: .height)
+        self.init(width: width, height: height)
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(width, forKey: .width)
+        try container.encode(height, forKey: .height)
     }
 }
 
