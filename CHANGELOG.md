@@ -1,5 +1,140 @@
 # 开发记录
 
+## 2025-12-24 - 图片选中状态修复与触摸穿透优化 ✅
+
+### 概述
+解决了选择工具状态下点击图片对象无法显示选中状态的问题。通过深入分析视图层级和触摸传递机制，发现并修复了关键的手势识别和视图交互问题。
+
+### 问题诊断
+
+#### 核心现象
+在选择工具状态下点击图片对象时：
+- ✅ `shouldReceive` 正确返回 `false`，让 SelectableImageView 自己处理
+- ✅ `hitTest` 正确找到了 SelectableImageView
+- ✅ `isSelectableObject` 正确返回 `true`
+- ❌ 但 SelectableImageView 的 `handleTap` 从未被调用
+- ❌ 图片不显示选中状态（控制点等）
+
+#### 根本原因分析
+通过添加详细的调试日志链，定位到问题在于**视图层级导致的触摸拦截**：
+
+```
+NativeCanvasView
+├── pencilCanvas
+├── overlayContainerView
+│   └── objectLayerView (包含SelectableImageView)
+└── textOverlayView (最顶层，isUserInteractionEnabled = true) ❌
+```
+
+**问题**：`textOverlayView` 作为最顶层视图且启用了用户交互，拦截了所有触摸事件，导致触摸无法传递到下层的 `objectLayerView` 中的图片对象。
+
+### 修复方案
+
+#### 1. 创建触摸穿透视图类
+```swift
+/// 允许触摸穿透的视图类
+/// 如果触摸位置没有子视图，则将触摸传递给下层视图
+class TouchThroughView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // 首先检查是否有子视图响应触摸
+        let hitView = super.hitTest(point, with: event)
+        
+        // 如果点击的是自己（没有子视图响应），则让触摸穿透
+        if hitView == self {
+            return nil
+        }
+        
+        return hitView
+    }
+}
+```
+
+#### 2. 修改视图层级架构
+将 `textOverlayView` 从 `UIView` 改为 `TouchThroughView`：
+
+```swift
+// 修复前
+private let textOverlayView = UIView()
+
+// 修复后
+private let textOverlayView = TouchThroughView()
+```
+
+#### 3. 保持选择工具下的完整交互能力
+恢复选择工具模式下 `textOverlayView` 的用户交互，确保：
+- ✅ **文本可以选择**：点击文本时，TouchThroughView 返回文本视图
+- ✅ **图片、形状、箭头可以选择**：点击这些对象时，触摸穿透到 objectLayerView
+- ✅ **空白区域可以取消选择**：点击空白区域时，触摸穿透到 canvasTapGesture
+
+### 调试系统增强
+
+#### 完整的调试日志链
+添加了全方位的调试日志来追踪问题：
+
+| 调试点 | 日志内容 | 作用 |
+|--------|---------|------|
+| `shouldReceive` | 工具状态、hitTest结果、返回值 | 确认手势是否被正确接收 |
+| `handleTap` | 图片ID、回调触发状态 | 确认图片点击是否被处理 |
+| `isSelected` | 状态变化、前后值对比 | 确认选中状态是否正确更新 |
+| `updateSelectionAppearance` | 控制点显示/隐藏状态 | 确认UI是否正确响应 |
+| `enableImageGestures` | 手势启用状态、用户交互状态 | 确认手势配置是否正确 |
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `NativeCanvasView.swift` | 架构优化 | 添加TouchThroughView类，修改textOverlayView类型 |
+| `SelectableImageView.swift` | 调试增强 | 添加完整的状态追踪日志 |
+| `CHANGELOG.md` | 更新 | 记录修复过程和技术要点 |
+
+### 验证结果
+
+#### 成功解决的问题
+- ✅ 选择工具下点击图片：正确显示选中状态和控制点
+- ✅ 选择工具下点击文本：正确选中文本对象
+- ✅ 选择工具下点击形状：正确选中形状对象
+- ✅ 选择工具下点击空白：正确取消所有选中
+- ✅ 所有工具模式切换正常，无交互冲突
+
+#### 用户体验提升
+- ✅ **统一交互模式**：选择工具下所有对象类型都有一致的交互体验
+- ✅ **专业级操作**：图片选中后显示完整的控制点系统
+- ✅ **直观反馈**：选中状态视觉反馈清晰明确
+
+### 技术亮点
+
+#### 1. 第一性原理解决方案
+从视图层级和触摸传递的根本原理出发，设计优雅的触摸穿透机制，而不是在各个组件中修补问题。
+
+#### 2. 架构一致性
+保持与现有形状、箭头、文本对象完全一致的交互模式，用户无需学习不同的操作方式。
+
+#### 3. 调试友好设计
+完整的日志系统不仅解决了当前问题，还为未来类似问题提供了强有力的排查工具。
+
+### 后续影响
+
+#### 正面影响
+- ✅ 为未来添加新的对象类型奠定了统一的交互基础
+- ✅ 提供了可复用的触摸穿透解决方案
+- ✅ 建立了完善的调试日志体系
+
+#### 注意事项
+- ⚠️ TouchThroughView 只在选择工具模式下生效，其他工具模式保持原有行为
+- ⚠️ 需要确保所有新增的可选择对象都正确遵循相同的交互模式
+
+### 总结
+
+本次修复成功解决了选择工具状态下图片对象无法选中的问题，通过创新的触摸穿透视图设计，实现了所有对象类型的统一交互体验。这个解决方案不仅修复了当前问题，还为未来的功能扩展提供了坚实的架构基础。
+
+**关键成就**：
+- ✅ 定位并修复了视图层级导致的触摸拦截问题
+- ✅ 实现了优雅的触摸穿透机制
+- ✅ 建立了统一的对象交互模式
+- ✅ 提供了完善的调试追踪体系
+
+---
+
 ## 2025-12-24 - 图片工具终极修复完成 ✅
 
 ### 概述

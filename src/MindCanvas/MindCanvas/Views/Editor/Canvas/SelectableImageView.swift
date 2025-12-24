@@ -38,6 +38,7 @@ class SelectableImageView: UIView {
     // 选中状态
     var isSelected: Bool = false {
         didSet {
+            print("🖼️ [ImageView] isSelected 变化: \(oldValue) -> \(isSelected), 图片ID: \(layerNode.id)")
             updateSelectionAppearance()
         }
     }
@@ -75,6 +76,7 @@ class SelectableImageView: UIView {
         setupGestures()
         loadImage()
         updateFromNode()
+        print("🖼️ [ImageView] 初始化完成 - 图片ID: \(layerNode.id.uuidString.prefix(8)), tapGesture初始状态: \(tapGesture.isEnabled)")
     }
 
     required init?(coder: NSCoder) {
@@ -115,12 +117,15 @@ class SelectableImageView: UIView {
     private func setupGestures() {
         // 点击手势
         tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        print("🖼️ [ImageView] 创建 tapGesture - target: \(ObjectIdentifier(self)), action: #selector(handleTap)")
         addGestureRecognizer(tapGesture)
+        print("🖼️ [ImageView] tapGesture 已添加到视图")
         
         // 拖拽手势
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         panGesture.delegate = self
         addGestureRecognizer(panGesture)
+        print("🖼️ [ImageView] panGesture 已添加到视图")
     }
 
     private func updateSelectionStyle() {
@@ -231,14 +236,19 @@ class SelectableImageView: UIView {
         // 角点在选中状态或操作过程中显示，提升交互体验
         let showHandles = isSelected || activeHandle != nil
         
+        print("🖼️ [ImageView] updateSelectionAppearance - isSelected: \(isSelected), activeHandle: \(activeHandle != nil), showHandles: \(showHandles)")
+        
         selectionBorder.isHidden = !showHandles
         rotationLineLayer.isHidden = !showHandles
         rotationHandleLayer.isHidden = !showHandles
         cornerHandleLayers.forEach { $0.isHidden = !showHandles }
 
         guard showHandles else { 
+            print("🖼️ [ImageView] 隐藏控制点")
             return 
         }
+        
+        print("🖼️ [ImageView] 显示控制点")
 
         // 更新选中边框
         let borderRect = bounds
@@ -349,7 +359,9 @@ class SelectableImageView: UIView {
     // MARK: - Gesture Handlers
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        print("🖼️ [ImageView] handleTap 被调用 - 图片ID: \(layerNode.id)")
         onSelected?(layerNode.id)
+        print("🖼️ [ImageView] onSelected 回调已触发")
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -581,20 +593,34 @@ class SelectableImageView: UIView {
     // MARK: - Public Methods
 
     func enableImageGestures() {
+        print("🖼️ [ImageView] enableImageGestures - 图片ID: \(layerNode.id.uuidString.prefix(8))")
         isUserInteractionEnabled = true
         panGesture.isEnabled = true
         tapGesture.isEnabled = true
+        print("🖼️ [ImageView] 手势已启用 - tapGesture.isEnabled: \(tapGesture.isEnabled), isUserInteractionEnabled: \(isUserInteractionEnabled)")
     }
     
     func disableImageGestures() {
+        print("🖼️ [ImageView] disableImageGestures - 图片ID: \(layerNode.id.uuidString.prefix(8))")
         isUserInteractionEnabled = false
         panGesture.isEnabled = false
         tapGesture.isEnabled = false
+        print("🖼️ [ImageView] 手势已禁用")
     }
     
     /// 让"画布缩放"优先：当 scrollView pinch 能识别时，本对象的 pinch 应当失败
     func requireObjectPinchToFail(_ gesture: UIGestureRecognizer) {
         // 图片对象不需要 pinch 手势，使用控制点进行缩放
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        print("🖼️ [ImageView] touchesBegan - 图片ID: \(layerNode.id.uuidString.prefix(8))")
+        super.touchesBegan(touches, with: event)
+    }
+    
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        print("🖼️ [ImageView] touchesEnded - 图片ID: \(layerNode.id.uuidString.prefix(8))")
+        super.touchesEnded(touches, with: event)
     }
 
     // MARK: - Helper Methods

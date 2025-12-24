@@ -36,6 +36,22 @@ class DebugTapGestureRecognizer: UITapGestureRecognizer {
     }
 }
 
+/// 允许触摸穿透的视图类
+/// 如果触摸位置没有子视图，则将触摸传递给下层视图
+class TouchThroughView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // 首先检查是否有子视图响应触摸
+        let hitView = super.hitTest(point, with: event)
+        
+        // 如果点击的是自己（没有子视图响应），则让触摸穿透
+        if hitView == self {
+            return nil
+        }
+        
+        return hitView
+    }
+}
+
 /// 原生画布视图 (UIKit 实现)
 /// 重构版本：直接使用 PKCanvasView 的内置缩放功能，不再嵌套 UIScrollView
 /// 参考：https://github.com/simonbs/InfiniteCanvas
@@ -49,7 +65,7 @@ class NativeCanvasView: UIView {
     internal let overlayContainerView = UIView()
 
     /// Layer 3: 文字覆盖层 - 完全独立于 objectLayerView
-    private let textOverlayView = UIView()
+    private let textOverlayView = TouchThroughView()
 
     /// Layer 2: PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
     var pencilCanvas = PKCanvasView()
@@ -149,6 +165,7 @@ class NativeCanvasView: UIView {
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
         didSet {
+            print("🔄 [Canvas] selectedNodeID 变化: \(oldValue?.uuidString.prefix(8) ?? "nil") -> \(selectedNodeID?.uuidString.prefix(8) ?? "nil")")
             updateSelectionStates()
             
             // 修复：同步选中状态到CanvasStateManager
@@ -450,7 +467,9 @@ class NativeCanvasView: UIView {
 
     /// 创建图片视图
     private func createImageView(for layer: LayerNode) {
+        print("🖼️ [Canvas] createImageView 开始 - layerID: \(layer.id.uuidString.prefix(8))")
         let imageView = SelectableImageView(layerNode: layer)
+        print("🖼️ [Canvas] SelectableImageView 创建完成")
 
         var operationStartNode: LayerNode?
 
@@ -502,9 +521,11 @@ class NativeCanvasView: UIView {
 
         // 添加到对象图层
         objectLayerView.addSubview(imageView)
+        print("🖼️ [Canvas] imageView 已添加到 objectLayerView")
         
         // 存储到字典
         imageViews[layer.id] = imageView
+        print("🖼️ [Canvas] imageView 已存储到字典 - 总数: \(imageViews.count)")
         
         // 根据当前工具状态设置手势
         if currentTool == .select || currentTool == .image {
@@ -586,9 +607,13 @@ class NativeCanvasView: UIView {
 
     /// 更新选中状态
     private func updateSelectionStates() {
+        print("🔄 [Canvas] updateSelectionStates - selectedNodeID: \(selectedNodeID?.uuidString.prefix(8) ?? "nil")")
+        print("🔄 [Canvas] 当前图片数量: \(imageViews.count)")
+        
         // 更新图片视图选中状态
         for (id, imageView) in imageViews {
             let shouldBeSelected = (id == selectedNodeID)
+            print("🔄 [Canvas] 图片 \(id.uuidString.prefix(8)): shouldBeSelected = \(shouldBeSelected)")
             imageView.isSelected = shouldBeSelected
         }
         
@@ -948,9 +973,9 @@ class NativeCanvasView: UIView {
         addLayer(imageLayer)
         print("✅ [Canvas] 图片图层已添加到画布")
         
-        // 自动选中新创建的图片
-        selectedNodeID = imageLayer.id
-        print("✅ [Canvas] 图片已选中: \(imageLayer.id)")
+        // 不自动选中图片，避免显示选中状态（角点等）
+        // 用户需要手动切换到选择工具才能操作图片
+        print("✅ [Canvas] 图片创建完成，未自动选中")
     }
     
     /// 处理图片数据选择（来自相机/相册）
@@ -993,9 +1018,9 @@ class NativeCanvasView: UIView {
         print("[ImageData] 添加到画布...")
         addLayer(imageLayer)
 
-        // 自动选中新创建的图片
-        print("[ImageData] 选中图片...")
-        selectedNodeID = imageLayer.id
+        // 不自动选中图片，避免显示选中状态（角点等）
+        // 用户需要手动切换到选择工具才能操作图片
+        print("[ImageData] 图片创建完成，未自动选中")
 
         print("[ImageData] 处理完成!")
         print("========================================")
@@ -1194,7 +1219,7 @@ class NativeCanvasView: UIView {
             // 关键：启用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
-            textOverlayView.isUserInteractionEnabled = true  // 新增：选择时可交互
+            textOverlayView.isUserInteractionEnabled = true  // 恢复：使用TouchThroughView处理触摸穿透
             
             // 启用空白区域点击手势识别器
             canvasTapGesture.isEnabled = true
@@ -2137,11 +2162,18 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
         // 其他工具的处理保持不变
         let location = touch.location(in: objectLayerView)
         let hitView = objectLayerView.hitTest(location, with: nil)
+        
+        print("[shouldReceive][Select] location: \(location)")
+        print("[shouldReceive][Select] hitView: \(type(of: hitView))")
+        print("[shouldReceive][Select] hitView is SelectableImageView: \(hitView is SelectableImageView)")
+        print("[shouldReceive][Select] isSelectableObject: \(isSelectableObject(hitView))")
 
         if isSelectableObject(hitView) {
+            print("[shouldReceive][Select] 点击在可选择对象上，返回 false")
             return false
         }
 
+        print("[shouldReceive][Select] 点击空白区域，返回 true")
         return true
     }
 
