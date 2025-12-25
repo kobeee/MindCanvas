@@ -1,18 +1,14 @@
 import SwiftUI
 import UIKit
 import PencilKit
-import PhotosUI
-import Photos
 
 /// 自定义手势识别器，用于追踪完整生命周期
 class DebugTapGestureRecognizer: UITapGestureRecognizer {
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
-        print("[DebugTap] 手势识别器初始化")
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        print("[DebugTap] touchesBegan - 触摸开始")
         super.touchesBegan(touches, with: event)
     }
 
@@ -21,17 +17,14 @@ class DebugTapGestureRecognizer: UITapGestureRecognizer {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        print("[DebugTap] touchesEnded - 触摸结束, state: \(self.state.rawValue)")
         super.touchesEnded(touches, with: event)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        print("[DebugTap] touchesCancelled - 触摸取消")
         super.touchesCancelled(touches, with: event)
     }
 
     override func reset() {
-        print("[DebugTap] reset - 重置")
         super.reset()
     }
 }
@@ -165,7 +158,6 @@ class NativeCanvasView: UIView {
     /// 当前选中的节点 ID
     private var selectedNodeID: UUID? {
         didSet {
-            print("🔄 [Canvas] selectedNodeID 变化: \(oldValue?.uuidString.prefix(8) ?? "nil") -> \(selectedNodeID?.uuidString.prefix(8) ?? "nil")")
             updateSelectionStates()
             
             // 修复：同步选中状态到CanvasStateManager
@@ -189,6 +181,9 @@ class NativeCanvasView: UIView {
 
     /// 缩放变化回调
     var onZoomChanged: ((CGFloat) -> Void)?
+
+    /// 图片选择器请求回调（用于通知上层显示图片源选择弹窗）
+    var onShowImagePickerRequested: ((CGPoint) -> Void)?
 
     /// 绘制中标记
     private(set) var isDrawing = false
@@ -467,9 +462,7 @@ class NativeCanvasView: UIView {
 
     /// 创建图片视图
     private func createImageView(for layer: LayerNode) {
-        print("🖼️ [Canvas] createImageView 开始 - layerID: \(layer.id.uuidString.prefix(8))")
         let imageView = SelectableImageView(layerNode: layer)
-        print("🖼️ [Canvas] SelectableImageView 创建完成")
 
         var operationStartNode: LayerNode?
 
@@ -521,17 +514,15 @@ class NativeCanvasView: UIView {
 
         // 添加到对象图层
         objectLayerView.addSubview(imageView)
-        print("🖼️ [Canvas] imageView 已添加到 objectLayerView")
-        
+
         // 存储到字典
         imageViews[layer.id] = imageView
-        print("🖼️ [Canvas] imageView 已存储到字典 - 总数: \(imageViews.count)")
-        
+
         // 根据当前工具状态设置手势
         if currentTool == .select || currentTool == .image {
             imageView.enableImageGestures()
         }
-        
+
         sortLayers()
     }
     
@@ -607,34 +598,30 @@ class NativeCanvasView: UIView {
 
     /// 更新选中状态
     private func updateSelectionStates() {
-        print("🔄 [Canvas] updateSelectionStates - selectedNodeID: \(selectedNodeID?.uuidString.prefix(8) ?? "nil")")
-        print("🔄 [Canvas] 当前图片数量: \(imageViews.count)")
-        
         // 更新图片视图选中状态
         for (id, imageView) in imageViews {
             let shouldBeSelected = (id == selectedNodeID)
-            print("🔄 [Canvas] 图片 \(id.uuidString.prefix(8)): shouldBeSelected = \(shouldBeSelected)")
             imageView.isSelected = shouldBeSelected
         }
-        
+
         // 更新箭头视图选中状态
         for (id, arrowView) in arrowViews {
             let shouldBeSelected = (id == selectedNodeID)
             arrowView.isSelected = shouldBeSelected
         }
-        
+
         // 更新形状视图选中状态
         for (id, shapeView) in shapeViews {
             let shouldBeSelected = (id == selectedNodeID)
             shapeView.isSelected = shouldBeSelected
         }
-        
+
         // 更新文字视图选中状态
         for (id, textView) in textViews {
             let shouldBeSelected = (id == selectedNodeID)
             textView.isSelected = shouldBeSelected
         }
-        
+
         onSelectionChanged?(selectedNodeID != nil)
     }
 
@@ -712,24 +699,17 @@ class NativeCanvasView: UIView {
 
     /// 处理画布点击事件（用于空白区域取消选中或创建文字/图片）
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
-        // 无条件打印，确认方法被调用
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print("[handleCanvasTap] 方法被调用!")
-        print("[handleCanvasTap] currentTool = \(currentTool)")
-        print("[handleCanvasTap] gesture.state = \(gesture.state.rawValue)")
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
         // 文字工具模式
         if currentTool == .text {
             // 关键修复：在textOverlayView中检查文本点击
             let textLocation = gesture.location(in: textOverlayView)
             let hitTextView = textOverlayView.hitTest(textLocation, with: nil)
-            
+
             // 如果点击在已有文字上，让其自己处理（进入编辑模式）
             if hitTextView is SelectableTextView {
                 return
             }
-            
+
             // 获取objectLayerView中的坐标用于创建新文本
             let location = gesture.location(in: objectLayerView)
 
@@ -737,30 +717,20 @@ class NativeCanvasView: UIView {
             createTextAtLocationWithEditing(location)
             return
         }
-        
+
         // 图片工具模式
         if currentTool == .image {
-            print("========================================")
-            print("[Image] handleCanvasTap - 图片工具模式")
-
             // 检查是否点击在已有图片上
             let location = gesture.location(in: objectLayerView)
-            print("[Image] 点击位置: \(location)")
-
             let hitView = objectLayerView.hitTest(location, with: nil)
-            print("[Image] hitTest 结果: \(type(of: hitView as Any))")
 
             // 如果点击在已有图片上，让其自己处理（选中）
             if hitView is SelectableImageView {
-                print("[Image] 点击在已有图片上，跳过")
-                print("========================================")
                 return
             }
 
             // 点击空白区域，显示图片选择弹窗
-            print("[Image] 点击空白区域，调用 showImagePicker")
             showImagePicker(at: location)
-            print("========================================")
             return
         }
 
@@ -851,101 +821,31 @@ class NativeCanvasView: UIView {
     }
     
     // MARK: - Image Creation Methods
-    
-    /// 显示图片选择器（使用 PHPickerViewController）
-    private func showImagePicker(at location: CGPoint) {
-        print("========================================")
-        print("[ImagePicker] showImagePicker 开始")
-        print("[ImagePicker] 目标位置: \(location)")
-        print("[ImagePicker] isShowingImagePicker: \(isShowingImagePicker)")
 
+    /// 显示图片选择器（通过回调通知上层显示图片源选择弹窗）
+    private func showImagePicker(at location: CGPoint) {
         guard !isShowingImagePicker else {
-            print("[ImagePicker] 警告: 图片选择器已在显示中，忽略")
-            print("========================================")
             return
         }
 
         // 保存位置信息
         pendingImageLocation = location
         isShowingImagePicker = true
-        print("[ImagePicker] 状态已更新: pendingImageLocation=\(location)")
 
-        // 检查权限
-        print("[ImagePicker] 开始检查权限...")
-        checkAndRequestPhotoPermission { [weak self] granted in
-            print("[ImagePicker] 权限检查完成: granted=\(granted)")
-
-            guard let self = self else {
-                print("[ImagePicker] 错误: self 已释放")
-                return
-            }
-
-            guard granted else {
-                print("[ImagePicker] 错误: 相册权限被拒绝")
-                self.isShowingImagePicker = false
-                self.pendingImageLocation = nil
-                return
-            }
-
-            // 找到视图控制器
-            print("[ImagePicker] 查找视图控制器...")
-            guard let viewController = self.findViewController() else {
-                print("[ImagePicker] 错误: 未找到视图控制器")
-                print("[ImagePicker] responder chain: \(self.responderChainDescription())")
-                self.isShowingImagePicker = false
-                self.pendingImageLocation = nil
-                return
-            }
-            print("[ImagePicker] 找到视图控制器: \(type(of: viewController))")
-
-            // 确保在主线程
-            DispatchQueue.main.async {
-                print("[ImagePicker] 开始创建 PHPicker...")
-
-                // 配置 PHPicker
-                var configuration = PHPickerConfiguration(photoLibrary: .shared())
-                configuration.selectionLimit = 1
-                configuration.filter = .images
-                configuration.preferredAssetRepresentationMode = .current
-
-                // 创建并显示 PHPicker
-                let picker = PHPickerViewController(configuration: configuration)
-                picker.delegate = self
-                print("[ImagePicker] PHPicker 创建完成，delegate 设置: \(picker.delegate != nil)")
-
-                print("[ImagePicker] 即将 present PHPicker...")
-                viewController.present(picker, animated: true) {
-                    print("[ImagePicker] PHPicker present 完成")
-                }
-            }
-        }
-        print("========================================")
+        // 通知上层显示图片源选择弹窗
+        onShowImagePickerRequested?(location)
     }
 
-    /// 获取响应者链描述（调试用）
-    private func responderChainDescription() -> String {
-        var chain: [String] = []
-        var responder: UIResponder? = self
-        while let r = responder {
-            chain.append(String(describing: type(of: r)))
-            responder = r.next
-        }
-        return chain.joined(separator: " -> ")
-    }
+    
     
     /// 处理图片URL选择（来自资源库）
     private func handleImageSelected(url: String, at location: CGPoint) {
-        print("🎯 [Canvas] handleImageSelected 开始")
-        print("   - URL: \(url)")
-        print("   - 位置: \(location)")
-        
         // location是objectLayerView坐标系中的位置，直接就是画布内容坐标
         let contentLocation = location
-        print("   - 内容坐标: \(contentLocation)")
-        
+
         // 创建默认图片尺寸（300x300）
         let imageSize = CGSize(width: 300, height: 300)
-        
+
         // 计算图片frame（中心点在点击位置）
         let imageFrame = CGRect(
             x: contentLocation.x - imageSize.width / 2,
@@ -953,8 +853,7 @@ class NativeCanvasView: UIView {
             width: imageSize.width,
             height: imageSize.height
         )
-        print("   - 图片frame: \(imageFrame)")
-        
+
         // 创建图片图层节点
         let imageLayer = LayerNode(
             id: UUID(),
@@ -967,37 +866,26 @@ class NativeCanvasView: UIView {
             opacity: 1.0,
             createdAt: Date()
         )
-        print("✅ [Canvas] 创建图片图层: \(imageLayer.id)")
-        
+
         // 添加图片到画布
         addLayer(imageLayer)
-        print("✅ [Canvas] 图片图层已添加到画布")
-        
+
         // 不自动选中图片，避免显示选中状态（角点等）
         // 用户需要手动切换到选择工具才能操作图片
-        print("✅ [Canvas] 图片创建完成，未自动选中")
     }
     
     /// 处理图片数据选择（来自相机/相册）
     private func handleImageDataSelected(_ imageData: Data, at location: CGPoint) {
-        print("========================================")
-        print("[ImageData] handleImageDataSelected 开始")
-        print("[ImageData] 数据大小: \(imageData.count) bytes")
-        print("[ImageData] 位置: \(location)")
-
         // 先加载图片获取实际尺寸
         guard let image = UIImage(data: imageData) else {
-            print("❌ [ImageData] 无法解析图片数据")
             return
         }
-        
+
         let originalSize = image.size
-        print("[ImageData] 图片原始尺寸: \(originalSize)")
-        
+
         // 限制最大尺寸，避免图片过大
         let maxSize: CGFloat = 600
         let scaledSize = scaleImageSizeToFit(originalSize, maxSize: maxSize)
-        print("[ImageData] 缩放后尺寸: \(scaledSize)")
 
         let contentLocation = location
         let imageFrame = CGRect(
@@ -1006,12 +894,9 @@ class NativeCanvasView: UIView {
             width: scaledSize.width,
             height: scaledSize.height
         )
-        print("[ImageData] 计算的 frame: \(imageFrame)")
 
         // 保存图片到临时文件
-        print("[ImageData] 保存到临时文件...")
         let tempURL = saveImageToTempFile(imageData)
-        print("[ImageData] 临时文件 URL: \(tempURL?.absoluteString ?? "nil")")
 
         let imageLayer = LayerNode(
             id: UUID(),
@@ -1025,18 +910,25 @@ class NativeCanvasView: UIView {
             opacity: 1.0,
             createdAt: Date()
         )
-        print("[ImageData] 创建 LayerNode: \(imageLayer.id)")
 
         // 添加图片到画布
-        print("[ImageData] 添加到画布...")
         addLayer(imageLayer)
 
         // 不自动选中图片，避免显示选中状态（角点等）
         // 用户需要手动切换到选择工具才能操作图片
-        print("[ImageData] 图片创建完成，未自动选中")
+    }
 
-        print("[ImageData] 处理完成!")
-        print("========================================")
+    /// 导入图片（公开方法，供上层调用）
+    /// - Parameters:
+    ///   - imageData: 图片数据
+    ///   - location: 图片在画布上的位置（objectLayerView坐标系）
+    func importImage(_ imageData: Data, at location: CGPoint) {
+        // 重置状态
+        isShowingImagePicker = false
+        pendingImageLocation = nil
+
+        // 调用内部处理方法
+        handleImageDataSelected(imageData, at: location)
     }
     
     /// 缩放图片尺寸以适应最大尺寸限制
@@ -1057,12 +949,11 @@ class NativeCanvasView: UIView {
         let tempDir = NSTemporaryDirectory()
         let fileName = "temp_image_\(UUID().uuidString).jpg"
         let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(fileName)
-        
+
         do {
             try imageData.write(to: fileURL)
             return fileURL
         } catch {
-            print("❌ [Canvas] 保存临时图片文件失败: \(error)")
             return nil
         }
     }
@@ -1076,70 +967,9 @@ class NativeCanvasView: UIView {
         return maxImageZIndex + 1
     }
     
-    /// 查找最近的视图控制器
-    private func findViewController() -> UIViewController? {
-        var responder: UIResponder? = self
-        while responder != nil {
-            responder = responder?.next
-            if let viewController = responder as? UIViewController {
-                return viewController
-            }
-        }
-        return nil
-    }
     
-    /// 检查并请求相册权限（使用 iOS 14+ API）
-    private func checkAndRequestPhotoPermission(completion: @escaping (Bool) -> Void) {
-        print("[Permission] 检查相册权限...")
-
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        print("[Permission] 当前权限状态: \(status.rawValue) (\(permissionStatusDescription(status)))")
-
-        switch status {
-        case .authorized:
-            print("[Permission] 已完全授权")
-            completion(true)
-
-        case .limited:
-            print("[Permission] 受限授权（可使用）")
-            completion(true)
-
-        case .notDetermined:
-            print("[Permission] 权限未确定，请求授权...")
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
-                print("[Permission] 授权请求完成: \(newStatus.rawValue)")
-                DispatchQueue.main.async {
-                    let granted = newStatus == .authorized || newStatus == .limited
-                    print("[Permission] 授权结果: \(granted)")
-                    completion(granted)
-                }
-            }
-
-        case .denied:
-            print("[Permission] 权限被用户拒绝")
-            completion(false)
-
-        case .restricted:
-            print("[Permission] 权限受系统限制")
-            completion(false)
-
-        @unknown default:
-            print("[Permission] 未知权限状态: \(status.rawValue)")
-            completion(false)
-        }
-    }
-
-    /// 权限状态描述
-    private func permissionStatusDescription(_ status: PHAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined: return "未确定"
-        case .restricted: return "受限"
-        case .denied: return "拒绝"
-        case .authorized: return "已授权"
-        case .limited: return "受限授权"
-        @unknown default: return "未知"
-        }
-    }
+    
+    
 
     /// 将视图坐标转换为画布内容坐标
     private func convertToContentCoordinates(_ viewLocation: CGPoint) -> CGPoint {
@@ -1169,9 +999,9 @@ class NativeCanvasView: UIView {
         let frameInfo = "frame: \(view.frame)"
         let hiddenInfo = view.isHidden ? "hidden" : "visible"
         let interactionInfo = view.isUserInteractionEnabled ? "enabled" : "disabled"
-        
-        print("\(indent)- \(viewInfo) (\(frameInfo), \(hiddenInfo), \(interactionInfo))")
-        
+
+        // Debug output removed
+
         for subview in view.subviews {
             printHierarchy(subview, level: level + 1)
         }
@@ -1184,18 +1014,17 @@ class NativeCanvasView: UIView {
                 let gestureInfo = "\(type(of: gesture))"
                 let stateInfo = "state: \(gesture.state.rawValue)"
                 let enabledInfo = gesture.isEnabled ? "enabled" : "disabled"
-                
-                
+
+
                 if let tapGesture = gesture as? UITapGestureRecognizer {
-                    print("       - tapsRequired: \(tapGesture.numberOfTapsRequired)")
-                    print("       - touchesRequired: \(tapGesture.numberOfTouchesRequired)")
+                    // Debug output removed
                 }
-                
+
                 // 打印手势识别器的依赖关系
                 printGestureDependencies(gesture)
             }
         } else {
-            print("   (无手势识别器)")
+            // Debug output removed
         }
     }
     
@@ -1203,23 +1032,23 @@ class NativeCanvasView: UIView {
     private func printGestureDependencies(_ gesture: UIGestureRecognizer) {
         // 获取手势识别器的delegate信息
         if let delegate = gesture.delegate {
-            print("       - delegate: \(type(of: delegate))")
+            // Debug output removed
         }
-        
+
         // 检查是否是PKCanvasView的内置手势
         if gesture === pencilCanvas.drawingGestureRecognizer {
-            print("       - PKCanvasView drawingGestureRecognizer")
+            // Debug output removed
         }
         if gesture === pencilCanvas.panGestureRecognizer {
-            print("       - PKCanvasView panGestureRecognizer")
+            // Debug output removed
         }
         if let pinchGesture = pencilCanvas.pinchGestureRecognizer, gesture === pinchGesture {
-            print("       - PKCanvasView pinchGestureRecognizer")
+            // Debug output removed
         }
-        
+
         // 检查自定义手势
         if gesture === canvasTapGesture {
-            print("       - NativeCanvasView canvasTapGesture")
+            // Debug output removed
         }
     }
 
@@ -1227,12 +1056,6 @@ class NativeCanvasView: UIView {
 
     /// 根据工具更新手势处理
     func updateForTool(_ tool: CanvasTool) {
-        print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-        print("[updateForTool] 工具切换: \(tool)")
-        print("[updateForTool] currentTool (从stateManager): \(currentTool)")
-        print("[updateForTool] stateManager: \(String(describing: stateManager))")
-        print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-
         switch tool {
         case .select:
             pencilCanvas.isUserInteractionEnabled = true
@@ -1246,7 +1069,7 @@ class NativeCanvasView: UIView {
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
             textOverlayView.isUserInteractionEnabled = true  // 恢复：使用TouchThroughView处理触摸穿透
-            
+
             // 启用空白区域点击手势识别器
             canvasTapGesture.isEnabled = true
 
@@ -1259,12 +1082,12 @@ class NativeCanvasView: UIView {
             for arrowView in arrowViews.values {
                 arrowView.enableArrowGestures()
             }
-            
+
             // 确保所有形状的手势都能正常工作
             for shapeView in shapeViews.values {
                 shapeView.enableShapeGestures()
             }
-            
+
             // 确保所有文字的手势都能正常工作
             for textView in textViews.values {
                 textView.enableTextGestures()
@@ -1281,7 +1104,7 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
             overlayContainerView.isUserInteractionEnabled = false
             textOverlayView.isUserInteractionEnabled = false  // 新增：平移时不可交互
-            
+
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
 
@@ -1297,7 +1120,7 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
             textOverlayView.isUserInteractionEnabled = false  // 新增：绘图时不可交互
-            
+
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
 
@@ -1313,7 +1136,7 @@ class NativeCanvasView: UIView {
             // 关键：禁用覆盖层交互
             overlayContainerView.isUserInteractionEnabled = false
             textOverlayView.isUserInteractionEnabled = false  // 新增：擦除时不可交互
-            
+
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
 
@@ -1329,10 +1152,10 @@ class NativeCanvasView: UIView {
             overlayContainerView.isUserInteractionEnabled = true
             objectLayerView.isUserInteractionEnabled = true
             textOverlayView.isUserInteractionEnabled = true  // 新增：图片工具时可交互
-            
+
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
-            
+
             // 禁用所有图片的选择手势，只允许创建新图片
             for imageView in imageViews.values {
                 imageView.disableImageGestures()
@@ -1349,11 +1172,11 @@ class NativeCanvasView: UIView {
             // 这些工具可能需要与覆盖层交互
             overlayContainerView.isUserInteractionEnabled = true
             textOverlayView.isUserInteractionEnabled = true  // 修复：确保文本工具时可交互
-            
+
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
             objectLayerView.isUserInteractionEnabled = false  // 创建形状时不可交互
-            
+
             // 特殊处理文字工具
             if tool == .text {
                 // 禁用文本选择手势，只允许创建新文本
@@ -2146,29 +1969,20 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
     /// 处理手势识别器是否应该接收触摸事件
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        print("[shouldReceive] 检查手势是否接收触摸")
-        print("[shouldReceive] currentTool = \(currentTool)")
-
         guard gestureRecognizer == canvasTapGesture else {
-            print("[shouldReceive] 不是 canvasTapGesture，返回 true")
             return true
         }
-
-        print("[shouldReceive] 是 canvasTapGesture")
 
         // 图片工具时，空白区域应该接收点击（弹出相册）
         if currentTool == .image {
             let location = touch.location(in: objectLayerView)
             let hitView = objectLayerView.hitTest(location, with: nil)
-            print("[shouldReceive][Image] hitView = \(type(of: hitView))")
 
             // 如果点击在已有图片上，让其自己处理（选中）
             if hitView is SelectableImageView {
-                print("[shouldReceive][Image] 点击在已有图片上，返回 false")
                 return false
             }
             // 空白区域由 canvasTapGesture 处理（弹出相册）
-            print("[shouldReceive][Image] 点击空白区域，返回 true")
             return true
         }
 
@@ -2188,18 +2002,11 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
         // 其他工具的处理保持不变
         let location = touch.location(in: objectLayerView)
         let hitView = objectLayerView.hitTest(location, with: nil)
-        
-        print("[shouldReceive][Select] location: \(location)")
-        print("[shouldReceive][Select] hitView: \(type(of: hitView))")
-        print("[shouldReceive][Select] hitView is SelectableImageView: \(hitView is SelectableImageView)")
-        print("[shouldReceive][Select] isSelectableObject: \(isSelectableObject(hitView))")
 
         if isSelectableObject(hitView) {
-            print("[shouldReceive][Select] 点击在可选择对象上，返回 false")
             return false
         }
 
-        print("[shouldReceive][Select] 点击空白区域，返回 true")
         return true
     }
 
@@ -2439,97 +2246,6 @@ extension NativeCanvasView {
 
         // 确保全局状态被重置（finishEditing应该已经处理了，这是防御性代码）
         SelectableTextView.resetGlobalKeyboardState()
-    }
-}
-
-// MARK: - PHPickerViewControllerDelegate
-
-extension NativeCanvasView: PHPickerViewControllerDelegate {
-
-    /// PHPicker 完成选择的回调
-    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-        print("========================================")
-        print("[PHPicker] didFinishPicking 回调触发!")
-        print("[PHPicker] 结果数量: \(results.count)")
-
-        // 先关闭选择器
-        picker.dismiss(animated: true) {
-            print("[PHPicker] 选择器已关闭")
-        }
-
-        // 重置状态
-        isShowingImagePicker = false
-
-        // 获取待定位置
-        guard let location = pendingImageLocation else {
-            print("[PHPicker] 错误: pendingImageLocation 为 nil")
-            print("========================================")
-            return
-        }
-        print("[PHPicker] 目标位置: \(location)")
-
-        // 如果用户取消选择
-        guard let result = results.first else {
-            print("[PHPicker] 用户取消选择")
-            pendingImageLocation = nil
-            print("========================================")
-            return
-        }
-        print("[PHPicker] 获取到选择结果")
-
-        // 加载图片数据
-        let itemProvider = result.itemProvider
-        print("[PHPicker] ItemProvider: \(itemProvider)")
-        print("[PHPicker] 注册类型: \(itemProvider.registeredTypeIdentifiers)")
-
-        if itemProvider.canLoadObject(ofClass: UIImage.self) {
-            print("[PHPicker] 开始加载 UIImage...")
-
-            itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
-                print("[PHPicker] loadObject 回调")
-
-                if let error = error {
-                    print("[PHPicker] 加载失败: \(error.localizedDescription)")
-                    DispatchQueue.main.async {
-                        self?.pendingImageLocation = nil
-                    }
-                    return
-                }
-
-                guard let image = object as? UIImage else {
-                    print("[PHPicker] 错误: 对象不是 UIImage")
-                    DispatchQueue.main.async {
-                        self?.pendingImageLocation = nil
-                    }
-                    return
-                }
-                print("[PHPicker] 图片加载成功，尺寸: \(image.size)")
-
-                // 转换为 JPEG 数据
-                guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-                    print("[PHPicker] 错误: JPEG 压缩失败")
-                    DispatchQueue.main.async {
-                        self?.pendingImageLocation = nil
-                    }
-                    return
-                }
-                print("[PHPicker] JPEG 压缩完成，大小: \(imageData.count) bytes")
-
-                // 回到主线程处理
-                DispatchQueue.main.async { [weak self] in
-                    print("[PHPicker] 调用 handleImageDataSelected...")
-                    self?.handleImageDataSelected(imageData, at: location)
-                    self?.pendingImageLocation = nil
-                    print("[PHPicker] 处理完成")
-                    print("========================================")
-                }
-            }
-        } else {
-            print("[PHPicker] 错误: itemProvider 无法加载 UIImage")
-            print("[PHPicker] 可用类型: \(itemProvider.registeredTypeIdentifiers)")
-            pendingImageLocation = nil
-            print("========================================")
-        }
     }
 }
 

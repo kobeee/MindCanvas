@@ -18,6 +18,7 @@ struct NativeEditorView: View {
     @State private var showPhotoPicker = false
     @State private var showImageSourcePicker = false
     @State private var showCamera = false
+    @State private var pendingCanvasImageLocation: CGPoint?
     
     init(project: Project) {
         self.project = project
@@ -108,6 +109,12 @@ struct NativeEditorView: View {
             if let canvasView = viewModel.canvasView {
                 canvasView.onSelectionIdChanged = { [weak viewModel] selectedID in
                     viewModel?.stateManager.selectedNodeID = selectedID
+                }
+                
+                // 绑定图片选择器请求回调
+                canvasView.onShowImagePickerRequested = { [self] location in
+                    pendingCanvasImageLocation = location
+                    showImageSourcePicker = true
                 }
             }
             
@@ -215,11 +222,10 @@ struct NativeEditorView: View {
                     viewModel.stateManager.recordAction(action)
                     canvasView.removeText(id: selectedID)
                     deletionSuccess = true
-                    print("✅ [NativeEditorView] 删除文字对象成功: \(text.text)")
                 }
                 
                 if !deletionSuccess {
-                    print("⚠️ [NativeEditorView] 删除对象失败，未找到ID: \(selectedID)")
+                    // Deletion failed
                 }
 
                 // 清除选中状态
@@ -370,11 +376,18 @@ struct NativeEditorView: View {
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let item = newItem else { return }
             Task {
+                defer {
+                    selectedPhotoItem = nil
+                    pendingCanvasImageLocation = nil
+                }
                 if let data = try? await item.loadTransferable(type: Data.self) {
-                    await viewModel.importImage(data)
+                    if let location = pendingCanvasImageLocation, let canvasView = viewModel.canvasView {
+                        await MainActor.run {
+                            canvasView.importImage(data, at: location)
+                        }
+                    }
                 }
             }
-            selectedPhotoItem = nil
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraImagePicker { imageData in
@@ -762,7 +775,6 @@ private struct NativeCanvasContainer: View {
                         onToolChanged: { newTool in
                             // 验证状态同步
                             if viewModel.stateManager.currentTool != newTool {
-                                print("⚠️ [NativeEditorView] 状态同步异常：StateManager工具=\(viewModel.stateManager.currentTool.displayName), 回调工具=\(newTool.displayName)")
                                 // 强制同步状态
                                 viewModel.stateManager.selectTool(newTool)
                             }

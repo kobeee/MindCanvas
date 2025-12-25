@@ -1,5 +1,173 @@
 # 开发记录
 
+## 2025-12-25 - 图片工具交互流程修复 ✅
+
+### 概述
+修复了图片工具的交互流程问题，恢复了相册和拍照两个选项。在之前的"图片工具终极修复"中，为了修复工具状态切换问题，注释掉了 `onImageImport()` 调用，导致点击图片工具后直接弹出相册（无拍照选项）。通过架构重构，将图片选择弹窗的显示逻辑提升到 NativeEditorView 层，恢复了完整的图片源选择功能。
+
+### 问题诊断
+
+#### 核心现象
+1. 点击图片工具按钮 → 工具状态正确切换为 image
+2. 点击画布空白区域 → 直接弹出相册选择器（无拍照选项）
+3. 选择图片后 → 图片未在画布上显示
+
+#### 根本原因分析
+通过详细的调试日志定位到问题：
+
+**问题1：状态被提前清空**
+```
+[Editor] onChange(of: selectedPhotoItem) 触发
+[Editor] pendingCanvasImageLocation: (2549.0, 2571.5)  ← 有值
+========================================
+[Editor] selectedPhotoItem 和 pendingCanvasImageLocation 已清空  ← 立即被清空！
+========================================
+```
+
+`selectedPhotoItem = nil` 和 `pendingCanvasImageLocation = nil` 这两行代码在 Task **外部**执行，导致在 Task 开始执行**之前**，`pendingCanvasImageLocation` 就已经被清空了。
+
+**问题2：架构职责不清**
+- NativeCanvasView 直接使用 PHPickerViewController（只支持相册）
+- 缺少拍照功能的集成
+- 图片选择弹窗的显示逻辑分散在多个地方
+
+### 修复方案
+
+#### 1. 架构重构：职责分离 ✅
+**设计原则**：
+- **NativeCanvasView**：只负责画布交互和图片创建，不负责弹窗显示
+- **NativeEditorView**：负责显示图片源选择弹窗（已有完整的相册+拍照界面）
+- **回调机制**：通过 `onShowImagePickerRequested` 回调实现解耦
+
+#### 2. 修复状态清空时机 ✅
+**修复前**：
+```swift
+.onChange(of: selectedPhotoItem) { _, newItem in
+    guard let item = newItem else { return }
+    Task {
+        if let data = try? await item.loadTransferable(type: Data.self) {
+            if let location = pendingCanvasImageLocation, let canvasView = viewModel.canvasView {
+                await MainActor.run {
+                    canvasView.importImage(data, at: location)
+                }
+            }
+        }
+    }
+    selectedPhotoItem = nil
+    pendingCanvasImageLocation = nil  // ❌ 在 Task 外部清空
+}
+```
+
+**修复后**：
+```swift
+.onChange(of: selectedPhotoItem) { _, newItem in
+    guard let item = newItem else { return }
+    Task {
+        defer {
+            // Task 完成后清空状态
+            selectedPhotoItem = nil
+            pendingCanvasImageLocation = nil
+        }
+        if let data = try? await item.loadTransferable(type: Data.self) {
+            if let location = pendingCanvasImageLocation, let canvasView = viewModel.canvasView {
+                await MainActor.run {
+                    canvasView.importImage(data, at: location)
+                }
+            }
+        }
+    }
+}
+```
+
+#### 3. 添加回调机制 ✅
+**NativeCanvasView.swift**：
+```swift
+/// 图片选择器请求回调（用于通知上层显示图片源选择弹窗）
+var onShowImagePickerRequested: ((CGPoint) -> Void)?
+
+/// 显示图片选择器（通过回调通知上层显示图片源选择弹窗）
+private func showImagePicker(at location: CGPoint) {
+    guard !isShowingImagePicker else { return }
+    pendingImageLocation = location
+    isShowingImagePicker = true
+    // 通知上层显示图片源选择弹窗
+    onShowImagePickerRequested?(location)
+}
+```
+
+**NativeEditorView.swift**：
+```swift
+// 画布图片导入位置
+@State private var pendingCanvasImageLocation: CGPoint?
+
+// 绑定图片选择器请求回调
+canvasView.onShowImagePickerRequested = { [self] location in
+    pendingCanvasImageLocation = location
+    showImageSourcePicker = true
+}
+```
+
+#### 4. 添加公开的 importImage 方法 ✅
+```swift
+/// 导入图片（公开方法，供上层调用）
+func importImage(_ imageData: Data, at location: CGPoint) {
+    // 重置状态
+    isShowingImagePicker = false
+    pendingImageLocation = nil
+    // 调用内部处理方法
+    handleImageDataSelected(imageData, at: location)
+}
+```
+
+#### 5. 清理无用代码 ✅
+- 删除了 `checkAndRequestPhotoPermission` 方法
+- 删除了 `permissionStatusDescription` 方法
+- 删除了 `findViewController` 方法
+- 删除了 `responderChainDescription` 方法
+- 删除了 `PHPickerViewControllerDelegate` 扩展
+- 移除了 `PhotosUI` 和 `Photos` import
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `NativeCanvasView.swift` | 架构重构 | 添加回调、删除 PHPickerViewController 相关代码 |
+| `NativeEditorView.swift` | 修复 | 添加回调绑定、修复状态清空时机 |
+| `CHANGELOG.md` | 更新 | 记录修复过程和技术要点 |
+
+### 验证标准
+
+- [x] 点击图片工具按钮 → 工具状态正确切换为 image
+- [x] 点击画布空白区域 → 弹出图片源选择弹窗（相册 + 拍照）
+- [x] 选择相册图片 → 图片在点击位置正确创建
+- [x] 选择拍照图片 → 图片在点击位置正确创建
+- [x] 架构清晰，职责分离明确
+
+### 技术亮点
+
+#### 1. 职责分离架构
+- NativeCanvasView 专注于画布交互
+- NativeEditorView 负责 UI 弹窗
+- 通过回调实现松耦合
+
+#### 2. defer 块的巧妙使用
+- 确保状态在 Task 完成后清理
+- 避免异步操作中的状态混乱
+
+#### 3. 完整的调试日志
+- 添加了详细的调试日志追踪问题
+- 便于后续问题排查
+
+### 总结
+
+本次修复成功恢复了图片工具的完整交互流程，通过架构重构和状态管理优化，实现了：
+- ✅ 恢复相册和拍照两个选项
+- ✅ 修复状态被提前清空的 bug
+- ✅ 实现清晰的架构职责分离
+- ✅ 提供可扩展的回调机制
+
+---
+
 ## 2025-12-25 - 图片缩放平滑度和图像同步修复 ✅
 
 ### 概述
