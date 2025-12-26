@@ -245,19 +245,19 @@ class NativeCanvasView: UIView {
         // 配置覆盖层容器视图
         overlayContainerView.backgroundColor = .clear
         overlayContainerView.isUserInteractionEnabled = true
-        overlayContainerView.clipsToBounds = false  // 修改为 false，确保截图时对象层完整渲染
+        overlayContainerView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
 
         // 配置对象图层 - 作为 overlayContainerView 的子视图
         objectLayerView.backgroundColor = .clear
         objectLayerView.isUserInteractionEnabled = true
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
-        objectLayerView.clipsToBounds = false
+        objectLayerView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
         objectLayerView.isOpaque = false
 
         // 新增：配置文字覆盖层
         textOverlayView.backgroundColor = .clear
         textOverlayView.isUserInteractionEnabled = true
-        textOverlayView.clipsToBounds = false
+        textOverlayView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
         textOverlayView.isOpaque = false
         textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)
 
@@ -265,7 +265,7 @@ class NativeCanvasView: UIView {
         addSubview(pencilCanvas)
         addSubview(overlayContainerView)  // 覆盖在 pencilCanvas 上方
         overlayContainerView.addSubview(objectLayerView)
-        addSubview(textOverlayView)  // 新增：作为最顶层
+        overlayContainerView.addSubview(textOverlayView)  // 修复：作为 overlayContainerView 的子视图，确保被正确裁剪
 
         // 添加空白区域点击手势识别器
         addGestureRecognizer(canvasTapGesture)
@@ -288,7 +288,6 @@ class NativeCanvasView: UIView {
     private func setupConstraints() {
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
         overlayContainerView.translatesAutoresizingMaskIntoConstraints = false
-        textOverlayView.translatesAutoresizingMaskIntoConstraints = false  // 新增
 
         NSLayoutConstraint.activate([
             // pencilCanvas 填满整个视图
@@ -301,13 +300,7 @@ class NativeCanvasView: UIView {
             overlayContainerView.topAnchor.constraint(equalTo: topAnchor),
             overlayContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             overlayContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            // 新增：textOverlayView 约束
-            textOverlayView.topAnchor.constraint(equalTo: topAnchor),
-            textOverlayView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            textOverlayView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            textOverlayView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 

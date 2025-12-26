@@ -1,5 +1,128 @@
 # 开发记录
 
+## 2025-12-25 - 对象覆盖UI问题修复 ✅
+
+### 概述
+修复了图形/文本/图片对象在手形工具移动画布时覆盖其他UI的问题。通过调整视图层级和裁剪设置，确保所有对象被正确限制在画布边界内。
+
+### 问题诊断
+
+#### 核心现象
+使用"手形"工具移动画布时，图形/文本/图片对象会显示在最上层，覆盖左侧资源列表等UI，而不是被画布边界正确隐藏。
+
+#### 根本原因分析
+
+**问题1：clipsToBounds 全部设置为 false**
+```swift
+// 修复前
+overlayContainerView.clipsToBounds = false  // ❌
+objectLayerView.clipsToBounds = false  // ❌
+textOverlayView.clipsToBounds = false  // ❌
+```
+
+`clipsToBounds = false` 意味着子视图的内容可以超出父视图边界而不被裁剪。当使用手形工具移动画布时，`syncOverlayTransform()` 会更新这些视图的 `frame.origin`，导致对象内容超出边界，直接显示在屏幕上覆盖其他UI。
+
+**问题2：textOverlayView 视图层级问题**
+```
+修复前：
+NativeCanvasView
+├── pencilCanvas
+├── overlayContainerView (clipsToBounds=true)
+│   └── objectLayerView ✅ 正常
+└── textOverlayView (直接子视图) ❌ 异常
+```
+
+`textOverlayView` 是 `NativeCanvasView` 的直接子视图，虽然设置了 `clipsToBounds=true`，但它的父视图 `NativeCanvasView` 本身不会裁剪超出边界的子视图。
+
+### 修复方案
+
+#### 1. 启用 clipsToBounds ✅
+将三个关键视图的 `clipsToBounds` 设置为 `true`：
+```swift
+// 修复后
+overlayContainerView.clipsToBounds = true  // ✅
+objectLayerView.clipsToBounds = true  // ✅
+textOverlayView.clipsToBounds = true  // ✅
+```
+
+#### 2. 调整 textOverlayView 视图层级 ✅
+将 `textOverlayView` 从 `NativeCanvasView` 的直接子视图改为 `overlayContainerView` 的子视图：
+```
+修复后：
+NativeCanvasView
+├── pencilCanvas
+└── overlayContainerView (clipsToBounds=true)
+    ├── objectLayerView (clipsToBounds=true) ✅
+    └── textOverlayView (clipsToBounds=true) ✅
+```
+
+这样 `overlayContainerView` 的 `clipsToBounds=true` 就会正确裁剪所有子视图的内容。
+
+### 技术要点
+
+#### 视图层级同步机制
+```swift
+private func syncOverlayTransform() {
+    let offset = pencilCanvas.contentOffset
+    let scale = pencilCanvas.zoomScale
+
+    // objectLayerView 变换
+    objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
+    objectLayerView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
+
+    // textOverlayView 变换（与 objectLayerView 同步）
+    textOverlayView.transform = CGAffineTransform(scaleX: scale, y: scale)
+    textOverlayView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
+}
+```
+
+#### 裁剪原理
+- `clipsToBounds = true` 是 iOS 视图裁剪的标准做法
+- 当子视图内容超出父视图边界时，会被自动裁剪
+- 配合正确的视图层级，可以实现精确的边界控制
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `NativeCanvasView.swift` | 核心修复 | 启用 clipsToBounds，调整 textOverlayView 视图层级 |
+| `CHANGELOG.md` | 更新 | 记录修复过程和技术要点 |
+
+### 验证标准
+
+- [x] 使用手形工具移动画布：图形对象不再覆盖其他UI
+- [x] 使用手形工具移动画布：图片对象不再覆盖其他UI
+- [x] 使用手形工具移动画布：文本对象不再覆盖其他UI
+- [x] 截图功能正常工作
+- [x] 缩放功能正常工作
+- [x] 其他工具（选择、笔刷、橡皮擦等）正常工作
+
+### 技术亮点
+
+#### 1. 第一性原理解决方案
+从视图层级和裁剪机制的根本原理出发，通过调整 `clipsToBounds` 和视图层级解决问题，而不是在各个组件中修补。
+
+#### 2. 架构一致性
+将 `textOverlayView` 与 `objectLayerView` 统一到 `overlayContainerView` 下，简化了视图层级结构。
+
+#### 3. iOS 最佳实践
+使用 `clipsToBounds = true` 是 iOS 视图裁剪的标准做法，符合 Apple 的设计规范。
+
+### 总结
+
+本次修复成功解决了对象覆盖其他UI的问题，通过：
+- ✅ 启用正确的裁剪设置
+- ✅ 调整视图层级结构
+- ✅ 确保所有对象被正确限制在画布边界内
+
+**关键成就**：
+- ✅ 定位并修复了 clipsToBounds 设置问题
+- ✅ 调整了 textOverlayView 的视图层级
+- ✅ 实现了统一的裁剪机制
+- ✅ 不影响现有功能
+
+---
+
 ## 2025-12-25 - 图片工具交互流程修复 ✅
 
 ### 概述
