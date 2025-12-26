@@ -1,5 +1,240 @@
 # 开发记录
 
+## 2025-12-26 - 选框截图渲染完整性修复 ✅
+
+### 概述
+修复了选框截图无法正确显示所有内容的问题。通过深入分析 iOS 最佳实践，发现之前的实现使用了混合坐标系导致内容无法正确显示。最终采用 `drawViewHierarchy` 方法，这是 iOS 推荐的截图方式，能够正确捕获整个视图层级，包括 PencilKit 笔画、图片、箭头、形状、文本等所有内容。
+
+### 问题诊断
+
+#### 核心现象
+用户在画布上绘制了画笔、文本、图形、图片等多种内容，使用 Magic Frame 选框截图时：
+1. 第一次尝试：截图中只显示了图片，其他内容（画笔、文本、图形）都没有显示
+2. 第二次尝试：画笔笔画无法正确显示
+3. 第三次尝试：所有内容都无法显示
+
+#### 根本原因分析
+
+**问题1：captureContentSnapshot 只渲染 objectLayerView**
+```swift
+// 修复前
+func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
+    // ...
+    // 渲染对象层
+    objectLayerView.layer.render(in: ctx)  // ❌ 只渲染了 objectLayerView
+    // ❌ 没有渲染 textOverlayView！
+    // ...
+}
+```
+
+视图层级结构：
+```
+NativeCanvasView
+├── pencilCanvas (PKCanvasView) - PencilKit 绘图层
+└── overlayContainerView (UIView)
+    ├── objectLayerView (UIView) - 包含图片、箭头、形状等对象
+    └── textOverlayView (TouchThroughView) - 包含文本对象 ❌ 未被渲染
+```
+
+**问题2：captureVisibleAreaSnapshot 使用混合坐标系**
+```swift
+// 修复前
+func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
+    // ...
+    // 1. 将视口坐标转换为内容坐标
+    let contentRect = contentRect(forViewportRect: clippedRect)
+
+    // 2. 使用 contentRect 导出 PencilKit 笔画
+    let drawingImage = pencilCanvas.drawing.image(from: contentRect, scale: scale)
+
+    // 3. 绘制到 clippedRect.size ❌ 坐标不匹配！
+    drawingImage.draw(in: CGRect(origin: .zero, size: clippedRect.size))
+    // ...
+}
+```
+
+这种混合使用不同坐标系的渲染方式导致笔画位置不正确。
+
+**问题3：layer.render 的局限性**
+Apple 官方警告：`layer.render(in: ctx)` 不支持完整的 CoreAnimation 组合模型，可能无法正确捕获某些视图内容。
+
+### 修复方案
+
+#### 1. 基于 iOS 最佳实践的重构 ✅
+
+通过搜索 iOS 最佳实践，发现 `drawViewHierarchy(in:afterScreenUpdates:)` 是 Apple 推荐的截图方式：
+
+**设计原则**：
+- 使用 `drawViewHierarchy` 捕获整个视图层级
+- 简化逻辑，避免复杂的坐标转换
+- 添加白色背景确保可见性
+
+**最终修复方案**：
+```swift
+func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
+    print("[Snapshot] ===== Begin captureVisibleAreaSnapshot =====")
+    print("[Snapshot] viewportRect: \(viewportRect)")
+
+    // 验证尺寸
+    guard viewportRect.width >= 10, viewportRect.height >= 10 else {
+        print("[Snapshot] Error: viewportRect too small")
+        return nil
+    }
+
+    // 确保区域在视图范围内
+    let clippedRect = viewportRect.intersection(bounds)
+    print("[Snapshot] clippedRect: \(clippedRect)")
+    guard !clippedRect.isEmpty else {
+        print("[Snapshot] Error: clippedRect is empty")
+        return nil
+    }
+
+    // 确保布局完成
+    layoutIfNeeded()
+    syncOverlayTransform()
+
+    // 配置渲染器
+    let scale = UIScreen.main.scale
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = scale
+    format.opaque = false
+
+    let renderer = UIGraphicsImageRenderer(size: clippedRect.size, format: format)
+
+    let result = renderer.image { context in
+        let ctx = context.cgContext
+
+        // 1. 绘制白色背景（确保所有内容都可见）
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.fill(CGRect(origin: .zero, size: clippedRect.size))
+
+        // 2. 平移坐标系：使 clippedRect 的左上角对应图片的 (0, 0)
+        ctx.translateBy(x: -clippedRect.origin.x, y: -clippedRect.origin.y)
+
+        // 3. 使用 drawViewHierarchy 捕获整个视图层级
+        // 这是 iOS 推荐的方式，能正确捕获所有子视图
+        // 包括 PKCanvasView、objectLayerView、textOverlayView
+        self.drawHierarchy(in: self.bounds, afterScreenUpdates: true)
+    }
+
+    print("[Snapshot] result.size: \(result.size)")
+    print("[Snapshot] ===== End captureVisibleAreaSnapshot =====")
+    return result
+}
+```
+
+#### 2. 修复 captureContentSnapshot 方法 ✅
+**修复后**：
+```swift
+func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
+    // ...
+
+    let result = renderer.image { rendererContext in
+        let ctx = rendererContext.cgContext
+
+        // 白色背景（确保可见性）
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.fill(CGRect(origin: .zero, size: bounded.size))
+
+        ctx.saveGState()
+        ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
+
+        // 渲染对象层（包含图片、箭头、形状）
+        objectLayerView.layer.render(in: ctx)
+
+        // 渲染文本层（包含文本对象）✅ 新增
+        textOverlayView.layer.render(in: ctx)
+
+        ctx.restoreGState()
+
+        // 渲染 PencilKit 笔画
+        drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
+    }
+
+    return result
+}
+```
+
+### 技术要点
+
+#### 1. iOS 最佳实践：drawViewHierarchy
+**修复前**：
+- 使用混合坐标系，导致坐标不匹配
+- 使用 `layer.render`，有局限性
+
+**修复后**：
+- 使用 `drawViewHierarchy(in:afterScreenUpdates:)`
+- 这是 Apple 推荐的截图方式
+- 能正确捕获整个视图层级
+
+#### 2. 简化逻辑
+**修复前**：
+- 复杂的坐标转换
+- 分别处理 PencilKit 和对象层
+- 容易出错
+
+**修复后**：
+- 统一的截图方式
+- 一次捕获所有内容
+- 简洁、可靠
+
+#### 3. 白色背景
+**修复前**：
+- 没有白色背景，透明内容可能不可见
+
+**修复后**：
+- 绘制白色背景，确保所有内容都可见
+- 这符合截图工具的常见预期
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|-----|
+| `NativeCanvasView.swift` | 核心修复 | 重构 captureVisibleAreaSnapshot 使用 drawViewHierarchy |
+| `CHANGELOG.md` | 更新 | 记录修复过程和技术要点 |
+
+### 验证标准
+
+- [x] 画笔工具绘制的笔画能被正确截图
+- [x] 图片对象能被正确截图
+- [x] 箭头对象能被正确截图
+- [x] 形状对象能被正确截图
+- [x] 文本对象能被正确截图
+- [x] 截图包含白色背景，确保所有内容可见
+- [x] 截图位置和尺寸正确
+
+### 技术亮点
+
+#### 1. 基于 iOS 最佳实践
+通过搜索 iOS 最佳实践，发现 `drawViewHierarchy` 是 Apple 推荐的截图方式：
+- 稳定可靠
+- 能正确处理动态布局
+- 支持复杂的视图层级
+
+#### 2. 简化架构
+- 统一的截图方式
+- 避免复杂的坐标转换
+- 代码简洁、易维护
+
+#### 3. 完整的调试日志
+添加了详细的调试日志，便于追踪问题和验证效果。
+
+### 总结
+
+本次修复成功解决了选框截图无法正确显示所有内容的问题，通过：
+- ✅ 采用 iOS 最佳实践 `drawViewHierarchy`
+- ✅ 简化截图逻辑，避免复杂的坐标转换
+- ✅ 添加白色背景确保可见性
+- ✅ 保持代码简洁、优雅、可维护
+
+**关键成就**：
+- ✅ 定位并修复了截图渲染不完整的问题
+- ✅ 确保所有对象类型都能正确截图
+- ✅ 实现了符合 iOS 最佳实践的截图方案
+- ✅ 不影响现有功能
+
+---
+
 ## 2025-12-25 - 对象覆盖UI问题修复 ✅
 
 ### 概述

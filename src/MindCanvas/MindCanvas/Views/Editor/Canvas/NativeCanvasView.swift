@@ -1355,7 +1355,7 @@ class NativeCanvasView: UIView {
 
     /// 捕获内容坐标系中的指定区域快照
     func captureContentSnapshot(rect contentRect: CGRect) -> UIImage? {
-        
+
         // 扩大边界容差（从+-10扩大到+-100）
         let expandedCanvas = CGRect(
             x: -100,
@@ -1364,8 +1364,8 @@ class NativeCanvasView: UIView {
             height: canvasSize.height + 200
         )
         let bounded = contentRect.intersection(expandedCanvas)
-        
-        
+
+
         // 放宽最小尺寸检查（从1pt放宽到10pt）
         guard !bounded.isNull, bounded.width >= 10, bounded.height >= 10 else {
             if !bounded.isNull {
@@ -1377,7 +1377,7 @@ class NativeCanvasView: UIView {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = false
-        
+
 
         // PencilKit 导出
         let drawingImage = pencilCanvas.drawing.image(from: bounded, scale: scale)
@@ -1386,36 +1386,44 @@ class NativeCanvasView: UIView {
         let renderer = UIGraphicsImageRenderer(size: bounded.size, format: format)
         let result = renderer.image { rendererContext in
             let ctx = rendererContext.cgContext
-            
+
             // 白色背景（确保可见性）
             ctx.setFillColor(UIColor.white.cgColor)
             ctx.fill(CGRect(origin: .zero, size: bounded.size))
-            
+
             ctx.saveGState()
             ctx.translateBy(x: -bounded.origin.x, y: -bounded.origin.y)
-            
-            // 渲染对象层
+
+            // 渲染对象层（包含图片、箭头、形状）
             objectLayerView.layer.render(in: ctx)
-            
+
+            // 渲染文本层（包含文本对象）
+            textOverlayView.layer.render(in: ctx)
+
             ctx.restoreGState()
-            
+
             // 渲染 PencilKit 笔画
             drawingImage.draw(in: CGRect(origin: .zero, size: bounded.size))
         }
-        
+
         return result
     }
 
     /// 将视口坐标映射到画布内容坐标
     func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
-        
+        print("[contentRect] ===== Begin contentRect calculation =====")
+        print("[contentRect] viewportRect (input): \(viewportRect)")
+
         // 从视口坐标转换到Canvas坐标
         let rectInCanvas = pencilCanvas.convert(viewportRect, from: self)
-        
+        print("[contentRect] rectInCanvas (after convert): \(rectInCanvas)")
+
         // 获取缩放和偏移
         let scale = pencilCanvas.zoomScale
         let offset = pencilCanvas.contentOffset
-        
+        print("[contentRect] zoomScale: \(scale)")
+        print("[contentRect] contentOffset: \(offset)")
+
         // 应用缩放和偏移
         let result = CGRect(
             x: (rectInCanvas.origin.x + offset.x) / scale,
@@ -1423,7 +1431,9 @@ class NativeCanvasView: UIView {
             width: rectInCanvas.width / scale,
             height: rectInCanvas.height / scale
         )
-        
+
+        print("[contentRect] contentRect (result): \(result)")
+        print("[contentRect] ===== End contentRect calculation =====")
         return result
     }
 
@@ -1467,18 +1477,22 @@ class NativeCanvasView: UIView {
     /// - Parameter viewportRect: 视口坐标（相对于 NativeCanvasView）
     /// - Returns: 截取的图片，失败返回 nil
     func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
+        print("[Snapshot] ===== Begin captureVisibleAreaSnapshot =====")
+        print("[Snapshot] viewportRect: \(viewportRect)")
 
         // 验证尺寸
         guard viewportRect.width >= 10, viewportRect.height >= 10 else {
+            print("[Snapshot] Error: viewportRect too small")
             return nil
         }
 
         // 确保区域在视图范围内
         let clippedRect = viewportRect.intersection(bounds)
+        print("[Snapshot] clippedRect: \(clippedRect)")
         guard !clippedRect.isEmpty else {
+            print("[Snapshot] Error: clippedRect is empty")
             return nil
         }
-
 
         // 确保布局完成
         layoutIfNeeded()
@@ -1495,15 +1509,21 @@ class NativeCanvasView: UIView {
         let result = renderer.image { context in
             let ctx = context.cgContext
 
-            // 平移坐标系：使 clippedRect 的左上角对应图片的 (0, 0)
+            // 1. 绘制白色背景（确保所有内容都可见）
+            ctx.setFillColor(UIColor.white.cgColor)
+            ctx.fill(CGRect(origin: .zero, size: clippedRect.size))
+
+            // 2. 平移坐标系：使 clippedRect 的左上角对应图片的 (0, 0)
             ctx.translateBy(x: -clippedRect.origin.x, y: -clippedRect.origin.y)
 
-            // 渲染整个视图层级
-            // 这会自动包含 pencilCanvas 和 overlayContainerView 及其所有子视图
-            self.layer.render(in: ctx)
+            // 3. 使用 drawViewHierarchy 捕获整个视图层级
+            // 这是 iOS 推荐的方式，能正确捕获所有子视图
+            // 包括 PKCanvasView、objectLayerView、textOverlayView
+            self.drawHierarchy(in: self.bounds, afterScreenUpdates: true)
         }
 
-
+        print("[Snapshot] result.size: \(result.size)")
+        print("[Snapshot] ===== End captureVisibleAreaSnapshot =====")
         return result
     }
 
