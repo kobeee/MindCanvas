@@ -4,7 +4,8 @@
 定义用户相关的数据库模型
 """
 
-from sqlalchemy import String, Index
+from datetime import datetime
+from sqlalchemy import String, Index, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, TimestampMixin, UUIDMixin
@@ -33,6 +34,10 @@ class User(Base, UUIDMixin, TimestampMixin):
         nullable=False
     )  # 'apple', 'google', 'github', 'email'
     provider_id: Mapped[str | None] = mapped_column(String(255))
+
+    # Refresh Token
+    refresh_token: Mapped[str | None] = mapped_column(String(500))
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     # 头像
     avatar_url: Mapped[str | None] = mapped_column(String(500))
@@ -64,6 +69,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index("idx_users_email", "email"),
         Index("idx_users_provider_id", "provider_id"),
+        Index("idx_users_refresh_token", "refresh_token"),
     )
 
     def __repr__(self) -> str:

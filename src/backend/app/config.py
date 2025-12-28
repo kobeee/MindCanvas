@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     # 数据库配置
     DATABASE_URL: str = "postgresql://mindcanvas:mindcanvas@localhost:5432/mindcanvas"
 
+    # 邮件服务配置
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+
     # Redis 配置
     REDIS_URL: str = "redis://localhost:6379/0"
 

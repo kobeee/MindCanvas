@@ -130,11 +130,19 @@ class AuthService:
             # 创建 JWT Token
             access_token = await self.create_access_token(str(user.id))
 
+            # 创建 Refresh Token（对于第三方登录也需要）
+            refresh_token, refresh_expires_at = await self.create_refresh_token(str(user.id))
+
+            # 刷新用户对象，确保所有属性都已加载
+            await self.db.refresh(user)
+
             logger.info(f"User {user.id} logged in successfully via {provider}")
 
             return {
                 "access_token": access_token,
+                "refresh_token": refresh_token,
                 "token_type": "bearer",
+                "expires_in": self.expire_minutes * 60,  # 转换为秒
                 "user": user
             }
 
@@ -427,3 +435,178 @@ class AuthService:
         password_bytes = plain_password.encode('utf-8')
         hashed_bytes = hashed_password.encode('utf-8')
         return bcrypt.checkpw(password_bytes, hashed_bytes)
+
+    async def send_verification_code(self, email: str, redis_client) -> str:
+        """
+        发送验证码到邮箱
+
+        Args:
+            email: 邮箱地址
+            redis_client: Redis 客户端
+
+        Returns:
+            验证码
+
+        Raises:
+            AuthError: 如果发送失败
+        """
+        import random
+
+        # 检查发送频率限制（1分钟内只能发送一次）
+        rate_limit_key = f"email_rate_limit:{email}"
+        if await redis_client.exists(rate_limit_key):
+            raise AuthError("Verification code already sent, please wait")
+
+        # 生成 6 位数字验证码
+        code = str(random.randint(100000, 999999))
+
+        # 存储验证码到 Redis（5分钟过期）
+        verification_key = f"email_verification:{email}"
+        await redis_client.setex(verification_key, 300, code)
+
+        # 设置发送频率限制（1分钟）
+        await redis_client.setex(rate_limit_key, 60, "1")
+
+        # 发送邮件
+        from app.services.email_service import EmailService
+
+        email_service = EmailService(
+            host=settings.SMTP_HOST,
+            port=settings.SMTP_PORT,
+            username=settings.SMTP_USERNAME,
+            password=settings.SMTP_PASSWORD,
+            use_tls=settings.SMTP_USE_TLS
+        )
+
+        await email_service.send_verification_code(email, code)
+
+        logger.info(f"Verification code sent to {email}")
+        return code
+
+    async def create_refresh_token(self, user_id: str) -> tuple[str, datetime]:
+        """
+        创建 Refresh Token
+
+        Args:
+            user_id: 用户 ID
+
+        Returns:
+            (refresh_token, expires_at)
+
+        Raises:
+            AuthError: 如果创建失败
+        """
+        import secrets
+        from sqlalchemy import update
+
+        # 生成随机 Refresh Token
+        refresh_token = secrets.token_urlsafe(64)
+
+        # 设置过期时间（30天后）
+        expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+
+        # 更新用户记录
+        await self.db.execute(
+            update(User).where(User.id == UUID(user_id)).values(
+                refresh_token=refresh_token,
+                refresh_token_expires_at=expires_at
+            )
+        )
+        await self.db.commit()
+
+        logger.info(f"Refresh token created for user {user_id}")
+        return refresh_token, expires_at
+
+    async def verify_email_code(self, email: str, code: str, redis_client) -> tuple[User, str, datetime]:
+        """
+        验证邮箱验证码并登录
+
+        Args:
+            email: 邮箱地址
+            code: 验证码
+            redis_client: Redis 客户端
+
+        Returns:
+            (用户对象, refresh_token, expires_at)
+
+        Raises:
+            AuthError: 如果验证失败
+        """
+        # 从 Redis 获取验证码
+        verification_key = f"email_verification:{email}"
+        stored_code = await redis_client.get(verification_key)
+
+        if not stored_code:
+            raise AuthError("Verification code expired or not found")
+
+        if stored_code != code:
+            raise AuthError("Invalid verification code")
+
+        # 验证成功，删除验证码
+        await redis_client.delete(verification_key)
+
+        # 查找或创建用户
+        result = await self.db.execute(
+            select(User).where(User.email == email)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            # 创建新用户
+            user_data = UserCreate(
+                email=email,
+                username=email.split("@")[0],
+                auth_provider="email",
+                provider_id=None,
+                avatar_url=None
+            )
+
+            new_user = User(**user_data.model_dump())
+            self.db.add(new_user)
+            await self.db.commit()
+            await self.db.refresh(new_user)
+
+            logger.info(f"Created new user: {new_user.id}")
+            user = new_user
+
+        # 创建 Refresh Token
+        refresh_token, expires_at = await self.create_refresh_token(str(user.id))
+
+        # 刷新用户对象，确保所有属性都已加载
+        await self.db.refresh(user)
+
+        logger.info(f"User {user.id} logged in via email verification")
+        return user, refresh_token, expires_at
+
+    async def refresh_access_token(self, refresh_token: str) -> tuple[str, datetime, User]:
+        """
+        使用 Refresh Token 刷新 Access Token
+
+        Args:
+            refresh_token: Refresh Token
+
+        Returns:
+            (access_token, expires_at, user)
+
+        Raises:
+            AuthError: 如果刷新失败
+        """
+        # 查找用户
+        result = await self.db.execute(
+            select(User).where(User.refresh_token == refresh_token)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise AuthError("Invalid refresh token")
+
+        # 检查 Refresh Token 是否过期
+        if user.refresh_token_expires_at and user.refresh_token_expires_at < datetime.now(timezone.utc):
+            raise AuthError("Refresh token expired")
+
+        # 创建新的 Access Token
+        access_token = await self.create_access_token(str(user.id))
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.expire_minutes)
+
+        logger.info(f"Access token refreshed for user {user.id}")
+        return access_token, expires_at, user

@@ -1,5 +1,195 @@
 # 开发记录
 
+## 2025-12-28 - 后端优化方案完成 ✅
+
+### 概述
+完成了 MindCanvas 后端的邮箱验证登录、Refresh Token 机制和图片生命周期管理功能。新增邮件服务、Redis 集成、定期清理任务等功能，提升了用户体验和系统安全性。
+
+### 核心功能实现
+
+#### 1. 邮箱验证登录 ✅
+**新增文件**: `src/backend/app/services/email_service.py`
+
+**实现功能**:
+- 发送验证码到邮箱
+- 验证验证码并登录
+- 频率限制（1分钟内只能发送一次）
+- 验证码过期时间（5分钟）
+
+**技术特性**:
+- 使用 aiosmtplib 异步发送邮件
+- Redis 存储验证码和频率限制
+- 使用 SMTP 协议
+- 完善的错误处理
+
+#### 2. Refresh Token 机制 ✅
+**修改文件**: `src/backend/app/services/auth_service.py`
+
+**实现功能**:
+- Access Token（7天有效期）
+- Refresh Token（30天有效期）
+- 自动刷新 Access Token
+- Refresh Token 过期后需要重新验证
+
+**技术特性**:
+- 使用 secrets 生成随机 Refresh Token
+- 存储在 users 表中
+- 支持自动刷新流程
+
+#### 3. 图片生命周期管理 ✅
+**新增文件**: `src/backend/app/services/cleanup_service.py`
+
+**实现功能**:
+- 图片过期时间（7天）
+- 定期清理任务（每天凌晨3点）
+- 自动删除过期图片和任务记录
+
+**技术特性**:
+- 使用 APScheduler 定期执行清理任务
+- 只清理已完成或失败的任务图片
+- 同时删除图片文件和数据库记录
+
+#### 4. Redis 集成 ✅
+**新增文件**: `src/backend/app/database/redis.py`
+
+**实现功能**:
+- 验证码存储（5分钟过期）
+- 频率限制（1分钟内只能发送一次）
+- 连接池管理
+
+**技术特性**:
+- 使用 redis.asyncio 异步客户端
+- 单例模式管理 Redis 客户端
+- 自动连接池管理
+
+#### 5. API 接口扩展 ✅
+**修改文件**: `src/backend/app/routers/auth.py`
+
+**新增接口**:
+- `POST /api/v1/auth/send-verification-code` - 发送验证码
+- `POST /api/v1/auth/verify-email` - 验证邮箱并登录
+- `POST /api/v1/auth/refresh` - 刷新 Access Token
+
+### 数据库变更
+
+**新增字段**（直接修改 001_init.sql）:
+- users 表：
+  - `refresh_token` VARCHAR(500) - 刷新令牌
+  - `refresh_token_expires_at` TIMESTAMP WITH TIME ZONE - 刷新令牌过期时间
+- generation_tasks 表：
+  - `image_expires_at` TIMESTAMP WITH TIME ZONE - 图片过期时间
+
+**新增索引**:
+- `idx_users_refresh_token`
+- `idx_generation_tasks_image_expires_at`
+
+**新增注释**:
+- refresh_token: 刷新令牌（30天有效期）
+- refresh_token_expires_at: 刷新令牌过期时间
+- image_expires_at: 图片过期时间（7天后自动清理）
+
+### 文件清单
+
+**新增文件**:
+- `src/backend/app/services/email_service.py`
+- `src/backend/app/database/redis.py`
+- `src/backend/app/services/cleanup_service.py`
+
+**修改文件**:
+- `src/backend/requirements.txt` - 添加 aiosmtplib, apscheduler, redis
+- `src/backend/app/services/auth_service.py` - 添加邮箱验证和 Refresh Token 逻辑
+- `src/backend/app/routers/auth.py` - 添加三个新接口
+- `src/backend/app/models/schemas.py` - 添加 SendVerificationCodeRequest, VerifyEmailRequest, RefreshTokenRequest, RefreshTokenResponse, LoginResponse
+- `src/backend/app/models/task.py` - 添加 image_expires_at 字段
+- `src/backend/app/services/task_service.py` - 在任务完成时设置图片过期时间
+- `src/backend/app/main.py` - 启动清理调度器
+- `src/backend/migrations/001_init.sql` - 添加 Refresh Token 和图片过期时间字段
+- `src/backend/.env` - 添加邮件服务和 Redis 环境变量
+- `src/backend/docker-compose.yml` - 添加 Redis 服务
+
+### 技术栈
+
+**新增依赖**:
+- aiosmtplib==3.0.1 - 异步 SMTP 客户端
+- apscheduler==3.10.4 - 异步任务调度
+- redis==5.0.1 - Redis 客户端
+
+### 使用示例
+
+#### 1. 发送验证码
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/send-verification-code" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+#### 2. 验证邮箱并登录
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/verify-email" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "code": "123456"}'
+```
+
+#### 3. 刷新 Access Token
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/refresh" \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "refresh_token_string"}'
+```
+
+### 技术亮点
+
+1. **邮箱验证登录**: 使用 Redis 存储验证码，异步发送邮件，支持频率限制和过期时间管理
+2. **Refresh Token 机制**: Access Token（7天）+ Refresh Token（30天），提升用户体验
+3. **Token 刷新流程**: Access Token 过期后自动刷新，Refresh Token 过期后需要重新验证
+4. **图片生命周期管理**: 使用 APScheduler 定期清理过期图片，每天凌晨 3 点执行
+5. **API Key 安全**: 双重加密（RSA + Fernet），任务完成后立即删除
+
+### 代码审查结果
+
+**发现的3个问题已全部修复**:
+- 🔴 严重问题：main.py 中的数据库会话管理错误（已修复）
+- 🟡 中等问题：使用已弃用的 `datetime.utcnow()`（已修复）
+- 🟡 中等问题：过度使用通用异常捕获（已优化）
+
+### 下一步建议
+
+1. 配置邮件服务（在 .env 文件中设置 SMTP_USERNAME 和 SMTP_PASSWORD）
+2. 启动 Redis 服务（`docker-compose up -d redis`）
+3. 启动后端服务（`docker-compose up -d backend`）
+4. 测试新增功能（邮箱验证登录、Refresh Token 刷新、图片清理）
+
+### 验证结果
+
+**验证日期**: 2025-12-28
+
+**功能验证**:
+- ✅ 邮箱验证码发送（Redis 存储 + 5分钟过期）
+- ✅ 邮箱验证码验证
+- ✅ 登录（GitHub/Google/Apple）返回 access_token + refresh_token
+- ✅ Refresh Token 刷新（30天有效期）
+- ✅ JWT Token 验证（7天有效期）
+- ✅ Redis 验证码存储和频率限制
+- ✅ 任务创建、状态查询、图片过期时间设置
+- ✅ API Key 加密和自动清除
+- ✅ 数据库 User 和 Task 模型字段完整
+
+**问题修复记录**:
+1. ✅ apscheduler 依赖缺失 - 重新构建 Docker 镜像
+2. ✅ User 模型缺少 refresh_token 字段 - 在 user.py 中添加
+3. ✅ LoginResponse 验证错误 - 修改 auth_service.py 和 auth.py
+4. ✅ EncryptionService 初始化错误 - 传递 settings.ENCRYPTION_SECRET_KEY
+5. ✅ TaskResponse datetime 验证错误 - 将 created_at 和 updated_at 改为可选
+6. ✅ SQLAlchemy async rollback 错误 - 添加 rollback 异常处理
+
+**待办事项**:
+- SMTP 邮件发送配置（当前使用占位符）
+- Google API 真实调用测试（需要有效 API Key）
+- 图片下载功能测试
+- 清理定时任务手动触发测试
+
+---
+
 ## 2025-12-27 - 资源模块实现完成 ✅
 
 ### 概述

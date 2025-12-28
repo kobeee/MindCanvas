@@ -63,10 +63,35 @@ class LoginRequest(BaseModel):
     token: str = Field(..., description="第三方 Token 或验证码")
 
 
+class SendVerificationCodeRequest(BaseModel):
+    """发送验证码请求"""
+    email: EmailStr
+
+
+class VerifyEmailRequest(BaseModel):
+    """验证邮箱请求"""
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class RefreshTokenRequest(BaseModel):
+    """刷新 Token 请求"""
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    """刷新 Token 响应"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int  # Access Token 过期时间（秒）
+
+
 class LoginResponse(BaseModel):
     """登录响应"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    expires_in: int  # Access Token 过期时间（秒）
     user: UserResponse
 
 
@@ -188,8 +213,8 @@ class TaskResponse(TaskBase):
     status: str
     image_url: Optional[str] = None
     error_message: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class TaskStatusResponse(BaseModel):

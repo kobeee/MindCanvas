@@ -16,6 +16,30 @@ logger = setup_logger(settings.LOG_LEVEL)
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting MindCanvas Backend...")
+
+    # 启动清理调度器
+    try:
+        from app.services.cleanup_service import CleanupService, start_cleanup_scheduler
+        from app.storage.image_storage import ImageStorage
+        from app.database.connection import get_db
+
+        # 获取数据库会话（不使用 async for，避免会话被关闭）
+        db_gen = get_db()
+        db = await db_gen.__anext__()
+
+        # 创建清理服务
+        cleanup_service = CleanupService(
+            db=db,
+            storage=ImageStorage(),
+            retention_days=settings.IMAGE_RETENTION_DAYS
+        )
+
+        # 启动调度器
+        start_cleanup_scheduler(cleanup_service)
+        logger.info("Cleanup scheduler started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start cleanup scheduler: {str(e)}")
+
     yield
     logger.info("Shutting down MindCanvas Backend...")
 

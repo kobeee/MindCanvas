@@ -4,9 +4,10 @@
 定义生图任务相关的数据库模型
 """
 
+from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import String, Text, Index, ForeignKey
+from sqlalchemy import String, Text, Index, ForeignKey, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +49,10 @@ class Task(Base, UUIDMixin, TimestampMixin):
 
     # 生成结果
     image_url: Mapped[str | None] = mapped_column(String(500))
+    image_expires_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        index=True
+    )
     error_message: Mapped[str | None] = mapped_column(Text)
 
     # 关系
@@ -61,6 +66,7 @@ class Task(Base, UUIDMixin, TimestampMixin):
         Index("idx_generation_tasks_user_id", "user_id"),
         Index("idx_generation_tasks_status", "status"),
         Index("idx_generation_tasks_created_at", "created_at"),
+        Index("idx_generation_tasks_image_expires_at", "image_expires_at"),
     )
 
     def __repr__(self) -> str:

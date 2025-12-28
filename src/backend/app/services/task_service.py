@@ -14,6 +14,7 @@
 import asyncio
 import logging
 from typing import Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
@@ -286,8 +287,16 @@ class TaskService:
                 logger.error(f"Failed to save image for task {task_id}: {str(e)}")
                 raise TaskServiceError(f"Failed to save image: {str(e)}")
 
+            # 设置图片过期时间（7天后）
+            image_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+
             # 更新任务状态为完成
-            await self._update_task_status(task_id, "completed", image_url=image_url)
+            await self._update_task_status(
+                task_id,
+                "completed",
+                image_url=image_url,
+                image_expires_at=image_expires_at
+            )
             logger.info(f"Task {task_id} completed successfully")
 
             # 清除数据库中的 API Key（安全措施）
@@ -311,6 +320,7 @@ class TaskService:
         task_id: str,
         status: str,
         image_url: Optional[str] = None,
+        image_expires_at: Optional[datetime] = None,
         error_message: Optional[str] = None
     ):
         """
@@ -320,6 +330,7 @@ class TaskService:
             task_id: 任务 ID
             status: 新状态（pending/processing/completed/failed）
             image_url: 图片 URL（可选）
+            image_expires_at: 图片过期时间（可选）
             error_message: 错误信息（可选）
 
         Raises:
@@ -334,6 +345,9 @@ class TaskService:
             if image_url:
                 update_data["image_url"] = image_url
 
+            if image_expires_at:
+                update_data["image_expires_at"] = image_expires_at
+
             if error_message:
                 update_data["error_message"] = error_message
 
@@ -346,7 +360,11 @@ class TaskService:
 
         except Exception as e:
             logger.error(f"Failed to update task status: {str(e)}")
-            await self.db.rollback()
+            try:
+                await self.db.rollback()
+            except Exception:
+                # 忽略 rollback 错误，可能 session 已经处于无效状态
+                pass
             raise TaskServiceError(f"Failed to update task status: {str(e)}")
 
     async def _clear_api_key(self, task_id: str):
@@ -373,7 +391,11 @@ class TaskService:
 
         except Exception as e:
             logger.error(f"Failed to clear API Key for task {task_id}: {str(e)}")
-            await self.db.rollback()
+            try:
+                await self.db.rollback()
+            except Exception:
+                # 忽略 rollback 错误，可能 session 已经处于无效状态
+                pass
             # 不抛出异常，避免影响主流程
 
     async def _save_image(self, task_id: str, image_data: bytes) -> str:

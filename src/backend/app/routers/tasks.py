@@ -41,6 +41,7 @@ from app.services.google_api import GoogleAPIClient
 from app.storage.image_storage import ImageStorage
 from app.services.auth_service import AuthService, InvalidTokenError, UserNotFoundError
 from app.models.user import User
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def get_task_service(
         TaskService 实例
     """
     # 初始化依赖服务
-    encryption_service = EncryptionService()
+    encryption_service = EncryptionService(secret_key=settings.ENCRYPTION_SECRET_KEY)
     google_client = GoogleAPIClient()
     storage = ImageStorage()
 
