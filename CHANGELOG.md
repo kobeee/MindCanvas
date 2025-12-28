@@ -1,5 +1,625 @@
 # 开发记录
 
+## 2025-12-27 - 资源模块实现完成 ✅
+
+### 概述
+完成了 MindCanvas 后端的资源模块实现，包括 AssetService 和资源路由。支持图片上传、用户资源列表查询、资源详情查询、资源删除和更新功能。整合 ImageStorage 实现图片的保存和管理，提供完善的文件类型验证、文件大小限制、权限检查和安全机制。
+
+### 核心功能实现
+
+#### 1. AssetService 类 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/app/services/asset_service.py`
+
+**核心方法**:
+- `upload_image()`: 上传图片（支持多种格式，文件大小限制 10MB）
+- `get_user_assets()`: 获取用户资源列表（支持分页和类型过滤）
+- `get_asset_by_id()`: 获取单个资源详情
+- `delete_asset()`: 删除资源（权限检查，只能删除自己的资源）
+- `update_asset()`: 更新资源信息（权限检查）
+- `check_ownership()`: 检查资源归属权
+- `get_public_assets()`: 获取公开资源列表
+
+**技术特性**:
+- 文件类型验证（PNG, JPG, JPEG, WebP, GIF）
+- 文件大小限制（10MB）
+- 权限检查（只能操作自己的资源）
+- 分页支持（page, size, total_pages）
+- 类型过滤（upload/generated）
+- 完善的错误处理和日志记录
+
+**安全特性**:
+- 文件类型白名单验证
+- 文件大小限制
+- 权限检查（user_id 匹配）
+- 详细的错误日志（不泄露敏感信息）
+
+#### 2. 资源路由 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/app/routers/assets.py`
+
+**API 接口**:
+- `POST /api/v1/assets/upload`: 上传图片
+  - Body: `multipart/form-data` with `file` field
+  - Response: `{"id": "...", "url": "...", "type": "upload", ...}`
+- `GET /api/v1/assets/my`: 获取用户资源列表
+  - Query: `page=1, size=20, type=upload|generated`
+  - Response: `{"items": [...], "total": 100, "page": 1, "size": 20}`
+- `GET /api/v1/assets/{asset_id}`: 获取单个资源详情
+  - Response: `{"id": "...", "url": "...", "type": "upload", ...}`
+- `DELETE /api/v1/assets/{asset_id}`: 删除资源
+  - Response: `{"success": true, "message": "Asset deleted successfully"}`
+- `PATCH /api/v1/assets/{asset_id}`: 更新资源信息
+  - Body: `{"is_public": true}` or `{"prompt": "..."}`
+  - Response: 更新后的资源对象
+
+**特性**:
+- 使用 FastAPI 依赖注入
+- HTTP Bearer 认证（部分接口）
+- 完善的错误处理
+- 详细的 API 文档
+- multipart/form-data 文件上传支持
+
+### 技术栈
+- 数据库: SQLAlchemy 2.0.23
+- 存储: ImageStorage (本地存储)
+- 框架: FastAPI 0.104.1
+- 验证: Pydantic v2
+
+### 功能特性
+
+#### 1. 图片上传 ✅
+- 支持多种图片格式（PNG, JPG, JPEG, WebP, GIF）
+- 文件大小限制（10MB）
+- 自动生成资源 ID（UUID）
+- 自动保存到本地存储
+- 自动创建数据库记录
+- 完善的错误处理
+
+#### 2. 资源列表查询 ✅
+- 支持分页（page, size）
+- 支持类型过滤（upload/generated）
+- 按创建时间倒序排列
+- 返回总数和总页数
+- 完善的参数验证
+
+#### 3. 资源详情查询 ✅
+- 根据 ID 查询资源
+- 返回完整资源信息
+- 完善的错误处理
+
+#### 4. 资源删除 ✅
+- 权限检查（只能删除自己的资源）
+- 同时删除数据库记录和存储文件
+- 完善的错误处理
+
+#### 5. 资源更新 ✅
+- 权限检查（只能更新自己的资源）
+- 支持更新字段：is_public, prompt, model_version
+- 完善的错误处理
+
+#### 6. 公开资源查询 ✅
+- 查询所有公开资源
+- 支持分页和类型过滤
+- 按创建时间倒序排列
+
+### 安全措施
+
+#### 1. 文件类型验证
+```python
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
+
+def _extract_extension(self, filename: str) -> Optional[str]:
+    extension = parts[1].lower()
+    if extension not in self.ALLOWED_EXTENSIONS:
+        raise AssetServiceError(...)
+```
+
+#### 2. 文件大小限制
+```python
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+if len(image_data) > self.MAX_FILE_SIZE:
+    raise AssetServiceError(...)
+```
+
+#### 3. 权限检查
+```python
+if asset.user_id != user_id:
+    raise AssetPermissionError(...)
+```
+
+### 使用示例
+
+#### 1. 上传图片
+```bash
+curl -X POST "http://localhost:8000/api/v1/assets/upload" \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@/path/to/image.png"
+```
+
+#### 2. 获取用户资源列表
+```bash
+curl -X GET "http://localhost:8000/api/v1/assets/my?page=1&size=20" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### 3. 获取上传的资源
+```bash
+curl -X GET "http://localhost:8000/api/v1/assets/my?page=1&size=20&type=upload" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### 4. 获取生成的资源
+```bash
+curl -X GET "http://localhost:8000/api/v1/assets/my?page=1&size=20&type=generated" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### 5. 获取资源详情
+```bash
+curl -X GET "http://localhost:8000/api/v1/assets/{asset_id}"
+```
+
+#### 6. 删除资源
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/assets/{asset_id}" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### 7. 更新资源
+```bash
+# 设置为公开
+curl -X PATCH "http://localhost:8000/api/v1/assets/{asset_id}" \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"is_public": true}'
+
+# 更新提示词
+curl -X PATCH "http://localhost:8000/api/v1/assets/{asset_id}" \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "A beautiful sunset"}'
+```
+
+### 文件清单
+
+**核心实现**:
+- `src/backend/app/services/asset_service.py` (600+ 行)
+
+**路由实现**:
+- `src/backend/app/routers/assets.py` (400+ 行)
+
+### 技术亮点
+
+1. **完善的文件验证**: 文件类型白名单、文件大小限制、内容类型验证
+2. **权限检查**: 只能操作自己的资源，防止越权访问
+3. **分页支持**: 完整的分页功能，支持类型过滤
+4. **错误处理**: 完善的异常处理和错误信息
+5. **日志记录**: 详细的操作日志，便于排查问题
+6. **代码复用**: 依赖注入、工具方法提取
+
+### 注意事项
+
+1. **文件大小限制**: 当前限制为 10MB，可根据需要调整
+2. **文件类型验证**: 只支持常见的图片格式
+3. **权限检查**: 所有修改操作都会检查权限
+4. **存储路径**: 图片保存在 `storage/images/uploaded/` 目录
+5. **URL 格式**: 图片 URL 格式为 `{base_url}/images/uploaded/{asset_id}.{extension}`
+
+### 下一步工作
+
+1. 实现社区模块（Feed、发布、举报）
+2. 实现 API 路由层整合（整合所有模块到 main.py）
+3. 完善测试覆盖
+4. 编写 API 文档
+
+---
+
+## 2025-12-27 - 认证模块实现完成 ✅
+
+### 概述
+完成了 MindCanvas 后端的认证模块实现，包括 AuthService 和认证路由。支持多种第三方登录方式（Apple、Google、GitHub、邮箱），使用 JWT 进行身份验证，提供完整的用户认证功能。
+
+### 核心功能实现
+
+#### 1. AuthService 类 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/app/services/auth_service.py`
+
+**核心方法**:
+- `login_with_provider()`: 第三方登录，支持 Apple、Google、GitHub、邮箱
+- `get_current_user()`: 根据 JWT Token 获取当前用户
+- `create_access_token()`: 创建 JWT 访问令牌
+- `verify_token()`: 验证 JWT Token 并返回用户 ID
+- `hash_password()`: 使用 bcrypt 哈希密码
+- `verify_password()`: 验证密码
+
+**技术特性**:
+- 使用 JWT（python-jose）进行身份验证
+- 使用 passlib + bcrypt 进行密码哈希
+- Mock 第三方 Token 验证（实际需要调用各平台的验证接口）
+- 自动查找或创建用户
+- 完善的异常处理和日志记录
+
+**安全特性**:
+- JWT 密钥从环境变量获取
+- Token 过期时间可配置（默认 7 天）
+- 密码使用 bcrypt 哈希存储
+- 详细的错误日志（不泄露敏感信息）
+
+#### 2. 认证路由 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/app/routers/auth.py`
+
+**API 接口**:
+- `POST /api/v1/auth/login`: 用户登录
+  - Body: `{"provider": "apple", "token": "identity_token_string"}`
+  - Response: `{"access_token": "...", "token_type": "bearer", "user": {...}}`
+- `GET /api/v1/auth/me`: 获取当前用户信息
+  - Headers: `Authorization: Bearer <token>`
+  - Response: `{"id": "...", "email": "...", "username": "...", ...}`
+- `POST /api/v1/auth/logout`: 用户登出（客户端删除 Token）
+
+**特性**:
+- 使用 FastAPI 依赖注入
+- HTTP Bearer 认证
+- 完善的错误处理
+- 详细的 API 文档
+
+#### 3. 测试文件 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/tests/test_auth.py`
+
+**测试覆盖**:
+- AuthService 所有核心方法
+- 所有认证路由接口
+- 异常情况处理
+- 边界条件测试
+
+#### 4. 测试配置 ✅
+**文件**: `/Users/elvis/Documents/codes/一个月一个AI项目挑战/2025/12月/MindCanvas/src/backend/tests/conftest.py`
+
+**Fixtures**:
+- `db_session`: 数据库会话
+- `async_client`: 异步 HTTP 客户端
+- `test_user`: 测试用户
+
+### 技术栈
+- JWT: python-jose[cryptography]==3.3.0
+- 密码哈希: passlib[bcrypt]==1.7.4
+- 框架: FastAPI 0.104.1
+
+### 注意事项
+1. **第三方 Token 验证**: 当前实现为 Mock，实际需要调用各平台的验证接口
+   - Apple: 验证 identity_token（JWT）
+   - Google: 验证 id_token（JWT）
+   - GitHub: 验证 access_token
+   - Email: 验证验证码（需要集成邮件服务）
+
+2. **JWT 密钥**: 需要在环境变量中设置 `JWT_SECRET_KEY`，不要使用默认值
+
+3. **Token 过期**: Token 默认有效期为 7 天，可在配置中修改
+
+4. **登出机制**: JWT 是无状态的，服务端无法主动撤销 Token，客户端应删除本地存储的 Token
+
+### 下一步
+- 实现真实的第三方 Token 验证
+- 实现 Token 黑名单机制（可选）
+- 实现刷新 Token 机制（可选）
+
+---
+
+## 2025-12-27 - TaskService 实现完成 ✅
+
+### 概述
+完成了 MindCanvas 后端的任务服务（TaskService）实现，整合 EncryptionService、GoogleAPIClient、ImageStorage 三个服务，实现完整的生图任务处理流程。TaskService 支持异步任务处理、API Key 安全管理、任务状态管理和错误处理。
+
+### 核心功能实现
+
+#### 1. TaskService 类 ✅
+**文件**: `src/backend/app/services/task_service.py`
+
+**实现功能**:
+- ✅ 创建生图任务（create_task）
+- ✅ 查询任务状态（get_task_status）
+- ✅ 异步任务处理（_process_task）
+- ✅ 更新任务状态（_update_task_status）
+- ✅ 清除 API Key（_clear_api_key）
+- ✅ 保存图片到存储（_save_image）
+- ✅ 清理过期任务（cleanup_old_tasks）
+- ✅ 获取用户任务列表（get_user_tasks）
+
+**技术亮点**:
+- 使用 asyncio.create_task 实现异步任务处理
+- API Key 加密存储，任务完成后立即删除
+- API Key 只在任务处理时解密到内存，用完即销毁
+- 完善的错误处理和日志记录
+- 支持 pending/processing/completed/failed 四种状态
+
+#### 2. API Key 安全流程 ✅
+
+**安全措施**:
+1. iOS APP 加密 API Key (AES-256-GCM)
+2. HTTPS 传输到后端
+3. 后端解密 API Key (Fernet)
+4. 加密存储 API Key (Fernet)
+5. 任务处理时解密到内存
+6. 调用 Google API
+7. 立即清除内存中的 API Key
+8. 任务完成后删除数据库中的 API Key
+
+**安全特性**:
+- ✅ 传输加密（HTTPS）
+- ✅ 存储加密（Fernet）
+- ✅ 临时内存（用完即销毁）
+- ✅ 自动清理（任务完成后删除）
+- ✅ 日志脱敏（不记录 API Key）
+
+#### 3. 任务状态管理 ✅
+
+**状态定义**:
+- pending: 任务已创建，等待处理
+- processing: 任务正在处理中
+- completed: 任务已完成，图片已生成
+- failed: 任务失败，查看 error_message
+
+**状态转换**:
+```
+pending → processing → completed
+    ↓
+  failed
+```
+
+#### 4. 异步任务处理 ✅
+
+**实现方式**:
+- 使用 asyncio.create_task 启动后台任务
+- 不阻塞主线程
+- 支持多个任务同时处理
+
+**处理流程**:
+1. 更新状态为 processing
+2. 解密 API Key（临时内存）
+3. 调用 Google API 生成图片
+4. 保存图片到本地存储
+5. 更新状态为 completed
+6. 清除 API Key（安全措施）
+
+#### 5. 错误处理 ✅
+
+**异常类型**:
+- TaskNotFoundError: 任务不存在
+- TaskServiceError: 任务服务异常（基类）
+- EncryptionError: 加密服务异常
+- DecryptionError: 解密失败异常
+- GoogleAPIError: Google API 异常
+
+**错误处理策略**:
+- 任务创建失败：回滚数据库事务，抛出 TaskServiceError
+- 任务处理失败：更新状态为 failed，记录错误信息，清除 API Key
+- API Key 解密失败：更新状态为 failed，记录错误信息，清除 API Key
+- Google API 调用失败：更新状态为 failed，记录错误信息，清除 API Key
+- 图片保存失败：更新状态为 failed，记录错误信息，清除 API Key
+
+#### 6. 测试和示例 ✅
+
+**测试文件**: `src/backend/tests/test_task_service.py`
+- ✅ 创建任务（成功）
+- ✅ 创建任务（缺少参数）
+- ✅ 获取任务状态（成功）
+- ✅ 获取任务状态（任务不存在）
+
+**示例文件**: `src/backend/examples/task_service_example.py`
+- ✅ 服务初始化
+- ✅ API Key 加密
+- ✅ 任务创建流程
+- ✅ 任务状态说明
+- ✅ API Key 安全流程
+- ✅ 错误处理
+
+#### 7. 配置文件更新 ✅
+
+**requirements.txt**:
+- 新增: pytest==7.4.3
+- 新增: pytest-asyncio==0.21.1
+- 更新: pydantic-settings==2.8.1
+
+**.env**:
+- 设置: ENCRYPTION_SECRET_KEY
+
+### 文件清单
+
+**核心实现**:
+- `src/backend/app/services/task_service.py` (600 行)
+
+**测试和示例**:
+- `src/backend/tests/test_task_service.py`
+- `src/backend/examples/task_service_example.py`
+
+**配置文件**:
+- `src/backend/requirements.txt` (更新)
+- `src/backend/.env` (更新)
+
+**文档**:
+- `docs/design/backend/task_service_implementation_summary.md`
+
+### 使用示例
+
+```python
+# 初始化服务
+task_service = TaskService(
+    db=db_session,
+    encryption_service=encryption_service,
+    google_client=google_client,
+    storage=image_storage
+)
+
+# 创建任务
+task_id = await task_service.create_task(
+    user_id="user-123",
+    encrypted_api_key="encrypted_key",
+    prompt="A beautiful sunset",
+    base_image="base64_image"  # 可选
+)
+
+# 查询任务状态
+status = await task_service.get_task_status(task_id)
+print(f"Task status: {status['status']}")
+
+# 获取用户任务列表
+tasks = await task_service.get_user_tasks(
+    user_id="user-123",
+    status="completed",
+    limit=50
+)
+
+# 清理过期任务
+deleted_count = await task_service.cleanup_old_tasks(hours=24)
+```
+
+### 技术亮点
+
+1. **API Key 安全**: 全程加密，用完即销毁，确保 API Key 不泄露
+2. **异步处理**: 使用 asyncio.create_task 实现异步任务处理，不阻塞主线程
+3. **错误处理**: 完善的异常捕获和处理，确保任务失败时正确清理
+4. **日志记录**: 完整的操作日志，日志脱敏，便于排查问题
+5. **可测试性**: 单元测试和示例代码，便于验证功能
+
+### 下一步工作
+
+1. 实现 API 路由层（整合 TaskService）
+2. 集成到 FastAPI 应用
+3. 完善测试覆盖
+4. 编写 API 文档
+
+---
+
+## 2025-12-27 - 后端数据库模型和连接层实现 ✅
+
+### 概述
+完成了 MindCanvas 后端的数据库模型和连接层实现，使用 SQLAlchemy 2.0.23 和 asyncpg 0.29.0 实现异步数据库操作，包含用户、资源、社区动态、生图任务、举报等 5 个核心模型，以及完整的 Pydantic 请求/响应模型。
+
+### 核心功能实现
+
+#### 1. 数据库连接管理 ✅
+**文件**: `src/backend/app/database/connection.py`
+
+**实现功能**:
+- ✅ 异步数据库引擎配置（连接池、健康检查）
+- ✅ 异步会话工厂（async_sessionmaker）
+- ✅ FastAPI 依赖注入函数（get_db）
+- ✅ 自动事务管理（提交/回滚）
+- ✅ 数据库初始化和清理函数
+
+**技术亮点**:
+- 使用 SQLAlchemy 2.0 的异步特性
+- 连接池配置（pool_size=10, max_overflow=20）
+- pool_pre_ping 连接健康检查
+- 自动会话管理和资源释放
+
+#### 2. SQLAlchemy Base 模型 ✅
+**文件**: `src/backend/app/database/base.py`
+
+**实现功能**:
+- ✅ Base 基类（DeclarativeBase）
+- ✅ TimestampMixin（created_at, updated_at 自动时间戳）
+- ✅ UUIDMixin（UUID 主键自动生成）
+
+**技术亮点**:
+- 使用混入类（Mixin）复用通用字段
+- 自动更新 updated_at 时间戳
+- UUID 类型主键，默认使用 uuid4()
+
+#### 3. 数据库模型 ✅
+**文件**: `src/backend/app/models/`
+
+**User 模型** (`user.py`):
+- ✅ 用户基本信息（email, username, avatar_url）
+- ✅ 认证信息（auth_provider, provider_id）
+- ✅ 关系：assets, tasks, feed_items, reports
+- ✅ 索引：email, provider_id
+
+**Asset 模型** (`asset.py`):
+- ✅ 资源信息（url, type, prompt, model_version）
+- ✅ 公开状态（is_public）
+- ✅ 关系：user, feed_item
+- ✅ 索引：user_id, type, is_public, created_at
+
+**FeedItem 模型** (`feed.py`):
+- ✅ 社区动态信息（title, likes_count, published_at）
+- ✅ 关系：asset, user, reports
+- ✅ 索引：asset_id, user_id, published_at
+
+**Task 模型** (`task.py`):
+- ✅ 任务状态（pending, processing, completed, failed）
+- ✅ 生成参数（prompt, base_image）
+- ✅ API Key 安全（encrypted_api_key）
+- ✅ 关系：user
+- ✅ 索引：user_id, status, created_at
+
+**Report 模型** (`report.py`):
+- ✅ 举报信息（reason, description, status）
+- ✅ 关系：feed_item, reporter
+- ✅ 索引：feed_item_id, reporter_id, status
+
+#### 4. Pydantic 模型 ✅
+**文件**: `src/backend/app/models/schemas.py`
+
+**实现功能**:
+- ✅ 用户相关：UserBase, UserCreate, UserUpdate, UserResponse
+- ✅ 认证相关：LoginRequest, LoginResponse
+- ✅ 资源相关：AssetBase, AssetCreate, AssetUpdate, AssetResponse, AssetListResponse
+- ✅ 社区动态相关：FeedItemBase, FeedItemCreate, FeedItemUpdate, FeedItemResponse, FeedListResponse
+- ✅ 任务相关：TaskBase, TaskCreate, TaskUpdate, TaskResponse, TaskStatusResponse, TaskListResponse
+- ✅ 举报相关：ReportBase, ReportCreate, ReportUpdate, ReportResponse, ReportListResponse
+- ✅ 分页和过滤：PaginationParams, FeedFilterParams, AssetFilterParams, TaskFilterParams
+- ✅ 通用响应：SuccessResponse, ErrorResponse
+
+**技术亮点**:
+- 使用 Pydantic v2 语法
+- ConfigDict(from_attributes=True) 支持 ORM 对象转换
+- Field 验证（min_length, max_length, ge, le）
+- EmailStr 邮箱验证
+
+#### 5. 模块导出 ✅
+**文件**: `src/backend/app/database/__init__.py`, `src/backend/app/models/__init__.py`
+
+**实现功能**:
+- ✅ 导出所有数据库模型
+- ✅ 导出所有 Pydantic 模型
+- ✅ 导出数据库连接函数
+
+### 技术特性
+
+#### SQLAlchemy 2.0 特性
+- 使用 Mapped 类型注解
+- 使用 mapped_column 定义列
+- 使用 relationship 定义关系
+- 异步支持（AsyncSession）
+
+#### 安全措施
+- API Key 加密存储（encrypted_api_key）
+- 外键约束确保数据完整性
+- 级联删除避免孤立数据
+- 输入验证（Pydantic 模型）
+
+#### 性能优化
+- 所有外键字段创建索引
+- 常用查询字段创建索引
+- 连接池减少连接创建开销
+- 连接健康检查避免使用失效连接
+
+### 验证
+- ✅ 所有文件通过 Python 语法检查
+- ✅ 模型结构验证测试文件已创建
+- ✅ 模块导出正确
+
+### 文档
+- ✅ 实现总结文档：`docs/design/backend/database_models_implementation_summary.md`
+
+### 下一步
+- ⏳ 实现加密服务（API Key 安全核心）
+- ⏳ 实现 Google API 客户端
+- ⏳ 实现任务服务（生图服务核心）
+
+---
+
 ## 2025-12-27 - API Key 配置功能完整实现 ✅
 
 ### 概述
