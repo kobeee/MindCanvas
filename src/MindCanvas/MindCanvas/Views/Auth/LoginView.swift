@@ -232,14 +232,10 @@ struct LoginView: View {
     private func sendCode() {
         isCodeSent = true
         countdown = 60
-        
+
         Task {
-            do {
-                try await MockAuthService.shared.sendVerificationCode(to: email)
-                startCountdown()
-            } catch {
-                print("发送验证码失败")
-            }
+            await authManager.sendVerificationCode(email: email)
+            startCountdown()
         }
     }
     

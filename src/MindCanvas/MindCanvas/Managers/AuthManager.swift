@@ -5,86 +5,126 @@ import Observation
 @MainActor
 final class AuthManager {
     static let shared = AuthManager()
-    
+
     private(set) var isAuthenticated = false
     private(set) var currentUser: User?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    
+
     private let keychainManager = KeychainManager.shared
-    private let authService = MockAuthService.shared
-    
+    private let authService = AuthService.shared
+    private let tokenManager = TokenManager.shared
+
     private init() {
-        checkAuthentication()
+        Task {
+            await checkAuthentication()
+        }
     }
-    
-    func checkAuthentication() {
-        if let token = keychainManager.getToken(), !token.isEmpty {
+
+    func checkAuthentication() async {
+        if authService.isLoggedIn() {
             isAuthenticated = true
-            loadMockUser()
+            await loadCurrentUser()
         } else {
             isAuthenticated = false
             currentUser = nil
         }
     }
-    
-    private func loadMockUser() {
-        currentUser = User(
-            id: UUID().uuidString,
-            username: "当前用户",
-            email: "user@example.com",
-            isPro: false
-        )
+
+    private func loadCurrentUser() async {
+        do {
+            currentUser = try await authService.getCurrentUser()
+        } catch {
+            currentUser = nil
+            isAuthenticated = false
+        }
     }
-    
+
     func loginWithApple() async {
         await performLogin {
             try await authService.loginWithApple()
         }
     }
-    
+
     func loginWithGoogle() async {
         await performLogin {
             try await authService.loginWithGoogle()
         }
     }
-    
+
     func loginWithGithub() async {
         await performLogin {
             try await authService.loginWithGithub()
         }
     }
-    
-    func loginWithEmail(_ email: String, code: String) async {
-        await performLogin {
-            try await authService.loginWithEmail(email, code: code)
-        }
-    }
-    
-    private func performLogin(_ loginAction: () async throws -> LoginResponse) async {
+
+    func sendVerificationCode(email: String) async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await loginAction()
-            
-            if keychainManager.saveToken(response.token) {
-                currentUser = response.user
-                isAuthenticated = true
-            } else {
-                errorMessage = "保存登录信息失败"
-            }
+            try await authService.sendVerificationCode(email: email)
         } catch {
-            errorMessage = "登录失败: \(error.localizedDescription)"
+            errorMessage = formatErrorMessage(error)
         }
-        
+
         isLoading = false
     }
-    
-    func logout() {
-        _ = keychainManager.deleteToken()
+
+    func verifyEmail(email: String, code: String) async {
+        await performLogin {
+            try await authService.verifyEmail(email: email, code: code)
+        }
+    }
+
+    func loginWithEmail(_ email: String, code: String) async {
+        await verifyEmail(email: email, code: code)
+    }
+
+    private func performLogin(_ loginAction: () async throws -> Token) async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let token = try await loginAction()
+            currentUser = token.user
+            isAuthenticated = true
+        } catch {
+            errorMessage = formatErrorMessage(error)
+        }
+
+        isLoading = false
+    }
+
+    func logout() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            try await authService.logout()
+        } catch {
+            errorMessage = formatErrorMessage(error)
+        }
+
         currentUser = nil
         isAuthenticated = false
+        isLoading = false
+    }
+
+    func getCurrentUser() -> User? {
+        return currentUser
+    }
+
+    func ensureValidToken() async throws -> String {
+        return try await authService.ensureValidToken()
+    }
+
+    private func formatErrorMessage(_ error: Error) -> String {
+        if let apiError = error as? APIError {
+            return apiError.errorDescription ?? "未知错误"
+        } else {
+            return "登录失败: \(error.localizedDescription)"
+        }
     }
 }
 

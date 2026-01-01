@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # 内容安全审核
     ENABLE_STRICT_AUDIT: bool = False
 
+    # Google OAuth 配置
+    GOOGLE_CLIENT_ID: str = "356898960552-aq7iv1iooas0ihn2j391becn9jvsuoou.apps.googleusercontent.com"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

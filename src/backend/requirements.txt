@@ -9,6 +9,7 @@ psycopg[binary]==3.2.3
 
 # HTTP 客户端
 httpx==0.25.2
+requests==2.31.0
 
 # 加密
 cryptography==41.0.7
@@ -31,6 +32,7 @@ email-validator==2.1.0
 # 工具
 python-multipart==0.0.6
 aiofiles==23.2.1
+cachetools==5.3.2
 
 # 测试
 pytest==7.4.3
@@ -41,3 +43,6 @@ aiosmtplib==3.0.1
 
 # 任务调度
 apscheduler==3.10.4
+
+# Google 认证
+google-auth==2.23.3

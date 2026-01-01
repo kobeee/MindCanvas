@@ -6,13 +6,33 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1465791D2F06797000E64A9B /* AuthenticationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 14DACAB22F06490C00F4FA5D /* AuthenticationServices.framework */; };
+		146579202F0679A300E64A9B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1465791F2F0679A300E64A9B /* GoogleSignIn */; };
+		146579222F0679A300E64A9B /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 146579212F0679A300E64A9B /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		14DACAB22F06490C00F4FA5D /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		14DE19352EE9388400E9A0FD /* MindCanvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindCanvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		143F27CF2F06882B000A09D8 /* Exceptions for "MindCanvas" folder in "MindCanvas" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 14DE19342EE9388400E9A0FD /* MindCanvas */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		14DE19372EE9388400E9A0FD /* MindCanvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				143F27CF2F06882B000A09D8 /* Exceptions for "MindCanvas" folder in "MindCanvas" target */,
+			);
 			path = MindCanvas;
 			sourceTree = "<group>";
 		};
@@ -23,16 +43,28 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				146579222F0679A300E64A9B /* GoogleSignInSwift in Frameworks */,
+				1465791D2F06797000E64A9B /* AuthenticationServices.framework in Frameworks */,
+				146579202F0679A300E64A9B /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		14DACAB12F06490B00F4FA5D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				14DACAB22F06490C00F4FA5D /* AuthenticationServices.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		14DE192C2EE9388400E9A0FD = {
 			isa = PBXGroup;
 			children = (
 				14DE19372EE9388400E9A0FD /* MindCanvas */,
+				14DACAB12F06490B00F4FA5D /* Frameworks */,
 				14DE19362EE9388400E9A0FD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -65,6 +97,8 @@
 			);
 			name = MindCanvas;
 			packageProductDependencies = (
+				1465791F2F0679A300E64A9B /* GoogleSignIn */,
+				146579212F0679A300E64A9B /* GoogleSignInSwift */,
 			);
 			productName = MindCanvas;
 			productReference = 14DE19352EE9388400E9A0FD /* MindCanvas.app */;
@@ -94,6 +128,9 @@
 			);
 			mainGroup = 14DE192C2EE9388400E9A0FD;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1465791E2F0679A300E64A9B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 14DE19362EE9388400E9A0FD /* Products */;
 			projectDirPath = "";
@@ -256,6 +293,7 @@
 				DEVELOPMENT_TEAM = VWBLM675NZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MindCanvas/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "MindCanvas 需要访问您的相机来拍摄照片，用于在画布上创建图片对象。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MindCanvas 需要访问您的相册来选择图片，用于在画布上创建图片对象。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -291,6 +329,7 @@
 				DEVELOPMENT_TEAM = VWBLM675NZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MindCanvas/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "MindCanvas 需要访问您的相机来拍摄照片，用于在画布上创建图片对象。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MindCanvas 需要访问您的相册来选择图片，用于在画布上创建图片对象。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -338,6 +377,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1465791E2F0679A300E64A9B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1465791F2F0679A300E64A9B /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1465791E2F0679A300E64A9B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		146579212F0679A300E64A9B /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1465791E2F0679A300E64A9B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 14DE192D2EE9388400E9A0FD /* Project object */;
 }

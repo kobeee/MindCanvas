@@ -30,6 +30,7 @@ import logging
 from app.config import settings
 from app.models.user import User
 from app.models.schemas import UserCreate
+from app.services.google_token_validator import GoogleTokenValidator, GoogleTokenValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ class AuthService:
         self.secret_key = settings.JWT_SECRET_KEY
         self.algorithm = settings.JWT_ALGORITHM
         self.expire_minutes = settings.JWT_EXPIRE_MINUTES
+        self.google_token_validator = GoogleTokenValidator()
 
         if not self.secret_key or self.secret_key == "your-jwt-secret-key-change-in-production":
             logger.warning("JWT_SECRET_KEY is not set properly! Using default insecure key.")
@@ -278,7 +280,7 @@ class AuthService:
 
     async def _verify_provider_token(self, provider: str, token: str) -> Dict[str, Any]:
         """
-        验证第三方 Token（Mock 实现）
+        验证第三方 Token
 
         Args:
             provider: 认证提供者
@@ -291,35 +293,49 @@ class AuthService:
             ProviderTokenError: 如果 Token 验证失败
 
         注意：
-            - 当前实现为 Mock，实际需要调用各平台的验证接口
-            - Apple: 调用 Apple API 验证 identity_token
-            - Google: 调用 Google API 验证 id_token
-            - GitHub: 调用 GitHub API 验证 access_token
+            - Google: 使用真实的 Google Token 验证
+            - Apple: Mock 实现（需要集成 Apple API）
+            - GitHub: Mock 实现（需要集成 GitHub API）
             - Email: 验证验证码（需要集成邮件服务）
         """
-        # Mock 实现：验证 Token 格式
+        # 验证 Token 格式
         if not token or len(token) < 10:
             raise ProviderTokenError("Invalid token format")
 
-        # 根据不同的提供者返回不同的用户信息（Mock）
-        if provider == "apple":
-            # Apple 登录 Mock
+        # 根据不同的提供者验证 Token
+        if provider == "google":
+            # Google 登录：使用真实的 Token 验证
+            try:
+                logger.info("Validating Google ID Token...")
+                user_info = await self.google_token_validator.validate_token(
+                    id_token=token,
+                    client_id=settings.GOOGLE_CLIENT_ID
+                )
+
+                # 验证邮箱是否已验证
+                if not user_info.get("email_verified", False):
+                    raise ProviderTokenError("Email is not verified")
+
+                logger.info(f"Google ID Token validated successfully for email: {user_info.get('email')}")
+                return user_info
+
+            except GoogleTokenValidationError as e:
+                logger.error(f"Google Token validation failed: {str(e)}")
+                raise ProviderTokenError(f"Google Token validation failed: {str(e)}")
+            except Exception as e:
+                logger.error(f"Unexpected error validating Google Token: {str(e)}")
+                raise ProviderTokenError(f"Unexpected error: {str(e)}")
+
+        elif provider == "apple":
+            # Apple 登录 Mock（需要集成 Apple API）
             return {
                 "email": f"user_{token[:8]}@icloud.com",
                 "username": f"AppleUser_{token[:8]}",
                 "provider_id": token[:32],
                 "avatar_url": None
             }
-        elif provider == "google":
-            # Google 登录 Mock
-            return {
-                "email": f"user_{token[:8]}@gmail.com",
-                "username": f"GoogleUser_{token[:8]}",
-                "provider_id": token[:32],
-                "avatar_url": f"https://lh3.googleusercontent.com/mock-avatar-{token[:8]}"
-            }
         elif provider == "github":
-            # GitHub 登录 Mock
+            # GitHub 登录 Mock（需要集成 GitHub API）
             return {
                 "email": f"user_{token[:8]}@github.com",
                 "username": f"GitHubUser_{token[:8]}",
@@ -327,7 +343,7 @@ class AuthService:
                 "avatar_url": f"https://avatars.githubusercontent.com/mock-{token[:8]}"
             }
         elif provider == "email":
-            # 邮箱登录 Mock
+            # 邮箱登录 Mock（需要集成邮件服务）
             return {
                 "email": f"user_{token[:8]}@example.com",
                 "username": f"EmailUser_{token[:8]}",
