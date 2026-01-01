@@ -12,8 +12,15 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.356898960552-aq7iv1iooas0ihn2j391becn9jvsuoou</string>
+				<string>mindcanvas</string>
 			</array>
 		</dict>
 	</array>
+	<key>GIDClientID</key>
+	<string>356898960552-aq7iv1iooas0ihn2j391becn9jvsuoou.apps.googleusercontent.com</string>
+	<key>GitHubClientID</key>
+	<string>Ov23li3PdYwr0zVzdJjw</string>
+	<key>GitHubClientSecret</key>
+	<string>8d5fcdddc76d312d937108c01450c13018301a07</string>
 </dict>
 </plist>

@@ -31,6 +31,7 @@ from app.config import settings
 from app.models.user import User
 from app.models.schemas import UserCreate
 from app.services.google_token_validator import GoogleTokenValidator, GoogleTokenValidationError
+from app.services.github_token_validator import GitHubTokenValidator, GitHubTokenValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ class AuthService:
         self.algorithm = settings.JWT_ALGORITHM
         self.expire_minutes = settings.JWT_EXPIRE_MINUTES
         self.google_token_validator = GoogleTokenValidator()
+        self.github_token_validator = GitHubTokenValidator()
 
         if not self.secret_key or self.secret_key == "your-jwt-secret-key-change-in-production":
             logger.warning("JWT_SECRET_KEY is not set properly! Using default insecure key.")
@@ -294,8 +296,8 @@ class AuthService:
 
         注意：
             - Google: 使用真实的 Google Token 验证
+            - GitHub: 使用真实的 GitHub OAuth Token 验证
             - Apple: Mock 实现（需要集成 Apple API）
-            - GitHub: Mock 实现（需要集成 GitHub API）
             - Email: 验证验证码（需要集成邮件服务）
         """
         # 验证 Token 格式
@@ -335,13 +337,27 @@ class AuthService:
                 "avatar_url": None
             }
         elif provider == "github":
-            # GitHub 登录 Mock（需要集成 GitHub API）
-            return {
-                "email": f"user_{token[:8]}@github.com",
-                "username": f"GitHubUser_{token[:8]}",
-                "provider_id": token[:32],
-                "avatar_url": f"https://avatars.githubusercontent.com/mock-{token[:8]}"
-            }
+            # GitHub 登录：使用真实的 Token 验证
+            try:
+                logger.info("Validating GitHub Access Token...")
+                user_info = await self.github_token_validator.validate_token(
+                    access_token=token,
+                    client_id=settings.GITHUB_CLIENT_ID,
+                    client_secret=settings.GITHUB_CLIENT_SECRET
+                )
+
+                logger.info(
+                    f"GitHub Access Token validated successfully for user: "
+                    f"{user_info.get('username')} ({user_info.get('email')})"
+                )
+                return user_info
+
+            except GitHubTokenValidationError as e:
+                logger.error(f"GitHub Token validation failed: {str(e)}")
+                raise ProviderTokenError(f"GitHub Token validation failed: {str(e)}")
+            except Exception as e:
+                logger.error(f"Unexpected error validating GitHub Token: {str(e)}")
+                raise ProviderTokenError(f"Unexpected error: {str(e)}")
         elif provider == "email":
             # 邮箱登录 Mock（需要集成邮件服务）
             return {

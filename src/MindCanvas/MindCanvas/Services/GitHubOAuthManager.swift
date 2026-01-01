@@ -10,12 +10,14 @@ final class GitHubOAuthManager: NSObject {
     private let clientID: String
     private let clientSecret: String
     private let redirectURI: String
+    private let callbackScheme: String
 
     private override init() {
         // 从配置文件读取
         self.clientID = Bundle.main.object(forInfoDictionaryKey: "GitHubClientID") as? String ?? ""
         self.clientSecret = Bundle.main.object(forInfoDictionaryKey: "GitHubClientSecret") as? String ?? ""
         self.redirectURI = "mindcanvas://auth"
+        self.callbackScheme = "mindcanvas"
         super.init()
     }
 
@@ -40,7 +42,7 @@ final class GitHubOAuthManager: NSObject {
 
             let session = ASWebAuthenticationSession(
                 url: authURL,
-                callbackURLScheme: redirectURI
+                callbackURLScheme: callbackScheme
             ) { callbackURL, error in
                 if let error = error {
                     continuation.resume(throwing: error)

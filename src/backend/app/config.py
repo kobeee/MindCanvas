@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # Google OAuth 配置
     GOOGLE_CLIENT_ID: str = "356898960552-aq7iv1iooas0ihn2j391becn9jvsuoou.apps.googleusercontent.com"
 
+    # GitHub OAuth 配置
+    GITHUB_CLIENT_ID: str = "Ov23li3PdYwr0zVzdJjw"
+    GITHUB_CLIENT_SECRET: str = "8d5fcdddc76d312d937108c01450c13018301a07"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

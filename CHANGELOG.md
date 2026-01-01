@@ -1,5 +1,147 @@
 # 开发记录
 
+## 2026-01-01 - GitHub OAuth 真实验证实现完成 ✅
+
+### 概述
+完成了 MindCanvas 后端 GitHub OAuth Token 的真实验证实现。与 Google OAuth 不同，GitHub 使用 OAuth 2.0 协议，通过调用 GitHub API 获取用户信息。实现后，用户可以使用真实的 GitHub 账户登录，获取真实的用户信息（email、username、avatar_url 等）。
+
+### 核心功能实现
+
+#### 1. GitHub OAuth Token 真实验证 ✅
+**新增文件**: `src/backend/app/services/github_token_validator.py`
+
+**实现功能**:
+- 使用 httpx 调用 GitHub API 验证 Access Token
+- 获取用户基本信息（id, login, name, avatar_url, email 等）
+- 自动获取用户公开邮箱（如果主邮箱未公开）
+- 验证用户邮箱是否已验证
+
+**技术特性**:
+- 使用 `https://api.github.com/user` 获取用户信息
+- 使用 `https://api.github.com/user/emails` 获取邮箱列表
+- 支持 `read:user` 和 `user:email` 权限范围
+- 完整的错误处理和日志记录
+
+#### 2. 配置更新 ✅
+
+**修改文件**: `src/backend/app/config.py`
+
+**新增配置**:
+```python
+# GitHub OAuth 配置
+GITHUB_CLIENT_ID: str = "Ov23li3PdYwr0zVzdJjw"
+GITHUB_CLIENT_SECRET: str = "8d5fcdddc76d312d937108c01450c13018301a07"
+```
+
+#### 3. 认证服务集成 ✅
+
+**修改文件**: `src/backend/app/services/auth_service.py`
+
+**修改内容**:
+- 导入 `GitHubTokenValidator` 和 `GitHubTokenValidationError`
+- 初始化 `GitHubTokenValidator`
+- 在 `_verify_provider_token` 方法中集成 GitHub Token 验证
+- 替换原来的 Mock 实现为真实验证
+
+#### 4. iOS 端配置更新 ✅
+
+**修改文件**: `src/MindCanvas/MindCanvas/Info.plist`
+
+**新增配置**:
+- GitHub Client ID: `Ov23li3PdYwr0zVzdJjw`
+- GitHub Client Secret: `8d5fcdddc76d312d937108c01450c13018301a07`
+- URL Scheme: `mindcanvas`（GitHub OAuth 回调）
+
+**修改文件**: `src/MindCanvas/MindCanvas/Services/GitHubOAuthManager.swift`
+
+**修复内容**:
+- 分离 `redirectURI`（完整 URL）和 `callbackScheme`（纯 scheme）
+- 修复 `ASWebAuthenticationSession` 的 `callbackURLScheme` 参数
+
+### 文件清单
+
+**新增文件**（1个）:
+- `src/backend/app/services/github_token_validator.py` - GitHub OAuth Token 验证器
+
+**修改文件**（4个）:
+- `src/backend/app/config.py` - 添加 GitHub OAuth 配置
+- `src/backend/app/services/auth_service.py` - 集成 GitHub Token 验证
+- `src/MindCanvas/MindCanvas/Info.plist` - 添加 GitHub OAuth 凭证
+- `src/MindCanvas/MindCanvas/Services/GitHubOAuthManager.swift` - 修复 callbackURLScheme
+
+### 技术要点
+
+#### 1. GitHub OAuth 流程
+1. iOS 应用使用 ASWebAuthenticationSession 发起 GitHub OAuth 授权
+2. 用户在 GitHub 页面登录并授权
+3. GitHub 重定向到 `mindcanvas://auth` 并返回授权码
+4. iOS 端交换授权码获取 Access Token
+5. iOS 端将 Access Token 发送到后端
+6. 后端调用 GitHub API 验证 Token 并获取用户信息
+7. 后端返回 JWT Token 给 iOS 应用
+
+#### 2. GitHub API 调用
+```python
+# 获取用户信息
+GET https://api.github.com/user
+Authorization: Bearer <access_token>
+
+# 获取用户邮箱（如果主邮箱未公开）
+GET https://api.github.com/user/emails
+Authorization: Bearer <access_token>
+```
+
+#### 3. 用户信息映射
+| GitHub API 字段 | 应用字段 |
+|----------------|---------|
+| email | email |
+| login / name | username |
+| id | provider_id |
+| avatar_url | avatar_url |
+
+### GitHub OAuth 凭证
+
+**GitHub OAuth 应用配置**:
+- **Client ID**: `Ov23li3PdYwr0zVzdJjw`
+- **Client Secret**: `8d5fcdddc76d312d937108c01450c13018301a07`
+- **Authorization callback URL**: `mindcanvas://auth`
+- **Scope**: `read:user user:email`
+
+### 验证结果
+
+**后端服务测试**:
+```bash
+# 健康检查
+curl http://127.0.0.1:8008/health
+
+# GitHub 登录接口（无效 Token）
+curl -X POST http://127.0.0.1:8008/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"github","token":"test_token"}'
+# 返回：{"detail":"GitHub Token validation failed: Failed to get user info: 401"}
+```
+
+**验证结果**:
+- ✅ GitHub Token 验证器工作正常
+- ✅ 无效 Token 返回 401 错误（真实验证）
+- ✅ iOS 端 GitHub 登录发起成功
+
+### Google 与 GitHub OAuth 对比
+
+| 对比项 | Google OAuth | GitHub OAuth |
+|--------|-------------|--------------|
+| 验证方式 | JWT ID Token 验证 | API 调用验证 |
+| 库/工具 | google-auth | httpx |
+| 用户信息 | JWT 声明中提取 | API 响应中获取 |
+| 邮箱验证 | JWT 中的 email_verified | API 返回的 verified 字段 |
+
+### 相关文档
+
+- [GitHub OAuth 文档](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)
+- [GitHub Users API](https://docs.github.com/en/rest/users/users#get-the-authenticated-user)
+
+---
+
 ## 2026-01-01 - Google 登录真实验证实现完成 ✅
 
 ### 概述
