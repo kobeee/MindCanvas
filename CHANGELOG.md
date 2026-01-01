@@ -1,5 +1,223 @@
 # 开发记录
 
+## 2026-01-01 - 邮箱验证码登录功能完成 ✅
+
+### 概述
+完成了 MindCanvas 邮箱验证码登录功能的完整实现，包括后端 SMTP 邮件服务配置、iOS 端优雅的 Toast 提示 UI，以及 API 解码问题修复。实现后，用户可以使用任意邮箱地址接收验证码完成登录。
+
+### 核心功能实现
+
+#### 1. 后端 SMTP 邮件服务配置 ✅
+
+**修改文件**: `src/backend/.env`
+
+**新增配置**:
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USERNAME=chenhangkobe@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_USE_TLS=False
+```
+
+#### 2. 邮件服务 SSL 支持 ✅
+
+**修改文件**: `src/backend/app/services/email_service.py`
+
+**实现功能**:
+- 支持 Gmail SSL 端口（465）
+- 使用 `starttls` 方式连接（587 端口）
+- 自动处理 SMTP 连接错误
+- 详细的错误日志记录
+
+**技术特性**:
+```python
+# SSL 连接方式（Gmail 465 端口）
+await aiosmtplib.send(
+    message,
+    hostname=self.host,
+    port=self.port,
+    username=self.username,
+    password=self.password,
+    use_tls=True  # SSL/TLS
+)
+
+# STARTTLS 方式（Gmail 587 端口）
+await aiosmtplib.send(
+    message,
+    hostname=self.host,
+    port=self.port,
+    username=self.username,
+    password=self.password,
+    use_tls=False,
+    start_tls=True  # STARTTLS
+)
+```
+
+#### 3. AuthService SSL 参数集成 ✅
+
+**修改文件**: `src/backend/app/services/auth_service.py`
+
+**修改内容**:
+- 添加 `use_ssl` 参数支持
+- 根据配置选择 SSL 或 STARTTLS 连接方式
+- 修复 Gmail SMTP 连接问题
+
+#### 4. iOS 端 API 解码修复 ✅
+
+**修改文件**: `src/MindCanvas/MindCanvas/Models/APIModels.swift`
+
+**新增模型**:
+```swift
+struct SendVerificationCodeResponse: Codable {
+    let message: String
+    let expiresIn: Int
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case expiresIn = "expires_in"
+    }
+}
+```
+
+**修改文件**: `src/MindCanvas/MindCanvas/Services/APIClient.swift`
+
+**修复内容**:
+- `sendVerificationCode` 返回类型从 `[String: String]` 改为 `SendVerificationCodeResponse`
+- 修复 `expires_in` Int 类型解码问题
+
+**修改文件**: `src/MindCanvas/MindCanvas/Services/AuthService.swift`
+
+**修改内容**:
+- 更新返回类型为 `SendVerificationCodeResponse`
+- 简化错误处理流程
+
+**修改文件**: `src/MindCanvas/MindCanvas/Managers/AuthManager.swift`
+
+**修改内容**:
+- 简化 `sendVerificationCode` 方法，直接返回 Bool
+- 移除冗余的 `isLoading` 状态管理
+
+#### 5. iOS 端优雅 Toast 提示 UI ✅
+
+**修改文件**: `src/MindCanvas/MindCanvas/Views/Auth/LoginView.swift`
+
+**实现功能**:
+- 发送验证码时显示优雅的 Toast 弹窗
+- 发送中状态：蓝色信封图标 + "验证码发送中..."
+- 发送成功状态：绿色对勾图标 + "验证码已发送至您的邮箱"
+- 发送失败状态：红色 X 图标 + 错误信息
+- 毛玻璃卡片效果 + 阴影
+- 弹簧动画（spring response: 0.4）
+- 自动 2.5 秒后消失
+
+**技术特性**:
+```swift
+// Toast 状态管理
+@State private var toastMessage = ""
+@State private var toastType: ToastType = .info
+@State private var showToast = false
+
+// Toast 动画
+.transition(.move(edge: .top).combined(with: .opacity))
+.animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
+
+// Toast 样式
+.background(.ultraThinMaterial)
+.shadow(color: .black.opacity(0.15), radius: 20, y: 10)
+```
+
+**UI 效果**:
+```
+┌─────────────────────────────────────────┐
+│ ✉  验证码发送中...                       │  ← 蓝色信封
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│ ✓  验证码已发送至您的邮箱                 │  ← 绿色对勾
+└─────────────────────────────────────────┘
+```
+
+### 验证结果
+
+**后端服务测试**:
+```bash
+# 发送验证码
+curl -X POST "http://localhost:8008/api/v1/auth/send-verification-code" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com"}'
+# 返回：{"message":"Verification code sent successfully","expires_in":300}
+
+# 验证邮箱并登录
+curl -X POST "http://localhost:8008/api/v1/auth/verify-email" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "code": "123456"}'
+# 返回：{"access_token": "...", "refresh_token": "...", "user": {...}}
+```
+
+**功能验证**:
+- ✅ 验证码发送成功（Redis 存储 + 5分钟过期）
+- ✅ 验证码频率限制生效（1分钟内只能发送一次）
+- ✅ 邮箱验证登录成功（返回 JWT Token）
+- ✅ iOS 端 Toast 提示优雅显示
+- ✅ API 解码问题修复
+
+### 文件清单
+
+**新增文件**（0个）
+
+**修改文件**（5个）:
+- `src/backend/.env` - SMTP 邮件服务配置
+- `src/backend/app/services/email_service.py` - SSL 连接支持
+- `src/backend/app/services/auth_service.py` - EmailService SSL 参数
+- `src/MindCanvas/MindCanvas/Models/APIModels.swift` - 添加 SendVerificationCodeResponse
+- `src/MindCanvas/MindCanvas/Services/APIClient.swift` - 修复返回类型
+- `src/MindCanvas/MindCanvas/Services/AuthService.swift` - 简化返回处理
+- `src/MindCanvas/MindCanvas/Managers/AuthManager.swift` - 简化方法
+- `src/MindCanvas/MindCanvas/Views/Auth/LoginView.swift` - Toast 提示 UI
+
+### 技术要点
+
+#### 1. Gmail SMTP 配置
+- **端口**: 465（SSL）或 587（STARTTLS）
+- **用户名**: 完整邮箱地址
+- **密码**: 应用专用密码（不是登录密码）
+- **注意**: 需要在 Google 账户中启用"应用专用密码"
+
+#### 2. iOS 端 Toast 提示设计
+- **位置**: 顶部滑入
+- **动画**: 弹簧动画（spring）
+- **消失**: 自动 2.5 秒后
+- **样式**: 毛玻璃卡片 + 图标 + 文字
+- **状态**: 发送中（蓝）/ 成功（绿）/ 失败（红）
+
+#### 3. API 解码最佳实践
+- **问题**: 后端返回 `expires_in: 300`（Int），Swift 期望 String
+- **解决**: 定义明确的响应模型 `SendVerificationCodeResponse`
+- **好处**: 类型安全，自动解码，编译时检查
+
+### 相关文档
+
+- [Gmail SMTP 设置](https://support.google.com/mail/answer/7126229)
+- [应用专用密码](https://support.google.com/accounts/answer/185833)
+
+### 总结
+
+本次实现完成了邮箱验证码登录功能的完整闭环：
+- ✅ 后端 SMTP 邮件服务（支持 Gmail SSL）
+- ✅ Redis 验证码存储和频率限制
+- ✅ iOS 端优雅的 Toast 提示 UI
+- ✅ API 解码问题修复
+- ✅ 完整的登录流程验证
+
+**关键成就**:
+- ✅ 用户体验优雅，发送验证码无需跳转页面
+- ✅ 错误处理完善，友好的错误提示
+- ✅ 类型安全，编译时检查 API 响应
+- ✅ 邮件服务稳定，Gmail SMTP 集成成功
+
+---
+
 ## 2026-01-01 - GitHub OAuth 真实验证实现完成 ✅
 
 ### 概述

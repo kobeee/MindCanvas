@@ -8,27 +8,101 @@ struct LoginView: View {
     @State private var isCodeSent = false
     @State private var countdown = 0
     
-    var body: some View {
-        VStack(spacing: Theme.Spacing.xxxl) {
-            Spacer()
-            
-            logoSection
-            
-            if authManager.isLoading {
-                loadingSection
-            } else {
-                loginOptionsSection
+    // Toast 状态
+    @State private var toastMessage = ""
+    @State private var toastType: ToastType = .info
+    @State private var showToast = false
+    
+    enum ToastType {
+        case info, success, error
+        
+        var icon: String {
+            switch self {
+            case .info: return "envelope.fill"
+            case .success: return "checkmark.circle.fill"
+            case .error: return "xmark.circle.fill"
             }
-            
-            if let errorMessage = authManager.errorMessage {
-                errorSection(errorMessage)
-            }
-            
-            Spacer()
         }
-        .padding(.horizontal, 60)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.Colors.appBackground)
+        
+        var color: Color {
+            switch self {
+            case .info: return Theme.Colors.brandBlue
+            case .success: return Color.fromHex("#34C759") ?? .green
+            case .error: return Theme.Colors.destructive
+            }
+        }
+    }
+    
+    var body: some View {
+        ZStack {
+            // 主内容
+            VStack(spacing: Theme.Spacing.xxxl) {
+                Spacer()
+                
+                logoSection
+                
+                if authManager.isLoading {
+                    loadingSection
+                } else {
+                    loginOptionsSection
+                }
+                
+                if let errorMessage = authManager.errorMessage {
+                    errorSection(errorMessage)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 60)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.Colors.appBackground)
+            
+            // Toast 弹窗
+            if showToast {
+                toastView
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
+            }
+        }
+    }
+    
+    private var toastView: some View {
+        HStack(spacing: 12) {
+            Image(systemName: toastType.icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(toastType.color)
+            
+            Text(toastMessage)
+                .font(Theme.Fonts.bodyBold)
+                .foregroundStyle(Theme.Colors.primaryText)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(
+            Capsule()
+                .fill(Theme.Colors.cardBackground)
+                .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
+        )
+        .overlay(
+            Capsule()
+                .stroke(toastType.color.opacity(0.3), lineWidth: 1)
+        )
+        .padding(.top, 60)
+        .padding(.horizontal, 40)
+    }
+    
+    private func showToast(message: String, type: ToastType, duration: Double = 2.5) {
+        toastMessage = message
+        toastType = type
+        withAnimation {
+            showToast = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showToast = false
+            }
+        }
     }
     
     private var logoSection: some View {
@@ -232,9 +306,19 @@ struct LoginView: View {
     private func sendCode() {
         isCodeSent = true
         countdown = 60
-
+        
+        // 显示发送中提示
+        showToast(message: "验证码发送中...", type: .info)
+        
         Task {
-            await authManager.sendVerificationCode(email: email)
+            let success = await authManager.sendVerificationCode(email: email)
+            if success {
+                showToast(message: "验证码已发送至您的邮箱", type: .success)
+            } else if let error = authManager.errorMessage {
+                showToast(message: error, type: .error)
+                isCodeSent = false
+                countdown = 0
+            }
             startCountdown()
         }
     }

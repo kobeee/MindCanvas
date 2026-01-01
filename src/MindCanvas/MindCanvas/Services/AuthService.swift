@@ -37,8 +37,8 @@ final class AuthService {
 
     // MARK: - 邮箱验证登录
 
-    func sendVerificationCode(email: String) async throws {
-        try await apiClient.sendVerificationCode(email: email)
+    func sendVerificationCode(email: String) async throws -> SendVerificationCodeResponse {
+        return try await apiClient.sendVerificationCode(email: email)
     }
 
     func verifyEmail(email: String, code: String) async throws -> Token {

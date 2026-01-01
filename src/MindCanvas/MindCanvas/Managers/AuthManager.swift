@@ -58,17 +58,17 @@ final class AuthManager {
         }
     }
 
-    func sendVerificationCode(email: String) async {
-        isLoading = true
+    func sendVerificationCode(email: String) async -> Bool {
+        isLoading = false  // 不显示加载状态
         errorMessage = nil
 
         do {
-            try await authService.sendVerificationCode(email: email)
+            let response = try await authService.sendVerificationCode(email: email)
+            return true
         } catch {
             errorMessage = formatErrorMessage(error)
+            return false
         }
-
-        isLoading = false
     }
 
     func verifyEmail(email: String, code: String) async {

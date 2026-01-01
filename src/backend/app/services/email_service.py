@@ -9,6 +9,7 @@ import aiosmtplib
 from email.message import EmailMessage
 from typing import Optional
 import logging
+import ssl
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,21 @@ class EmailService:
     使用 aiosmtplib 提供异步发送邮件功能。
 
     使用方法：
-        # 初始化服务
+        # 初始化服务（TLS 方式，端口 587）
         email_service = EmailService(
             host="smtp.gmail.com",
             port=587,
             username="your_email@gmail.com",
             password="your_password"
+        )
+
+        # 初始化服务（SSL 方式，端口 465）
+        email_service = EmailService(
+            host="smtp.gmail.com",
+            port=465,
+            username="your_email@gmail.com",
+            password="your_password",
+            use_ssl=True
         )
 
         # 发送验证码邮件
@@ -46,7 +56,8 @@ class EmailService:
         port: int,
         username: str,
         password: str,
-        use_tls: bool = True
+        use_tls: bool = True,
+        use_ssl: bool = False
     ):
         """
         初始化邮件服务
@@ -56,14 +67,16 @@ class EmailService:
             port: SMTP 服务器端口
             username: 邮箱账号
             password: 邮箱密码或应用专用密码
-            use_tls: 是否使用 TLS 加密
+            use_tls: 是否使用 TLS 加密（STARTTLS）
+            use_ssl: 是否使用 SSL 加密
         """
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.use_tls = use_tls
-        logger.info(f"EmailService initialized: {host}:{port}")
+        self.use_ssl = use_ssl
+        logger.info(f"EmailService initialized: {host}:{port}, TLS={use_tls}, SSL={use_ssl}")
 
     async def send_verification_code(
         self,
@@ -104,14 +117,28 @@ class EmailService:
             message.set_content(body.strip())
 
             # 发送邮件
-            await aiosmtplib.send(
-                message,
-                hostname=self.host,
-                port=self.port,
-                username=self.username,
-                password=self.password,
-                use_tls=self.use_tls
-            )
+            if self.use_ssl:
+                # 使用 SSL 连接（端口 465）
+                context = ssl.create_default_context()
+                await aiosmtplib.send(
+                    message,
+                    hostname=self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    use_tls=True,  # SSL 需要 use_tls=True
+                    tls_context=context
+                )
+            else:
+                # 使用 TLS（STARTTLS，端口 587）
+                await aiosmtplib.send(
+                    message,
+                    hostname=self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    use_tls=self.use_tls
+                )
 
             logger.info(f"Verification code sent to {to_email}")
             return True

@@ -507,7 +507,8 @@ class AuthService:
             port=settings.SMTP_PORT,
             username=settings.SMTP_USERNAME,
             password=settings.SMTP_PASSWORD,
-            use_tls=settings.SMTP_USE_TLS
+            use_tls=settings.SMTP_USE_TLS,
+            use_ssl=(settings.SMTP_PORT == 465)  # 端口465使用SSL
         )
 
         await email_service.send_verification_code(email, code)

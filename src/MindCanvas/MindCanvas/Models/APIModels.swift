@@ -9,6 +9,16 @@ struct SendVerificationCodeRequest: Codable {
     let email: String
 }
 
+struct SendVerificationCodeResponse: Codable {
+    let message: String
+    let expiresIn: Int
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case expiresIn = "expires_in"
+    }
+}
+
 struct VerifyEmailRequest: Codable {
     let email: String
     let code: String

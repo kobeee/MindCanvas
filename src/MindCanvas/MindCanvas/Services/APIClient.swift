@@ -116,13 +116,13 @@ final class APIClient {
         )
     }
 
-    func sendVerificationCode(email: String) async throws {
-        _ = try await request(
+    func sendVerificationCode(email: String) async throws -> SendVerificationCodeResponse {
+        return try await request(
             endpoint: "/api/v1/auth/send-verification-code",
             method: .POST,
             body: SendVerificationCodeRequest(email: email),
             requiresAuth: false,
-            responseType: [String: String].self
+            responseType: SendVerificationCodeResponse.self
         )
     }
 
