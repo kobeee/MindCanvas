@@ -9,9 +9,12 @@ enum APIError: Error, LocalizedError {
     case encodingError(Error)
     case unauthorized(message: String?)
     case tokenExpired
+    case invalidAPIKey
+    case generationFailed(String)
+    case timeout
     case serverError(message: String?)
     case unknown
-
+    
     var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -30,6 +33,12 @@ enum APIError: Error, LocalizedError {
             return "未授权: \(message ?? "请重新登录")"
         case .tokenExpired:
             return "Token 已过期，正在刷新..."
+        case .invalidAPIKey:
+            return "API Key 未配置，请在设置中添加 API Key"
+        case .generationFailed(let message):
+            return "生成失败: \(message)"
+        case .timeout:
+            return "生成超时，请稍后重试"
         case .serverError(let message):
             return "服务器错误: \(message ?? "请稍后重试")"
         case .unknown:

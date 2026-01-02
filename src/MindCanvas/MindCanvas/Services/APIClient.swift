@@ -12,7 +12,7 @@ enum HTTPMethod: String {
 final class APIClient {
     static let shared = APIClient()
 
-    private let baseURL: String
+    internal let baseURL: String
     private let session: URLSession
     private let tokenManager = TokenManager.shared
     private let decoder: JSONDecoder
@@ -36,7 +36,7 @@ final class APIClient {
         }
     }
 
-    private func request<T: Decodable>(
+    internal func request<T: Decodable>(
         endpoint: String,
         method: HTTPMethod = .GET,
         body: Encodable? = nil,

@@ -120,13 +120,14 @@ async def global_exception_handler(request, exc):
 
 
 # 导入路由
-from app.routers import auth, assets, feed, tasks
+from app.routers import auth, assets, feed, tasks, users
 
 # 注册路由
 app.include_router(auth.router)
 app.include_router(assets.router)
 app.include_router(feed.router)
 app.include_router(tasks.router)
+app.include_router(users.router)
 
 # 配置静态文件服务
 # 获取项目根目录

@@ -47,7 +47,7 @@ final class NativeEditorViewModel {
     
     // MARK: - 服务
     
-    private let generationService = MockGenerationService.shared
+    private let generationService = RealGenerationService.shared
     private var modelContext: ModelContext?
     
     // MARK: - 画布引用 (用于调用原生方法)

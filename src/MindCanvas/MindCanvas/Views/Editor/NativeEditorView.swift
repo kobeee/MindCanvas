@@ -824,11 +824,6 @@ private struct NativeControlPanel: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // API 配置
-                configSection
-
-                Divider()
-
                 // 模型选择
                 modelSection
 
@@ -848,25 +843,6 @@ private struct NativeControlPanel: View {
                 infoSection
             }
             .padding()
-        }
-    }
-    
-    private var configSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("API 配置", systemImage: "server.rack")
-                .font(.headline)
-            
-            HStack {
-                Text("服务")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("官方服务")
-                    .foregroundStyle(.primary)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
         }
     }
     
@@ -920,6 +896,27 @@ private struct NativeControlPanel: View {
     
     private var generateSection: some View {
         VStack(spacing: 12) {
+            // API Key 未配置提示
+            if !KeychainManager.shared.hasAPIKey() {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("API Key 未配置")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.red)
+                        Text("请在设置中添加 API Key")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(12)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(8)
+            }
+            
             Button {
                 onImageToImageTapped()
             } label: {
@@ -937,7 +934,8 @@ private struct NativeControlPanel: View {
             .disabled(
                 viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                 viewModel.isGenerating ||
-                !viewModel.stateManager.isMagicFrameVisible
+                !viewModel.stateManager.isMagicFrameVisible ||
+                !KeychainManager.shared.hasAPIKey()
             )
             .frame(maxWidth: .infinity)
             .frame(height: 50)
@@ -948,7 +946,7 @@ private struct NativeControlPanel: View {
                 Label("文生图", systemImage: "paintpalette")
             }
             .buttonStyle(.bordered)
-            .disabled(viewModel.isGenerating)
+            .disabled(viewModel.isGenerating || !KeychainManager.shared.hasAPIKey())
             .frame(maxWidth: .infinity)
         }
     }
