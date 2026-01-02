@@ -69,6 +69,7 @@ class PublicKeyUpdate(BaseModel):
 class PublicKeyResponse(BaseModel):
     """公钥响应"""
     has_public_key: bool
+    public_key: Optional[str] = None
 
 
 @router.get("/public-key", response_model=PublicKeyResponse)
@@ -79,17 +80,19 @@ async def get_public_key():
     iOS 端调用此接口获取后端的 RSA 公钥，用于加密 API Key。
 
     Returns:
-        包含 has_public_key 的响应（公钥通过其他方式获取）
+        包含 has_public_key 和 public_key 的响应
 
     注意：
         - 此接口不需要认证
         - 公钥通过配置提供，不存储在数据库中
+        - public_key 是 PEM 格式的公钥的 Base64 编码
     """
     # 从配置获取公钥的 Base64 编码
     public_key_base64 = getattr(settings, "RSA_PUBLIC_KEY_BASE64", None)
     
     return PublicKeyResponse(
-        has_public_key=bool(public_key_base64)
+        has_public_key=bool(public_key_base64),
+        public_key=public_key_base64
     )
 
 

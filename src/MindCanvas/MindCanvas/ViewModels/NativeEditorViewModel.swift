@@ -260,13 +260,48 @@ final class NativeEditorViewModel {
 
     /// 图生图：用户确认后执行生成
     func confirmImageToImageGenerate() async {
-        guard !isGenerating else { return }
+        print("[ImageToImage] ===== Begin confirmImageToImageGenerate =====")
+
+        guard !isGenerating else {
+            print("[ImageToImage] Error: Already generating")
+            flowHintMessage = "正在生成中，请稍候"
+            return
+        }
+
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard let context = modelContext else { return }
-        guard let canvasView = canvasView else { return }
-        guard stateManager.isMagicFrameVisible else { return }
-        guard let base64String = pendingImageToImageBase64 else { return }
+        print("[ImageToImage] prompt: \(trimmed.isEmpty ? "(empty)" : trimmed)")
+
+        guard !trimmed.isEmpty else {
+            print("[ImageToImage] Error: Prompt is empty")
+            flowHintMessage = "请输入生成描述"
+            return
+        }
+
+        guard let context = modelContext else {
+            print("[ImageToImage] Error: modelContext is nil")
+            flowHintMessage = "数据上下文不可用"
+            return
+        }
+
+        guard let canvasView = canvasView else {
+            print("[ImageToImage] Error: canvasView is nil")
+            flowHintMessage = "画布尚未就绪"
+            return
+        }
+
+        guard stateManager.isMagicFrameVisible else {
+            print("[ImageToImage] Error: Magic Frame not visible")
+            flowHintMessage = "选框已关闭，请重新选择区域"
+            return
+        }
+
+        guard let base64String = pendingImageToImageBase64 else {
+            print("[ImageToImage] Error: pendingImageToImageBase64 is nil")
+            flowHintMessage = "预览数据丢失，请重新选择区域"
+            return
+        }
+
+        print("[ImageToImage] base64Image length: \(base64String.count)")
 
         isGenerating = true
         flowHintMessage = nil
@@ -283,10 +318,20 @@ final class NativeEditorViewModel {
         loadingAsset.generationModeRawValue = GenerationMode.img2img.rawValue
 
         context.insert(loadingAsset)
-        try? context.save()
+        do {
+            try context.save()
+            print("[ImageToImage] Loading asset saved successfully")
+        } catch {
+            print("[ImageToImage] Error: Failed to save loading asset: \(error)")
+            flowHintMessage = "保存失败：\(error.localizedDescription)"
+            isGenerating = false
+            return
+        }
+
         loadAssets()
 
         do {
+            print("[ImageToImage] Calling generationService.generate...")
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: base64String,
@@ -295,16 +340,25 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request)
 
+            print("[ImageToImage] Generation success, url: \(response.imageUrl)")
+
             loadingAsset.url = response.imageUrl
             loadingAsset.thumbnailUrl = response.thumbnailUrl
             loadingAsset.isLoading = false
 
-            try? context.save()
+            do {
+                try context.save()
+                print("[ImageToImage] Asset updated successfully")
+            } catch {
+                print("[ImageToImage] Error: Failed to update asset: \(error)")
+            }
             loadAssets()
 
             let maxZ = canvasDocument.maxZIndex
             // 回填必须使用“画布内容坐标”frame，而不是视口 magicFrame
             let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
+            print("[ImageToImage] Adding generated layer to canvas, frame: \(contentRect)")
+
             let generatedLayer = LayerNode.aiGenerated(
                 url: response.imageUrl,
                 frame: contentRect,
@@ -317,12 +371,23 @@ final class NativeEditorViewModel {
             prompt = ""
             stateManager.hideMagicFrame()
 
+            print("[ImageToImage] ===== End confirmImageToImageGenerate (success) =====")
+
         } catch {
+            print("[ImageToImage] Generation failed: \(error)")
+
             context.delete(loadingAsset)
-            try? context.save()
+            do {
+                try context.save()
+                print("[ImageToImage] Loading asset deleted successfully")
+            } catch {
+                print("[ImageToImage] Error: Failed to delete loading asset: \(error)")
+            }
+
             loadAssets()
-            print("生成失败: \(error)")
+
             flowHintMessage = "生成失败：\(error.localizedDescription)"
+            print("[ImageToImage] ===== End confirmImageToImageGenerate (failed) =====")
         }
 
         isGenerating = false
@@ -330,12 +395,41 @@ final class NativeEditorViewModel {
 
     /// 文生图：生成资源（不自动上画布）
     func generateTextToImage(prompt: String, ratio: ImageAspectRatio) async {
-        guard !isGenerating else { return }
+        print("[TextToImage] ===== Begin generateTextToImage =====")
+
+        guard !isGenerating else {
+            print("[TextToImage] Error: Already generating")
+            flowHintMessage = "正在生成中，请稍候"
+            return
+        }
+
+        // 提前验证 API Key
+        guard KeychainManager.shared.hasAPIKey() else {
+            print("[TextToImage] Error: API Key not configured")
+            flowHintMessage = "请先在设置中配置 API Key"
+            return
+        }
+
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard let context = modelContext else { return }
+        print("[TextToImage] prompt: \(trimmed.isEmpty ? "(empty)" : trimmed)")
+        print("[TextToImage] ratio: \(ratio.rawValue)")
+
+        guard !trimmed.isEmpty else {
+            print("[TextToImage] Error: Prompt is empty")
+            flowHintMessage = "请输入生成描述"
+            return
+        }
+
+        guard let context = modelContext else {
+            print("[TextToImage] Error: modelContext is nil")
+            flowHintMessage = "数据上下文不可用"
+            return
+        }
 
         isGenerating = true
+        flowHintMessage = nil
+
+        print("[TextToImage] Creating loading asset...")
 
         let loadingAsset = Asset(
             url: "",
@@ -347,10 +441,21 @@ final class NativeEditorViewModel {
         loadingAsset.aspectRatio = ratio.rawValue
 
         context.insert(loadingAsset)
-        try? context.save()
+        do {
+            try context.save()
+            print("[TextToImage] Loading asset saved successfully")
+        } catch {
+            print("[TextToImage] Error: Failed to save loading asset: \(error)")
+            flowHintMessage = "保存失败：\(error.localizedDescription)"
+            isGenerating = false
+            return
+        }
+
         loadAssets()
 
         do {
+            print("[TextToImage] Calling generationService.generate...")
+
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: nil,
@@ -359,21 +464,39 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request)
 
+            print("[TextToImage] Generation success, url: \(response.imageUrl)")
+
             loadingAsset.url = response.imageUrl
             loadingAsset.thumbnailUrl = response.thumbnailUrl
             loadingAsset.isLoading = false
 
-            try? context.save()
+            do {
+                try context.save()
+                print("[TextToImage] Asset updated successfully")
+            } catch {
+                print("[TextToImage] Error: Failed to update asset: \(error)")
+            }
+
             loadAssets()
 
         } catch {
+            print("[TextToImage] Generation failed: \(error)")
+
             context.delete(loadingAsset)
-            try? context.save()
+            do {
+                try context.save()
+                print("[TextToImage] Loading asset deleted successfully")
+            } catch {
+                print("[TextToImage] Error: Failed to delete loading asset: \(error)")
+            }
+
             loadAssets()
-            print("生成失败: \(error)")
+
+            flowHintMessage = "生成失败：\(error.localizedDescription)"
         }
 
         isGenerating = false
+        print("[TextToImage] ===== End generateTextToImage =====")
     }
     
     // MARK: - Asset 操作

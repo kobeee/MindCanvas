@@ -18,7 +18,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
+from app.database.connection import AsyncSessionLocal
 from app.models.task import Task
+from app.services.rsa_encryption_service import RSAEncryptionService, RSAEncryptionError
 from app.services.encryption import EncryptionService, EncryptionError, DecryptionError
 from app.services.google_api import GoogleAPIClient, GoogleAPIError
 from app.storage.image_storage import ImageStorage, ImageType
@@ -67,7 +69,7 @@ class TaskService:
     def __init__(
         self,
         db: AsyncSession,
-        encryption_service: EncryptionService,
+        encryption_service: RSAEncryptionService,
         google_client: GoogleAPIClient,
         storage: Optional[ImageStorage] = None
     ):
@@ -76,7 +78,7 @@ class TaskService:
 
         Args:
             db: 异步数据库会话
-            encryption_service: 加密服务实例
+            encryption_service: RSA 加密服务实例
             google_client: Google API 客户端实例
             storage: 图片存储服务实例（可选，默认创建新实例）
 
@@ -257,9 +259,16 @@ class TaskService:
 
             # 解密 API Key（临时内存）
             try:
-                api_key = self.encryption_service.decrypt(task.encrypted_api_key)
-                logger.debug(f"API Key decrypted for task {task_id}")
-            except DecryptionError as e:
+                # iOS 端发送的是 Base64 编码的 RSA 加密数据
+                import base64
+                logger.info(f"Task {task_id}: Starting API Key decryption, encrypted_api_key length={len(task.encrypted_api_key)}")
+                encrypted_bytes = base64.b64decode(task.encrypted_api_key)
+                logger.info(f"Task {task_id}: Base64 decoded, encrypted_bytes length={len(encrypted_bytes)}")
+                logger.debug(f"Task {task_id}: Encrypted bytes (first 50): {encrypted_bytes[:50].hex()}")
+                api_key = self.encryption_service.decrypt(encrypted_bytes)
+                logger.info(f"Task {task_id}: API Key decrypted successfully, length={len(api_key)}")
+                logger.debug(f"Task {task_id}: API Key (first 10 chars): {api_key[:10]}...")
+            except RSAEncryptionError as e:
                 logger.error(f"Failed to decrypt API Key for task {task_id}: {str(e)}")
                 raise TaskServiceError(f"Failed to decrypt API Key: {str(e)}")
 
@@ -337,35 +346,36 @@ class TaskService:
             TaskServiceError: 如果更新失败
 
         注意：
-            - 此方法内部使用新的数据库会话，避免与外层会话冲突
+            - 此方法使用新的独立会话，避免与外层会话冲突
         """
-        try:
-            update_data: Dict[str, Any] = {"status": status}
-
-            if image_url:
-                update_data["image_url"] = image_url
-
-            if image_expires_at:
-                update_data["image_expires_at"] = image_expires_at
-
-            if error_message:
-                update_data["error_message"] = error_message
-
-            await self.db.execute(
-                update(Task).where(Task.id == task_id).values(**update_data)
-            )
-            await self.db.commit()
-
-            logger.debug(f"Task {task_id} status updated to {status}")
-
-        except Exception as e:
-            logger.error(f"Failed to update task status: {str(e)}")
+        async with AsyncSessionLocal() as session:
             try:
-                await self.db.rollback()
-            except Exception:
-                # 忽略 rollback 错误，可能 session 已经处于无效状态
-                pass
-            raise TaskServiceError(f"Failed to update task status: {str(e)}")
+                update_data: Dict[str, Any] = {"status": status}
+
+                if image_url:
+                    update_data["image_url"] = image_url
+
+                if image_expires_at:
+                    update_data["image_expires_at"] = image_expires_at
+
+                if error_message:
+                    update_data["error_message"] = error_message
+
+                await session.execute(
+                    update(Task).where(Task.id == task_id).values(**update_data)
+                )
+                await session.commit()
+
+                logger.debug(f"Task {task_id} status updated to {status}")
+
+            except Exception as e:
+                logger.error(f"Failed to update task status: {str(e)}")
+                try:
+                    await session.rollback()
+                except Exception:
+                    # 忽略 rollback 错误，可能 session 已经处于无效状态
+                    pass
+                raise TaskServiceError(f"Failed to update task status: {str(e)}")
 
     async def _clear_api_key(self, task_id: str):
         """
@@ -378,25 +388,27 @@ class TaskService:
             - 任务完成后必须立即清除 API Key
             - 即使任务失败也要清除 API Key
             - 此操作不可逆
+            - 此方法使用新的独立会话，避免与外层会话冲突
         """
-        try:
-            await self.db.execute(
-                update(Task)
-                .where(Task.id == task_id)
-                .values(encrypted_api_key=None)
-            )
-            await self.db.commit()
-
-            logger.info(f"API Key cleared for task {task_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to clear API Key for task {task_id}: {str(e)}")
+        async with AsyncSessionLocal() as session:
             try:
-                await self.db.rollback()
-            except Exception:
-                # 忽略 rollback 错误，可能 session 已经处于无效状态
-                pass
-            # 不抛出异常，避免影响主流程
+                await session.execute(
+                    update(Task)
+                    .where(Task.id == task_id)
+                    .values(encrypted_api_key=None)
+                )
+                await session.commit()
+
+                logger.info(f"API Key cleared for task {task_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to clear API Key for task {task_id}: {str(e)}")
+                try:
+                    await session.rollback()
+                except Exception:
+                    # 忽略 rollback 错误，可能 session 已经处于无效状态
+                    pass
+                # 不抛出异常，避免影响主流程
 
     async def _save_image(self, task_id: str, image_data: bytes) -> str:
         """

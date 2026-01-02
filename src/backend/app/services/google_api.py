@@ -1,8 +1,14 @@
 """
 Google API 客户端模块
 
-提供 Google Nano Banana Pro API (Gemini 2.0 Flash) 的异步调用功能，
+提供 Google Nano Banana Pro API (Gemini 3 Pro Image Preview) 的异步调用功能，
 支持文本到图片生成和图片到图片生成。
+
+Nano Banana Pro 是 Google 最新的旗舰级图像生成模型，具备：
+- 思考模式（Thinking Mode）：复杂场景推理
+- 搜索接地（Search Grounding）：验证事实准确性
+- 4K 分辨率输出：专业级图像质量
+- 高保真文本渲染：94% 文本渲染准确率
 
 安全特性：
 - 使用 httpx 异步 HTTP 客户端
@@ -13,6 +19,7 @@ Google API 客户端模块
 
 import httpx
 import base64
+import json
 import logging
 from typing import Optional
 
@@ -48,8 +55,14 @@ class GoogleAPIClient:
     """
     Google API 客户端类
 
-    使用 httpx 异步 HTTP 客户端调用 Google Nano Banana Pro API (Gemini 2.0 Flash)，
+    使用 httpx 异步 HTTP 客户端调用 Google Nano Banana Pro API (Gemini 3 Pro Image Preview)，
     支持文本到图片生成和图片到图片生成。
+
+    Nano Banana Pro (gemini-3-pro-image-preview) 特性：
+    - 思考模式（Thinking Mode）：复杂场景推理
+    - 搜索接地（Search Grounding）：验证事实准确性
+    - 4K 分辨率输出：专业级图像质量
+    - 高保真文本渲染：94% 文本渲染准确率
 
     使用方法：
         # 初始化客户端
@@ -85,9 +98,9 @@ class GoogleAPIClient:
             - 超时时间设置为 60 秒，适用于生图任务
         """
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-        self.model_name = "gemini-2.0-flash-exp"
+        self.model_name = "gemini-3-pro-image-preview"
         self.timeout = timeout
-        logger.info(f"GoogleAPIClient initialized with timeout={timeout}s")
+        logger.info(f"GoogleAPIClient initialized with model={self.model_name}, timeout={timeout}s")
 
     async def generate_image(
         self,
@@ -170,6 +183,21 @@ class GoogleAPIClient:
                 # 解析响应
                 data = response.json()
 
+                # 添加详细的响应日志
+                logger.info(f"API Response keys: {list(data.keys())}")
+                logger.info(f"Full API Response: {json.dumps(data, indent=2)}")
+
+                if "candidates" in data:
+                    candidates_count = len(data["candidates"])
+                    logger.info(f"Candidates count: {candidates_count}")
+                    if candidates_count > 0:
+                        first_candidate = data["candidates"][0]
+                        logger.info(f"First candidate keys: {list(first_candidate.keys())}")
+                        if "finishReason" in first_candidate:
+                            logger.info(f"Finish reason: {first_candidate['finishReason']}")
+                        if "finishMessage" in first_candidate:
+                            logger.info(f"Finish message: {first_candidate['finishMessage']}")
+
                 # 提取图片数据
                 image_data = self._extract_image_data(data)
 
@@ -210,8 +238,12 @@ class GoogleAPIClient:
         # 构建基础请求体
         payload = {
             "contents": [{
+                "role": "user",
                 "parts": [{"text": prompt}]
-            }]
+            }],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"]
+            }
         }
 
         # 如果有参考图，添加到请求体
@@ -221,7 +253,7 @@ class GoogleAPIClient:
                 # 尝试解码以验证 Base64 格式
                 base64.b64decode(base_image, validate=True)
                 payload["contents"][0]["parts"].append({
-                    "inline_data": {
+                    "inlineData": {
                         "mime_type": "image/png",
                         "data": base_image
                     }
@@ -254,6 +286,17 @@ class GoogleAPIClient:
 
             candidate = response_data["candidates"][0]
 
+            # 检查候选结果状态
+            if "finishReason" in candidate:
+                finish_reason = candidate["finishReason"]
+                logger.info(f"Candidate finishReason: {finish_reason}")
+                if finish_reason != "STOP":
+                    error_msg = f"Generation failed with reason: {finish_reason}"
+                    if "finishMessage" in candidate:
+                        error_msg += f" - {candidate['finishMessage']}"
+                    logger.error(error_msg)
+                    raise GoogleAPIError(error_msg)
+
             if "content" not in candidate:
                 logger.error("No content in candidate")
                 raise GoogleAPIError("No content in candidate")
@@ -264,20 +307,72 @@ class GoogleAPIClient:
                 logger.error("No parts in content")
                 raise GoogleAPIError("No parts in content")
 
-            part = content["parts"][0]
+            # 添加 parts 数组的详细日志
+            parts = content["parts"]
+            parts_count = len(parts)
+            logger.info(f"Parts count: {parts_count}")
 
-            if "inline_data" not in part:
-                logger.error("No inline_data in part")
-                raise GoogleAPIError("No inline_data in part")
+            # 记录每个 part 的类型和完整内容
+            for i, part in enumerate(parts):
+                logger.info(f"Part {i} keys: {list(part.keys())}")
+                logger.info(f"Part {i} full content: {json.dumps(part, indent=2)}")
+                if "text" in part:
+                    text_preview = part['text'][:100] if len(part['text']) > 100 else part['text']
+                    logger.info(f"Part {i} text: {text_preview}...")
+                if "inline_data" in part:
+                    mime_type = part['inline_data'].get('mime_type', 'unknown')
+                    logger.info(f"Part {i} inline_data mime_type: {mime_type}")
+                if "inlineData" in part:  # 驼峰命名
+                    mime_type = part['inlineData'].get('mime_type', 'unknown')
+                    logger.info(f"Part {i} inlineData (camelCase) mime_type: {mime_type}")
+                if "thought_signature" in part:
+                    logger.info(f"Part {i} has thought_signature")
 
-            inline_data = part["inline_data"]
+            # 遍历所有 parts，找到包含 inline_data 或 inlineData 的 part
+            image_base64 = None
+            for i, part in enumerate(parts):
+                # 检查下划线命名 inline_data
+                if "inline_data" in part:
+                    inline_data = part["inline_data"]
+                    if "data" in inline_data:
+                        image_base64 = inline_data["data"]
+                        logger.info(f"Found inline_data in part {i}")
+                        break
+                    else:
+                        logger.error(f"Part {i} has inline_data but no data field")
+                # 检查驼峰命名 inlineData
+                elif "inlineData" in part:
+                    inline_data = part["inlineData"]
+                    if "data" in inline_data:
+                        image_base64 = inline_data["data"]
+                        logger.info(f"Found inlineData (camelCase) in part {i}")
+                        break
+                    else:
+                        logger.error(f"Part {i} has inlineData but no data field")
 
-            if "data" not in inline_data:
-                logger.error("No data in inline_data")
-                raise GoogleAPIError("No data in inline_data")
+            # 如果没有找到 inline_data 或 inlineData，记录所有 parts 的类型并抛出异常
+            if image_base64 is None:
+                part_types = []
+                for part in parts:
+                    if "text" in part:
+                        part_types.append("text")
+                    elif "inline_data" in part:
+                        part_types.append("inline_data")
+                    elif "inlineData" in part:
+                        part_types.append("inlineData")
+                    elif "thought_signature" in part:
+                        part_types.append("thought_signature")
+                    else:
+                        part_types.append("unknown")
 
-            # 提取 Base64 图片数据
-            image_base64 = inline_data["data"]
+                logger.error(f"No inline_data or inlineData found in any part. Part types: {part_types}")
+
+                # 如果有 text part，记录文本内容
+                for i, part in enumerate(parts):
+                    if "text" in part:
+                        logger.error(f"Part {i} text content: {part['text'][:200]}...")
+
+                raise GoogleAPIError(f"No inline_data or inlineData found in any part. Part types: {part_types}")
 
             # 解码为二进制数据
             image_data = base64.b64decode(image_base64)

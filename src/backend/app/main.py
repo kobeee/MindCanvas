@@ -130,9 +130,8 @@ app.include_router(tasks.router)
 app.include_router(users.router)
 
 # 配置静态文件服务
-# 获取项目根目录
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-STORAGE_DIR = os.path.join(BASE_DIR, "storage", "images")
+# 使用配置中的存储路径（支持 Docker 环境变量覆盖）
+STORAGE_DIR = settings.IMAGE_STORAGE_PATH
 
 # 确保存储目录存在
 os.makedirs(STORAGE_DIR, exist_ok=True)

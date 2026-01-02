@@ -35,28 +35,31 @@ final class RSAEncryptionService {
         guard let url = URL(string: "\(APIClient.shared.baseURL)/api/v1/users/public-key") else {
             throw RSAEncryptionError.invalidPublicKey
         }
-        
+
         let (data, response) = try await URLSession.shared.data(from: url)
-        
+
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             throw RSAEncryptionError.invalidPublicKey
         }
-        
+
         struct PublicKeyResponse: Decodable {
             let hasPublicKey: Bool
+            let publicKey: String?
+
+            enum CodingKeys: String, CodingKey {
+                case hasPublicKey = "has_public_key"
+                case publicKey = "public_key"
+            }
         }
-        
+
         let decoder = JSONDecoder()
         let keyResponse = try decoder.decode(PublicKeyResponse.self, from: data)
-        
-        guard keyResponse.hasPublicKey else {
+
+        guard keyResponse.hasPublicKey, let publicKeyBase64 = keyResponse.publicKey else {
             throw RSAEncryptionError.invalidPublicKey
         }
-        
-        // 从配置获取公钥
-        let publicKeyBase64 = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUFxdmVhc2pTbXYzMFluMkJONkVzcApybWFTYks1WHorbFJQZjZSeW5EdnZWRDAxUVlYMTVmaThzK1RJZGhvMStTNGtibVQ0T1VpZTZJUEJpc1ZkeVFiCldXUGZNbXdmV0tVMCtDWEhzZzdFOXFHbzFETDEyOFlnWnA0SmdNUEVmUEEvMDVrR0h6YkpuQzRGcUQ4WUtIVXMKaVRXU3JnQ296K3RxYy9UUndXbEM0WDF1dUtzZWN2cXNNZmZsQmVUZVdiUmE5TjNDY2RYQTdOWSt1WWcwakFtSQp2Z284WHB4MVlTQXN6eXQwL2lpUVdkcW82UGcvNEtsK2QvYnhzeUxvY1dUMDhxdURlOHVnYklPaTB5eEVnUTNzCld0bUtqdVJhMXh5bVQxWnpTL1k2SjlIUkR1MThvMldGYWhLY3diOXdZWitTV1pRa0E0eEh5UlU4ZUJEcS92dHAKT1FJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
-        
+
         cachedPublicKey = try loadPublicKey(fromBase64: publicKeyBase64)
     }
     
@@ -65,15 +68,18 @@ final class RSAEncryptionService {
         if cachedPublicKey == nil {
             try await fetchAndCachePublicKey()
         }
-        
+
         guard let publicKey = cachedPublicKey else {
             throw RSAEncryptionError.invalidPublicKey
         }
-        
+
         guard let plaintextData = plaintext.data(using: .utf8) else {
             throw RSAEncryptionError.encryptionFailed("无法将字符串转换为数据")
         }
-        
+
+        print("🔐 [RSAEncryptionService] Starting encryption, plaintext length=\(plaintextData.count)")
+        print("🔐 [RSAEncryptionService] Plaintext (first 10 chars): \(String(data: plaintextData.prefix(10), encoding: .utf8) ?? "N/A")...")
+
         // 使用 SecKey 加密
         var error: Unmanaged<CFError>?
         guard let encryptedData = SecKeyCreateEncryptedData(
@@ -83,34 +89,70 @@ final class RSAEncryptionService {
             &error
         ) else {
             let errorMessage = error?.takeRetainedValue().localizedDescription ?? "未知错误"
+            print("❌ [RSAEncryptionService] Encryption failed: \(errorMessage)")
             throw RSAEncryptionError.encryptionFailed(errorMessage)
         }
-        
+
+        print("🔐 [RSAEncryptionService] Encryption successful, encrypted data length=\((encryptedData as Data).count)")
+
         // Base64 编码
-        return (encryptedData as Data).base64EncodedString()
+        let base64Encoded = (encryptedData as Data).base64EncodedString()
+        print("🔐 [RSAEncryptionService] Base64 encoded, length=\(base64Encoded.count)")
+        print("🔐 [RSAEncryptionService] Base64 (first 50 chars): \(String(base64Encoded.prefix(50)))...")
+
+        return base64Encoded
     }
     
     /// 从 Base64 字符串加载公钥
     private func loadPublicKey(fromBase64 base64: String) throws -> SecKey {
-        guard let keyData = Data(base64Encoded: base64) else {
+        // 解码 Base64 得到 PEM 格式的公钥
+        guard let pemData = Data(base64Encoded: base64) else {
             throw RSAEncryptionError.invalidPublicKey
         }
-        
+
+        let pemString = String(data: pemData, encoding: .utf8) ?? ""
+
+        // 从 PEM 格式提取 DER 格式的公钥数据
+        // PEM 格式: -----BEGIN PUBLIC KEY-----\n<base64>\n-----END PUBLIC KEY-----
+        let lines = pemString.components(separatedBy: "\n")
+        var base64Lines: [String] = []
+
+        var inKeySection = false
+        for line in lines {
+            if line.contains("-----BEGIN PUBLIC KEY-----") {
+                inKeySection = true
+                continue
+            }
+            if line.contains("-----END PUBLIC KEY-----") {
+                inKeySection = false
+                continue
+            }
+            if inKeySection && !line.isEmpty {
+                base64Lines.append(line)
+            }
+        }
+
+        let base64String = base64Lines.joined()
+        guard let derData = Data(base64Encoded: base64String) else {
+            throw RSAEncryptionError.invalidPublicKey
+        }
+
         let options: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
             kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
             kSecReturnPersistentRef as String: false
         ]
-        
+
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateWithData(
-            keyData as CFData,
+            derData as CFData,
             options as CFDictionary,
             &error
         ) else {
+            print("❌ SecKeyCreateWithData failed: \(error.debugDescription)")
             throw RSAEncryptionError.invalidPublicKey
         }
-        
+
         return key
     }
 }

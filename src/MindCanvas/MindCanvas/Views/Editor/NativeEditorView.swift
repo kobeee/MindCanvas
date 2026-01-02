@@ -7,6 +7,7 @@ import PhotosUI
 struct NativeEditorView: View {
     let project: Project
     @State private var viewModel: NativeEditorViewModel
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     
     @State private var activeSheet: ActiveSheet?
@@ -103,6 +104,9 @@ struct NativeEditorView: View {
             .frame(width: 320)
         }
         .onAppear {
+            // 设置 modelContext
+            viewModel.setModelContext(modelContext)
+            
             viewModel.loadCanvasDocument()
             
             // 修复：绑定状态同步，确保NativeCanvasView的选中状态同步到CanvasStateManager

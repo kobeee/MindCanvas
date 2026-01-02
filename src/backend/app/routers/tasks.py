@@ -17,6 +17,7 @@ API 接口：
 """
 
 from typing import Annotated, Optional
+import base64
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -36,7 +37,7 @@ from app.services.task_service import (
     TaskNotFoundError,
     TaskServiceError
 )
-from app.services.encryption import EncryptionService
+from app.services.rsa_encryption_service import RSAEncryptionService
 from app.services.google_api import GoogleAPIClient
 from app.storage.image_storage import ImageStorage
 from app.services.auth_service import AuthService, InvalidTokenError, UserNotFoundError
@@ -65,13 +66,15 @@ async def get_task_service(
         TaskService 实例
     """
     # 初始化依赖服务
-    encryption_service = EncryptionService(secret_key=settings.ENCRYPTION_SECRET_KEY)
+    # 从配置获取 RSA 私钥
+    private_key_pem = base64.b64decode(settings.RSA_PRIVATE_KEY_BASE64)
+    rsa_service = RSAEncryptionService(private_key_pem=private_key_pem)
     google_client = GoogleAPIClient()
     storage = ImageStorage()
 
     return TaskService(
         db=db,
-        encryption_service=encryption_service,
+        encryption_service=rsa_service,
         google_client=google_client,
         storage=storage
     )
