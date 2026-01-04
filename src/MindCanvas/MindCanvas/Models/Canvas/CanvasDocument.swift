@@ -15,8 +15,11 @@ struct CanvasDocument: Codable, Identifiable {
     /// 箭头图层数组 (按 zIndex 排序)
     var arrows: [ArrowLayerNode]
     
-    /// 矩形图层数组 (按 zIndex 排序)
+    /// 矩形图层数组 (按 zIndex 排序) - 旧版本兼容
     var rectangles: [RectangleLayerNode]
+    
+    /// 形状图层数组 (按 zIndex 排序) - 新形状系统
+    var shapes: [ShapeLayerNode]
     
     /// 文字图层数组 (按 zIndex 排序)
     var texts: [TextLayerNode]
@@ -47,6 +50,7 @@ struct CanvasDocument: Codable, Identifiable {
         layers: [LayerNode] = [],
         arrows: [ArrowLayerNode] = [],
         rectangles: [RectangleLayerNode] = [],
+        shapes: [ShapeLayerNode] = [],
         texts: [TextLayerNode] = [],
         annotations: [AnnotationLayerNode] = [],
         drawingData: Data? = nil,
@@ -60,6 +64,7 @@ struct CanvasDocument: Codable, Identifiable {
         self.layers = layers
         self.arrows = arrows
         self.rectangles = rectangles
+        self.shapes = shapes
         self.texts = texts
         self.annotations = annotations
         self.drawingData = drawingData
@@ -288,6 +293,7 @@ struct CanvasDocument: Codable, Identifiable {
         layers.removeAll()
         arrows.removeAll()
         rectangles.removeAll()
+        shapes.removeAll()
         texts.removeAll()
         annotations.removeAll()
         drawingData = nil
@@ -322,7 +328,7 @@ struct CanvasDocument: Codable, Identifiable {
     
     /// 是否为空画布
     var isEmpty: Bool {
-        layers.isEmpty && arrows.isEmpty && rectangles.isEmpty && texts.isEmpty && annotations.isEmpty && drawingData == nil
+        layers.isEmpty && arrows.isEmpty && rectangles.isEmpty && shapes.isEmpty && texts.isEmpty && annotations.isEmpty && drawingData == nil
     }
     
     // MARK: - 数据验证和完整性检查
@@ -435,6 +441,7 @@ struct CanvasDocument: Codable, Identifiable {
             layerCount: layers.count,
             arrowCount: arrows.count,
             rectangleCount: rectangles.count,
+            shapeCount: shapes.count,
             textCount: texts.count,
             annotationCount: annotations.count,
             hasDrawingData: drawingData != nil,
@@ -449,6 +456,7 @@ struct CanvasDocument: Codable, Identifiable {
         size += layers.count * 256 // 估算每个图层256字节
         size += arrows.count * 128 // 估算每个箭头128字节
         size += rectangles.count * 128
+        size += shapes.count * 128
         size += texts.count * 512 // 文字数据较大
         size += annotations.count * 256
         size += drawingData?.count ?? 0
@@ -471,6 +479,10 @@ struct CanvasDocument: Codable, Identifiable {
             !previous.rectangles.contains { $0.id == rectangle.id && $0 == rectangle }
         }
         
+        let changedShapes = shapes.filter { shape in
+            !previous.shapes.contains { $0.id == shape.id && $0 == shape }
+        }
+        
         let changedTexts = texts.filter { text in
             !previous.texts.contains { $0.id == text.id && $0 == text }
         }
@@ -485,6 +497,7 @@ struct CanvasDocument: Codable, Identifiable {
             changedLayers: changedLayers,
             changedArrows: changedArrows,
             changedRectangles: changedRectangles,
+            changedShapes: changedShapes,
             changedTexts: changedTexts,
             changedAnnotations: changedAnnotations,
             drawingChanged: drawingChanged,
@@ -531,6 +544,7 @@ struct DocumentStatistics {
     let layerCount: Int
     let arrowCount: Int
     let rectangleCount: Int
+    let shapeCount: Int
     let textCount: Int
     let annotationCount: Int
     let hasDrawingData: Bool
@@ -547,6 +561,7 @@ struct DocumentSnapshot: Codable {
     let changedLayers: [LayerNode]
     let changedArrows: [ArrowLayerNode]
     let changedRectangles: [RectangleLayerNode]
+    let changedShapes: [ShapeLayerNode]
     let changedTexts: [TextLayerNode]
     let changedAnnotations: [AnnotationLayerNode]
     let drawingChanged: Bool

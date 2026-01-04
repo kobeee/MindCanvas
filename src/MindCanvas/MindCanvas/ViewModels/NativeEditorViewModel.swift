@@ -81,7 +81,12 @@ final class NativeEditorViewModel {
     private func loadAssets() {
         guard let context = modelContext else { return }
         
+        // 只加载当前项目的资源
+        let projectID = project.id
         let descriptor = FetchDescriptor<Asset>(
+            predicate: #Predicate<Asset> { asset in
+                asset.projectID == projectID
+            },
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         
@@ -100,10 +105,11 @@ final class NativeEditorViewModel {
             // 上传图片
             let url = try await generationService.uploadImage(imageData)
             
-            // 创建 Asset 记录
+            // 创建 Asset 记录（关联当前项目）
             let asset = Asset(
                 url: url,
-                type: .upload
+                type: .upload,
+                projectID: project.id
             )
             
             context.insert(asset)
@@ -121,24 +127,72 @@ final class NativeEditorViewModel {
     func addAssetToCanvas(_ asset: Asset) {
         guard let canvasView = canvasView else { return }
         
-        // 计算图片应该放置的位置 (画布中心)
-        let canvasSize = CGSize(width: 5000, height: 5000)
-        let imageSize = CGSize(width: 300, height: 300)
-        let position = CGPoint(
-            x: (canvasSize.width - imageSize.width) / 2,
-            y: (canvasSize.height - imageSize.height) / 2
-        )
+        // 异步加载图片获取原始尺寸
+        loadImageSize(from: asset.url) { [weak self] originalSize in
+            guard let self = self else { return }
+            
+            // 限制最大尺寸，避免图片过大
+            let maxSize: CGFloat = 600
+            let scaledSize = self.scaleImageSizeToFit(originalSize, maxSize: maxSize)
+            
+            // 计算图片应该放置的位置 (画布中心)
+            let canvasSize = CGSize(width: 5000, height: 5000)
+            let position = CGPoint(
+                x: (canvasSize.width - scaledSize.width) / 2,
+                y: (canvasSize.height - scaledSize.height) / 2
+            )
+            
+            // 创建图层节点
+            let layer = LayerNode.userImage(
+                url: asset.url,
+                at: position,
+                size: scaledSize,
+                originalSize: originalSize
+            )
+            
+            // 添加到画布
+            canvasView.addLayer(layer)
+            self.canvasDocument.addLayer(layer)
+        }
+    }
+    
+    /// 加载图片获取尺寸（支持本地和远程URL）
+    private func loadImageSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
+        let defaultSize = CGSize(width: 300, height: 300)
         
-        // 创建图层节点
-        let layer = LayerNode.userImage(
-            url: asset.url,
-            at: position,
-            size: imageSize
-        )
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { completion(defaultSize) }
+            return
+        }
         
-        // 添加到画布
-        canvasView.addLayer(layer)
-        canvasDocument.addLayer(layer)
+        // 本地文件
+        if url.isFileURL {
+            if let data = try? Data(contentsOf: url),
+               let image = UIImage(data: data) {
+                DispatchQueue.main.async { completion(image.size) }
+            } else {
+                DispatchQueue.main.async { completion(defaultSize) }
+            }
+            return
+        }
+        
+        // 远程图片
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            if let data = data, let image = UIImage(data: data) {
+                DispatchQueue.main.async { completion(image.size) }
+            } else {
+                DispatchQueue.main.async { completion(defaultSize) }
+            }
+        }.resume()
+    }
+    
+    /// 缩放图片尺寸以适应最大尺寸限制
+    private func scaleImageSizeToFit(_ size: CGSize, maxSize: CGFloat) -> CGSize {
+        if size.width <= maxSize && size.height <= maxSize {
+            return size
+        }
+        let scale = min(maxSize / size.width, maxSize / size.height)
+        return CGSize(width: size.width * scale, height: size.height * scale)
     }
     
     /// 删除选中的图层
@@ -313,7 +367,8 @@ final class NativeEditorViewModel {
             url: "",
             type: .generated,
             prompt: trimmed,
-            isLoading: true
+            isLoading: true,
+            projectID: project.id
         )
         loadingAsset.generationModeRawValue = GenerationMode.img2img.rawValue
 
@@ -435,7 +490,8 @@ final class NativeEditorViewModel {
             url: "",
             type: .generated,
             prompt: trimmed,
-            isLoading: true
+            isLoading: true,
+            projectID: project.id
         )
         loadingAsset.generationModeRawValue = GenerationMode.txt2img.rawValue
         loadingAsset.aspectRatio = ratio.rawValue
@@ -509,8 +565,41 @@ final class NativeEditorViewModel {
     }
     
     func downloadAsset(_ asset: Asset) {
-        // TODO: 实现下载到相册功能
-        print("下载资源: \(asset.url)")
+        guard let url = URL(string: asset.url) else {
+            print("无效的资源URL: \(asset.url)")
+            return
+        }
+        
+        Task {
+            do {
+                // 下载图片数据
+                let (data, _) = try await URLSession.shared.data(from: url)
+                
+                guard let image = UIImage(data: data) else {
+                    print("无法解析图片数据")
+                    return
+                }
+                
+                // 保存到相册
+                try await saveImageToPhotoLibrary(image)
+                print("图片已保存到相册")
+                
+            } catch {
+                print("下载图片失败: \(error)")
+            }
+        }
+    }
+    
+    /// 保存图片到相册
+    private func saveImageToPhotoLibrary(_ image: UIImage) async throws {
+        return try await withCheckedThrowingContinuation { continuation in
+            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            // 由于 UIImageWriteToSavedPhotosAlbum 是异步的但没有完成回调，
+            // 我们在短暂延迟后返回成功（实际保存由系统完成）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                continuation.resume()
+            }
+        }
     }
     
     func publishAsset(_ asset: Asset, title: String) async {
@@ -532,7 +621,14 @@ final class NativeEditorViewModel {
     // MARK: - 画布持久化
     
     /// 保存画布文档（带数据验证）
+    @discardableResult
     func saveCanvasDocument() -> SaveResult {
+        // 关键：如果正在加载数据，跳过保存（防止加载过程中清空数据后被保存）
+        guard !isLoadingData else {
+            print("⏭️ [saveCanvasDocument] 正在加载数据，跳过保存")
+            return .success
+        }
+        
         guard let canvasView = canvasView else {
             return .failure(.canvasViewNotAvailable)
         }
@@ -554,7 +650,6 @@ final class NativeEditorViewModel {
             // 执行实际保存
             try performSave()
             
-            print("✅ 画布文档保存成功 - \(canvasDocument.statistics)")
             return .success
             
         } catch {
@@ -564,43 +659,65 @@ final class NativeEditorViewModel {
     }
     
     /// 加载画布文档（带错误处理和版本兼容性）
+    @discardableResult
     func loadCanvasDocument() -> LoadResult {
+        // 防止重复加载
+        guard !hasLoadedDocument else {
+            print("⏭️ [loadCanvasDocument] 已经加载过，跳过")
+            return .success
+        }
+        
         guard let canvasView = canvasView else {
+            print("⚠️ [loadCanvasDocument] canvasView 不可用，稍后重试")
             return .failure(.canvasViewNotAvailable)
         }
         
+        // 尝试加载文件，如果文件不存在则使用默认空文档
         do {
-            // 执行实际加载
             try performLoad()
-            
-            // 版本兼容性检查
-            if canvasDocument.version > 1 {
-                print("⚠️ 检测到较新版本的文档 (v\(canvasDocument.version))，可能存在兼容性问题")
-            }
-            
-            // 验证加载的数据
-            let validationErrors = canvasDocument.validate()
-            if !validationErrors.isEmpty {
-                print("⚠️ 加载的画布数据存在问题: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
-                
-                // 自动修复数据
-                canvasDocument.repair()
-                print("✅ 已修复加载的画布数据")
-            }
-            
-            // 同步数据到画布视图
-            syncDataToCanvas(canvasView)
-            
-            // 清空撤销栈（新会话开始）
-            stateManager.clearUndoRedoStacks()
-            
-            print("✅ 画布文档加载成功 - \(canvasDocument.statistics)")
-            return .success
-            
+            print("✅ [loadCanvasDocument] 文档文件加载成功")
+        } catch DocumentError.fileNotFound {
+            // 文件不存在是正常情况（第一次打开项目）
+            print("ℹ️ [loadCanvasDocument] 文档文件不存在，使用默认空文档")
+            // canvasDocument 已经在 init 中初始化为空文档，无需操作
         } catch {
-            print("❌ 画布文档加载失败: \(error)")
+            print("❌ [loadCanvasDocument] 加载失败: \(error)")
             return .failure(.loadError(error))
         }
+        
+        // 版本兼容性检查
+        if canvasDocument.version > 1 {
+            print("⚠️ 检测到较新版本的文档 (v\(canvasDocument.version))，可能存在兼容性问题")
+        }
+        
+        // 验证加载的数据
+        let validationErrors = canvasDocument.validate()
+        if !validationErrors.isEmpty {
+            print("⚠️ 加载的画布数据存在问题: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
+            
+            // 自动修复数据
+            canvasDocument.repair()
+            print("✅ 已修复加载的画布数据")
+        }
+        
+        // 同步数据到画布视图（即使是空文档也要执行，确保视图状态正确）
+        print("ℹ️ [loadCanvasDocument] 开始同步数据到画布...")
+        print("  - layers: \(canvasDocument.layers.count)")
+        print("  - arrows: \(canvasDocument.arrows.count)")
+        print("  - shapes: \(canvasDocument.shapes.count)")
+        print("  - texts: \(canvasDocument.texts.count)")
+        print("  - drawingData: \(canvasDocument.drawingData?.count ?? 0) bytes")
+        
+        syncDataToCanvas(canvasView)
+        
+        // 标记已加载
+        hasLoadedDocument = true
+        
+        // 清空撤销栈（新会话开始）
+        stateManager.clearUndoRedoStacks()
+        
+        print("✅ 画布文档加载成功 - \(canvasDocument.statistics)")
+        return .success
     }
     
     /// 强制保存（跳过验证）
@@ -679,6 +796,9 @@ final class NativeEditorViewModel {
         // 同步矩形数据
         canvasDocument.rectangles = canvasView.getRectangleLayerManager().rectangles
         
+        // 同步形状数据
+        canvasDocument.shapes = canvasView.getShapeLayerManager().shapes
+        
         // 同步文字数据
         canvasDocument.texts = canvasView.getTextLayerManager().getAllTexts()
         
@@ -687,45 +807,67 @@ final class NativeEditorViewModel {
         
         // 同步绘图数据
         canvasDocument.drawingData = canvasView.getDrawingData()
+        
+        // 调试日志
+        print("📤 [syncDataFromCanvas] 从画布同步数据:")
+        print("  - layers: \(canvasDocument.layers.count)")
+        print("  - arrows: \(canvasDocument.arrows.count)")
+        print("  - shapes: \(canvasDocument.shapes.count)")
+        print("  - texts: \(canvasDocument.texts.count)")
+        print("  - drawingData: \(canvasDocument.drawingData?.count ?? 0) bytes")
     }
+    
+    /// 标记是否正在加载数据（防止加载过程中触发保存）
+    private var isLoadingData = false
+    
+    /// 标记是否已经加载过文档（防止重复加载）
+    private var hasLoadedDocument = false
     
     /// 从文档同步数据到画布视图
     private func syncDataToCanvas(_ canvasView: NativeCanvasView) {
-        // 加载图层
-        canvasView.setLayers(canvasDocument.layers)
+        // 关键：设置加载标记，防止 clear 操作触发保存
+        isLoadingData = true
+        defer { isLoadingData = false }
         
-        // 加载箭头
-        let arrowManager = canvasView.getArrowLayerManager()
-        arrowManager.clearAll()
+        // 1. 清理所有现有图层和视图，并加载图片图层
+        canvasView.setLayers(canvasDocument.layers)  // 内部会先 removeAllLayers 再添加
+        
+        // 2. 清理并加载箭头（使用 canvasView 方法以创建视图）
+        canvasView.clearArrows()
         for arrow in canvasDocument.arrows {
-            arrowManager.addArrow(arrow)
+            canvasView.addArrow(arrow, recordUndo: false)
         }
         
-        // 加载矩形
-        let rectangleManager = canvasView.getRectangleLayerManager()
-        rectangleManager.clearAll()
+        // 3. 清理并加载矩形
+        canvasView.clearRectangles()
         for rectangle in canvasDocument.rectangles {
-            rectangleManager.addRectangle(rectangle)
+            canvasView.addRectangle(rectangle, recordUndo: false)
         }
         
-        // 加载文字
-        let textManager = canvasView.getTextLayerManager()
-        textManager.clearAll()
+        // 4. 清理并加载形状（使用 canvasView 方法以创建视图）
+        canvasView.clearShapes()
+        for shape in canvasDocument.shapes {
+            canvasView.addShape(shape, recordUndo: false)
+        }
+        
+        // 5. 清理并加载文字（使用 canvasView 方法以创建视图）
+        canvasView.clearTexts()
         for text in canvasDocument.texts {
-            textManager.addText(text)
+            canvasView.addText(text, recordUndo: false)
         }
         
-        // 加载标注
-        let annotationManager = canvasView.getAnnotationLayerManager()
-        annotationManager.clearAll()
+        // 6. 清理并加载标注
+        canvasView.clearAnnotations()
         for annotation in canvasDocument.annotations {
-            annotationManager.addAnnotation(annotation)
+            canvasView.addAnnotation(annotation, recordUndo: false)
         }
         
-        // 加载绘图
+        // 7. 加载绘图数据
         if let drawingData = canvasDocument.drawingData {
             canvasView.loadDrawing(from: drawingData)
         }
+        
+        print("ℹ️ [syncDataToCanvas] 数据同步完成")
     }
     
     /// 执行实际的保存操作

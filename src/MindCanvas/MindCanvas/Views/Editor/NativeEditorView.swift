@@ -107,9 +107,8 @@ struct NativeEditorView: View {
             // 设置 modelContext
             viewModel.setModelContext(modelContext)
             
-            viewModel.loadCanvasDocument()
-            
             // 修复：绑定状态同步，确保NativeCanvasView的选中状态同步到CanvasStateManager
+            // 注意：canvasView 可能在 onAppear 时还没准备好，加载文档移到 onViewCreated 中
             if let canvasView = viewModel.canvasView {
                 canvasView.onSelectionIdChanged = { [weak viewModel] selectedID in
                     viewModel?.stateManager.selectedNodeID = selectedID
@@ -120,6 +119,9 @@ struct NativeEditorView: View {
                     pendingCanvasImageLocation = location
                     showImageSourcePicker = true
                 }
+                
+                // canvasView 已准备好，加载文档
+                viewModel.loadCanvasDocument()
             }
             
             // 绑定清屏回调（支持撤销）
@@ -507,6 +509,12 @@ private struct NativeCanvasContainer: View {
                         view.onArrowCreated = { arrow in
                             // 这里可以添加箭头创建后的处理逻辑
                         }
+                        // 绑定图片选择器请求回调
+                        view.onShowImagePickerRequested = { location in
+                            // 这里通过 onImageImport 触发
+                        }
+                        // canvasView 准备好后，加载文档
+                        viewModel.loadCanvasDocument()
                     },
                     onZoomChanged: { scale in
                         viewModel.stateManager.zoomScale = scale
@@ -1178,19 +1186,21 @@ private struct NativeAssetCardView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                     
-                    if asset.type == .generated {
-                        Button {
-                            onDownload()
-                        } label: {
-                            Image(systemName: "arrow.down.circle")
-                        }
-                        
-                        Button {
-                            onPublish()
-                        } label: {
-                            Image(systemName: "globe")
-                        }
+                    // 下载按钮（对所有类型资源都显示）
+                    Button {
+                        onDownload()
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
                     }
+                    
+                    // 发布按钮暂时隐藏（功能待上线）
+                    // if asset.type == .generated {
+                    //     Button {
+                    //         onPublish()
+                    //     } label: {
+                    //         Image(systemName: "globe")
+                    //     }
+                    // }
                     
                     Button(role: .destructive) {
                         onDelete()

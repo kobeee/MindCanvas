@@ -5,33 +5,63 @@ struct FeedView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Theme.Spacing.lg) {
-                    ForEach(viewModel.items) { item in
-                        FeedCard(item: item) {
-                            Task {
-                                await viewModel.toggleLike(item)
-                            }
-                        } onRemix: {
-                            viewModel.remixItem(item)
+            comingSoonView
+                .background(Theme.Colors.appBackground)
+                .navigationTitle("MindStream")
+        }
+    }
+    
+    private var comingSoonView: some View {
+        VStack(spacing: Theme.Spacing.xxl) {
+            Spacer()
+            
+            Image(systemName: "sparkles")
+                .font(.system(size: 60, weight: .light))
+                .foregroundStyle(Theme.Colors.brandBlue.opacity(0.6))
+            
+            VStack(spacing: Theme.Spacing.md) {
+                Text("敬请期待")
+                    .font(Theme.Fonts.largeTitle)
+                    .foregroundStyle(Theme.Colors.primaryText)
+                
+                Text("精彩内容即将上线")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    // MARK: - 原有实现（暂时隐藏）
+    
+    @ViewBuilder
+    private var originalFeedContent: some View {
+        ScrollView {
+            LazyVStack(spacing: Theme.Spacing.lg) {
+                ForEach(viewModel.items) { item in
+                    FeedCard(item: item) {
+                        Task {
+                            await viewModel.toggleLike(item)
                         }
-                    }
-                    
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .padding()
+                    } onRemix: {
+                        viewModel.remixItem(item)
                     }
                 }
-                .padding(Theme.Spacing.lg)
+                
+                if viewModel.isLoading {
+                    ProgressView()
+                        .padding()
+                }
             }
-            .background(Theme.Colors.appBackground)
-            .navigationTitle("MindStream")
-            .task {
-                await viewModel.loadFeed()
-            }
-            .refreshable {
-                await viewModel.refresh()
-            }
+            .padding(Theme.Spacing.lg)
+        }
+        .task {
+            await viewModel.loadFeed()
+        }
+        .refreshable {
+            await viewModel.refresh()
         }
     }
 }

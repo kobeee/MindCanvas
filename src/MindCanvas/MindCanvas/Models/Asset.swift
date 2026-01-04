@@ -18,7 +18,10 @@ final class Asset {
     var createdAt: Date
     var isLoading: Bool
     
-    init(id: UUID = UUID(), url: String, thumbnailUrl: String? = nil, type: AssetType, prompt: String? = nil, isLoading: Bool = false) {
+    /// 关联的项目ID（每个创作独立管理资源）
+    var projectID: UUID?
+    
+    init(id: UUID = UUID(), url: String, thumbnailUrl: String? = nil, type: AssetType, prompt: String? = nil, isLoading: Bool = false, projectID: UUID? = nil) {
         self.id = id
         self.url = url
         self.thumbnailUrl = thumbnailUrl ?? url
@@ -28,6 +31,7 @@ final class Asset {
         self.aspectRatio = nil
         self.createdAt = Date()
         self.isLoading = isLoading
+        self.projectID = projectID
     }
 }
 

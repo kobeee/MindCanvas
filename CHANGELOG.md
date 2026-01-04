@@ -1,5 +1,552 @@
 # 开发记录
 
+## 2026-01-05 - 资源栏隔离与画布持久化修复（完成）✅
+
+### 问题描述
+
+用户反馈两个问题：
+1. **资源栏图片全局共享**：不同创作之间的资源栏图片互通，应该是每个创作独立管理
+2. **画布持久化失效**：画笔、图形、文字等操作无法保存，只有图片能保存
+
+### 根因分析
+
+#### 问题1：资源栏图片全局共享
+
+**根本原因**：`Asset` 模型没有 `projectID` 字段，`loadAssets()` 方法加载时没有过滤条件，导致加载了所有项目的资源。
+
+#### 问题2：画布持久化失效（深度分析 - 三层根因）
+
+**根因1 - TextLayerManager 异步操作**（初步修复）：
+`TextLayerManager.addText()` 和 `clearAll()` 使用了异步方式，导致数据还没更新就返回了。
+
+**根因2 - loadCanvasDocument 文件不存在处理**（初步修复）：
+文件不存在时直接抛出错误，跳过了 `syncDataToCanvas`。
+
+**根因3 - clear 方法触发保存导致数据覆盖**（真正的核心问题）：
+
+通过日志发现关键线索：
+```
+shapes: 1, texts: 1, drawingData: 1238 bytes  // 文件正确加载
+DocumentStatistics: shapeCount: 0, textCount: 0  // 但统计显示为0
+shapes: 0, texts: 0, drawingData: 42 bytes  // 下次加载数据被覆盖成空！
+```
+
+**恶性循环**：
+1. `syncDataToCanvas` 调用 `clearArrows()` / `clearShapes()` / `clearTexts()`
+2. 这些 clear 方法内部调用 `onCanvasUpdated?()`
+3. → 触发 `viewModel.saveCanvasDocument()`
+4. → `syncDataFromCanvas` 读取此时已清空但还没加载新数据的 canvasView
+5. → **空数据被保存到文件**
+6. → 下次加载就是空数据
+
+### 修复方案
+
+#### 修复1：Asset 关联 Project
+
+1. `Asset` 模型添加 `projectID` 字段
+2. `loadAssets()` 添加过滤条件，只加载当前项目的资源
+3. 创建 Asset 时设置 `projectID`
+
+#### 修复2：TextLayerManager 同步操作
+
+移除所有异步操作，改为同步执行。
+
+#### 修复3：loadCanvasDocument 容错处理
+
+文件不存在时使用默认空文档，确保 `syncDataToCanvas` 始终执行。
+
+#### 修复4：防止加载过程中的错误保存（核心修复）
+
+```swift
+// NativeEditorViewModel.swift
+
+/// 标记是否正在加载数据（防止加载过程中触发保存）
+private var isLoadingData = false
+
+/// 标记是否已经加载过文档（防止重复加载）
+private var hasLoadedDocument = false
+
+private func syncDataToCanvas(_ canvasView: NativeCanvasView) {
+    isLoadingData = true  // 设置标记，阻止保存
+    defer { isLoadingData = false }
+    
+    // 清理和加载数据（clear 方法会触发 onCanvasUpdated）
+    canvasView.clearArrows()
+    for arrow in canvasDocument.arrows {
+        canvasView.addArrow(arrow, recordUndo: false)
+    }
+    // ... 其他数据加载
+}
+
+func saveCanvasDocument() -> SaveResult {
+    // 关键：如果正在加载数据，跳过保存
+    guard !isLoadingData else {
+        print("⏭️ [saveCanvasDocument] 正在加载数据，跳过保存")
+        return .success
+    }
+    // ... 正常保存逻辑
+}
+
+func loadCanvasDocument() -> LoadResult {
+    // 防止重复加载
+    guard !hasLoadedDocument else { return .success }
+    // ... 加载逻辑
+    hasLoadedDocument = true
+}
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|:---|:---|
+| `Asset.swift` | 添加 `projectID` 字段 |
+| `TextLayerNode.swift` | `TextLayerManager` 改为同步操作 |
+| `NativeEditorViewModel.swift` | 1. `loadAssets()` 添加项目过滤<br>2. 创建 Asset 时设置 projectID<br>3. `loadCanvasDocument()` 文件不存在容错<br>4. 添加 `isLoadingData` 标记防止加载时保存<br>5. 添加 `hasLoadedDocument` 标记防止重复加载<br>6. 添加调试日志 |
+| `NativeEditorView.swift` | `onAppear` 中的 `loadCanvasDocument()` 调用优化 |
+
+### 经验总结
+
+1. **回调链问题**：clear 方法触发 onCanvasUpdated → 触发保存 → 保存空数据，这种隐蔽的回调链很难发现
+2. **状态标记模式**：使用 `isLoadingData` 这样的状态标记来协调异步操作是常见的解决方案
+3. **日志是关键**：通过对比日志中的数据变化，才发现了数据被覆盖的真正原因
+4. **第一性原理**：从日志中观察到的现象出发，逆向推导出问题的根源
+
+---
+
+## 2026-01-05 - 图片自由缩放与添加比例优化（完成）✅
+
+```swift
+// 修改后：文件不存在是正常情况，继续执行
+do {
+    try performLoad()
+} catch DocumentError.fileNotFound {
+    // 文件不存在是正常情况，使用默认空文档
+}
+
+// 无论文件是否存在，都执行同步
+syncDataToCanvas(canvasView)
+```
+
+#### 修复4：确保 canvasView 准备好后再加载
+
+在 `NativeCanvasViewWrapper.onViewCreated` 回调中调用 `loadCanvasDocument`，确保 `canvasView` 已准备好：
+
+```swift
+onViewCreated: { view in
+    viewModel.canvasView = view
+    // canvasView 准备好后，加载文档
+    viewModel.loadCanvasDocument()
+}
+```
+
+### 修改文件汇总
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|------|
+| `Asset.swift` | 功能增强 | 添加 projectID 字段关联项目 |
+| `NativeEditorViewModel.swift` | Bug修复 | loadAssets 过滤当前项目、创建 Asset 时设置 projectID、loadCanvasDocument 容错处理 |
+| `TextLayerNode.swift` | 重构 | TextLayerManager 异步操作改为同步 |
+| `NativeEditorView.swift` | Bug修复 | 确保 canvasView 准备好后再加载文档 |
+
+### 技术要点
+
+1. **数据隔离**：通过 `projectID` 实现资源与项目的关联，每个创作拥有独立的资源库
+2. **同步操作**：Manager 类的 CRUD 操作应该是同步的，避免异步导致的数据不一致
+3. **容错处理**：文件不存在是正常情况，不应该导致整个加载流程中断
+4. **生命周期管理**：确保视图准备好后再进行数据加载
+
+---
+
+## 2026-01-05 - 图片自由缩放与添加比例优化（完成）✅
+
+### 问题描述
+1. 实现自由缩放功能后，用户反馈："缩着缩着图片只剩下局部了"
+2. 从资源库添加的图片使用固定 300x300 尺寸，不保持原始比例
+
+### 根因分析
+
+#### 问题1：缩放后图片只剩局部
+在 `SelectableImageView.swift` 中，`imageView` 的 `contentMode` 设置为 `.scaleAspectFill`：
+
+```swift
+view.contentMode = .scaleAspectFill  // 问题所在
+```
+
+**`.scaleAspectFill`** 的行为是：保持图片原始宽高比，填满视图区域，**超出部分被裁剪**。当用户进行自由缩放（宽高独立变化）时，视图宽高比改变，但图片仍按原始比例填充，导致大量内容被裁剪。
+
+#### 问题2：资源库图片固定尺寸
+`handleImageSelected()` 方法直接使用 300x300 固定尺寸，没有获取图片原始尺寸。
+
+### 修复方案
+
+#### 修复1：contentMode 改为 scaleToFill
+```swift
+// 修改后：图片会拉伸填满整个视图，与自由缩放逻辑一致
+view.contentMode = .scaleToFill
+```
+
+#### 修复2：资源库图片保持原始比例
+修改 `NativeEditorViewModel.addAssetToCanvas()` 方法（这才是资源栏点击添加时调用的方法）：
+1. 异步加载图片获取原始尺寸
+2. 按比例缩放到最大 600px（与相册导入一致）
+3. 记录 `originalSize` 到 LayerNode
+
+新增辅助方法：
+- `loadImageSize()` - 支持本地和远程 URL 的图片尺寸获取
+- `scaleImageSizeToFit()` - 按比例缩放到最大尺寸
+
+同时也修改了 `NativeCanvasView.handleImageSelected()` 方法保持一致性。
+
+### 修改文件汇总
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|------|
+| `SelectableImageView.swift` | Bug修复 | contentMode 从 scaleAspectFill 改为 scaleToFill |
+| `NativeEditorViewModel.swift` | 功能优化 | addAssetToCanvas 改为异步加载图片并保持原始比例 |
+| `NativeCanvasView.swift` | 功能优化 | handleImageSelected 改为异步加载图片并保持原始比例 |
+
+---
+
+## 2026-01-05 - 图片选中尺寸突变与自由缩放修复（完成）✅
+
+### 问题描述
+1. **图片选中时尺寸突变**：从资源库添加图片到画布后，切换到选择工具并选中图片时，图片立即跳变到不同的尺寸
+2. **图片只能等比缩放**：用户希望能自由改变图片的长宽比例，而非强制等比缩放
+
+### 根因分析
+
+#### 问题1：图片尺寸突变
+**根本原因**：`SelectableImageView.loadImage()` 中，图片异步加载完成后会调用 `updateViewSizeForImage()`，该方法会根据图片原始尺寸重新计算并更新视图尺寸。
+
+**流程分析**：
+1. 从资源库添加图片时，`handleImageSelected()` 创建 300x300 的初始 frame
+2. 创建 `SelectableImageView` 时，`loadImage()` 被调用
+3. 图片异步加载完成后，`updateViewSizeForImage()` 根据原始尺寸（最大600）重新计算
+4. 用户选中图片时，视图已被更新为新尺寸，造成"突变"的视觉效果
+
+**修复方案**：
+- 添加 `hasCompletedInitialLoad` 标记，防止重复调整尺寸
+- 图片加载完成后只更新 `originalSize`，不再自动调整 frame
+- 保持创建时设置的尺寸不变
+
+#### 问题2：等比缩放限制
+**根本原因**：`handleResizeWithOriginalSize()` 方法中使用了 `avgScaleFactor`（平均缩放因子），强制保持宽高比。
+
+```swift
+// 原代码：使用平均缩放因子保持宽高比
+let avgScaleFactor = (scaleFactorX + scaleFactorY) / 2
+let newScale = currentScale + avgScaleFactor
+let newWidth = originalSize.width * clampedScale
+let newHeight = originalSize.height * clampedScale  // 宽高使用相同缩放比例
+```
+
+**修复方案**：
+- 移除等比缩放逻辑，改用自由缩放方法 `handleResizeFreeform()`
+- 宽度和高度独立计算增量，允许任意改变长宽比
+
+### 修改文件
+
+**`src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableImageView.swift`**
+
+#### 1. 图片加载逻辑重构
+
+```swift
+// 修改前：图片加载后自动调整尺寸
+private func loadImage() {
+    // ...
+    self?.imageView.image = image
+    self?.updateViewSizeForImage(image)  // 会改变 frame
+}
+
+private func updateViewSizeForImage(_ image: UIImage) {
+    let scaledSize = scaleSizeToFit(imageSize, maxSize: maxSize)
+    let newFrame = CGRect(...)  // 重新计算 frame
+    layerNode = layerNode.updated(frame: newFrame)  // 更新 frame
+}
+
+// 修改后：只更新 originalSize，不改变 frame
+private var hasCompletedInitialLoad = false
+
+private func loadImage() {
+    // ...
+    self?.imageView.image = image
+    self?.handleImageLoaded(image)
+}
+
+private func handleImageLoaded(_ image: UIImage) {
+    guard !hasCompletedInitialLoad else { return }
+    hasCompletedInitialLoad = true
+    
+    if layerNode.originalSize == nil {
+        // 只更新 originalSize，保持 frame 不变
+        let updatedNode = LayerNode(
+            // ... 保持原有 frame
+            originalSize: image.size  // 设置原始尺寸
+        )
+        layerNode = updatedNode
+        onNodeUpdated?(layerNode)
+    }
+}
+```
+
+#### 2. 缩放逻辑重构
+
+```swift
+// 修改前：强制等比缩放
+private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
+    if let originalSize = layerNode.originalSize {
+        handleResizeWithOriginalSize(...)  // 等比缩放
+    } else {
+        handleResizeIncremental(...)
+    }
+}
+
+private func handleResizeWithOriginalSize(...) {
+    let avgScaleFactor = (scaleFactorX + scaleFactorY) / 2  // 平均缩放因子
+    let newWidth = originalSize.width * clampedScale   // 等比
+    let newHeight = originalSize.height * clampedScale // 等比
+}
+
+// 修改后：统一使用自由缩放
+private func handleResizeFixed(handle: ControlHandle, currentPoint: CGPoint) {
+    handleResizeFreeform(handle: handle, currentPoint: currentPoint)
+}
+
+private func handleResizeFreeform(handle: ControlHandle, currentPoint: CGPoint) {
+    // 宽高独立计算
+    var newWidth = initialBounds.width + localDeltaX * widthSign
+    var newHeight = initialBounds.height + localDeltaY * heightSign
+    // ... 允许任意长宽比
+}
+```
+
+#### 3. 删除冗余代码
+- 删除 `updateViewSizeForImage()` 方法
+- 删除 `scaleSizeToFit()` 方法
+- 删除 `handleResizeWithOriginalSize()` 方法
+- 删除 `anchorOffset(for:originalSize:)` 重载方法
+
+### 技术要点
+
+1. **首次加载标记**：使用 `hasCompletedInitialLoad` 确保图片尺寸只在创建时设置一次
+2. **数据与视图分离**：`originalSize` 用于记录原始图片尺寸（供后续需要时使用），`frame` 控制实际显示尺寸
+3. **自由缩放算法**：基于拖拽增量独立计算宽高变化，不再强制等比
+
+### 修改文件汇总
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|------|
+| `SelectableImageView.swift` | Bug修复/重构 | 修复尺寸突变、实现自由缩放 |
+
+---
+
+## 2026-01-04 - 画布持久化与资源栏优化（完成）✅
+
+### 任务概述
+1. MindStream 页面和订阅页面临时隐藏，显示"敬请期待"
+2. 画布持久化问题修复 - 文字、图形、图像等操作无法保存
+3. 资源栏图片问题 - 隐藏发布图标、实现下载功能、修复选中框空白
+
+---
+
+### 1. MindStream 和订阅页面隐藏
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Feed/FeedView.swift`
+- `src/MindCanvas/MindCanvas/Views/Subscription/SubscriptionView.swift`
+
+**修改内容**：
+- 保留原有代码逻辑（注释状态）
+- 将页面内容替换为简洁的"敬请期待"提示界面
+- 使用统一的样式：渐变背景、居中布局、系统图标
+
+---
+
+### 2. 画布持久化问题修复 ⭐核心问题
+
+**问题根源分析**：
+`syncDataToCanvas()` 方法直接调用各个 Manager 的方法（如 `arrowManager.addArrow()`），这些方法只是将数据添加到数组中，**并没有创建对应的 UIView**。正确的做法应该是调用 `canvasView.addArrow()`、`canvasView.addText()` 等方法，这些方法会同时：
+1. 将数据添加到 manager
+2. 创建对应的 UIView
+
+**修改文件**：
+
+#### 2.1 `NativeCanvasView.swift`
+- 修复 `clearArrows()` 方法，添加视图清理逻辑
+
+```swift
+// 修改前
+func clearArrows() {
+    arrowLayerManager.clearAll()
+    onCanvasUpdated?()
+}
+
+// 修改后
+func clearArrows() {
+    arrowLayerManager.clearAll()
+    arrowViews.values.forEach { $0.removeFromSuperview() }
+    arrowViews.removeAll()
+    onCanvasUpdated?()
+}
+```
+
+#### 2.2 `NativeEditorViewModel.swift`
+- 重写 `syncDataToCanvas()` 方法，使用 `canvasView.addXxx()` 方法来加载数据
+- 更新 `syncDataFromCanvas()` 方法，同步 shapes 数据
+
+```swift
+// 核心修改：使用 canvasView 方法创建视图而非直接操作 manager
+private func syncDataToCanvas(_ canvasView: NativeCanvasView) {
+    // 1. 清理并加载图片图层
+    canvasView.setLayers(canvasDocument.layers)
+    
+    // 2. 清理并加载箭头（使用 canvasView 方法以创建视图）
+    canvasView.clearArrows()
+    for arrow in canvasDocument.arrows {
+        canvasView.addArrow(arrow, recordUndo: false)
+    }
+    
+    // 3. 清理并加载矩形
+    canvasView.clearRectangles()
+    for rectangle in canvasDocument.rectangles {
+        canvasView.addRectangle(rectangle, recordUndo: false)
+    }
+    
+    // 4. 清理并加载形状
+    canvasView.clearShapes()
+    for shape in canvasDocument.shapes {
+        canvasView.addShape(shape, recordUndo: false)
+    }
+    
+    // 5. 清理并加载文字
+    canvasView.clearTexts()
+    for text in canvasDocument.texts {
+        canvasView.addText(text, recordUndo: false)
+    }
+    
+    // 6. 清理并加载标注
+    canvasView.clearAnnotations()
+    for annotation in canvasDocument.annotations {
+        canvasView.addAnnotation(annotation, recordUndo: false)
+    }
+    
+    // 7. 恢复绘图数据
+    if let drawingData = canvasDocument.drawingData {
+        canvasView.loadDrawingData(drawingData)
+    }
+}
+```
+
+#### 2.3 `CanvasDocument.swift`
+- 添加 `shapes: [ShapeLayerNode]` 属性支持形状持久化
+- 更新初始化方法、`clear()` 方法、`isEmpty` 计算属性
+- 更新 `DocumentStatistics` 结构体添加 `shapeCount`
+- 更新 `DocumentSnapshot` 结构体添加 `changedShapes`
+- 更新 `generateIncrementalSnapshot()` 方法
+
+---
+
+### 3. 资源栏图片问题修复
+
+**修改文件**：
+
+#### 3.1 `NativeEditorView.swift` - 隐藏发布图标
+- 注释掉发布按钮（功能待上线）
+
+```swift
+// 修改前：显示发布按钮
+if asset.type == .generated {
+    Button { onDownload() } label: { ... }
+    Button { onPublish() } label: { ... }  // 发布按钮
+}
+
+// 修改后：隐藏发布按钮
+if asset.type == .generated {
+    Button { onDownload() } label: { ... }
+    // 发布功能暂时隐藏，待上线
+    // Button { onPublish() } label: { ... }
+}
+```
+
+#### 3.2 `NativeEditorViewModel.swift` - 实现下载功能
+
+```swift
+func downloadAsset(_ asset: Asset) {
+    guard let url = URL(string: asset.url) else {
+        print("无效的资源URL: \(asset.url)")
+        return
+    }
+    
+    Task {
+        do {
+            // 下载图片数据
+            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            guard let image = UIImage(data: data) else {
+                print("无法解析图片数据")
+                return
+            }
+            
+            // 保存到相册
+            try await saveImageToPhotoLibrary(image)
+            print("图片已保存到相册")
+            
+        } catch {
+            print("下载图片失败: \(error)")
+        }
+    }
+}
+
+private func saveImageToPhotoLibrary(_ image: UIImage) async throws {
+    return try await withCheckedThrowingContinuation { continuation in
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        continuation.resume()
+    }
+}
+```
+
+#### 3.3 `SelectableImageView.swift` - 修复选中框空白问题
+
+**问题分析**：
+`imageView.contentMode = .scaleAspectFit` 会导致图片等比缩放适应视图，但视图的 bounds 可能比实际显示的图片大，导致选中框有空白区域。
+
+**修复方案**：
+将 `contentMode` 从 `.scaleAspectFit` 改为 `.scaleAspectFill`，图片会填满整个视图区域。
+
+```swift
+// 修改前
+private let imageView: UIImageView = {
+    let view = UIImageView()
+    view.contentMode = .scaleAspectFit
+    view.clipsToBounds = true
+    return view
+}()
+
+// 修改后
+private let imageView: UIImageView = {
+    let view = UIImageView()
+    view.contentMode = .scaleAspectFill
+    view.clipsToBounds = true
+    return view
+}()
+```
+
+---
+
+### 修改文件汇总
+
+| 文件 | 修改类型 | 说明 |
+|-----|---------|------|
+| `FeedView.swift` | 功能调整 | 显示"敬请期待" |
+| `SubscriptionView.swift` | 功能调整 | 显示"敬请期待" |
+| `NativeCanvasView.swift` | Bug修复 | clearArrows 添加视图清理 |
+| `NativeEditorViewModel.swift` | Bug修复/功能实现 | syncDataToCanvas 重写、下载功能 |
+| `CanvasDocument.swift` | 功能增强 | 添加 shapes 持久化支持 |
+| `NativeEditorView.swift` | UI调整 | 隐藏发布按钮 |
+| `SelectableImageView.swift` | Bug修复 | 修复选中框空白问题 |
+
+---
+
 ## 2026-01-03 - 图片下载问题修复（完成）✅
 
 ### 问题描述

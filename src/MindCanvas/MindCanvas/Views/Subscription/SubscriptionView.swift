@@ -6,18 +6,54 @@ struct SubscriptionView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: Theme.Spacing.xxxl) {
-                    headerSection
-                    featuresSection
-                    planSelector
-                    subscribeButton
-                    faqSection
-                }
-                .padding(Theme.Spacing.xxl)
+            comingSoonView
+                .background(Theme.Colors.appBackground)
+                .navigationTitle("订阅 Pro")
+        }
+    }
+    
+    private var comingSoonView: some View {
+        VStack(spacing: Theme.Spacing.xxl) {
+            Spacer()
+            
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.goldGradient.opacity(0.2))
+                    .frame(width: 120, height: 120)
+                
+                Image(systemName: Theme.Icons.subscriptionFill)
+                    .font(.system(size: 50, weight: .light))
+                    .foregroundStyle(Theme.Colors.goldGradient)
             }
-            .background(Theme.Colors.appBackground)
-            .navigationTitle("订阅 Pro")
+            
+            VStack(spacing: Theme.Spacing.md) {
+                Text("敬请期待")
+                    .font(Theme.Fonts.largeTitle)
+                    .foregroundStyle(Theme.Colors.primaryText)
+                
+                Text("Pro 订阅功能即将上线")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    // MARK: - 原有实现（暂时隐藏）
+    
+    @ViewBuilder
+    private var originalSubscriptionContent: some View {
+        ScrollView {
+            VStack(spacing: Theme.Spacing.xxxl) {
+                headerSection
+                featuresSection
+                planSelector
+                subscribeButton
+                faqSection
+            }
+            .padding(Theme.Spacing.xxl)
         }
     }
     

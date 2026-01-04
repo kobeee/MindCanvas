@@ -835,36 +835,74 @@ class NativeCanvasView: UIView {
     private func handleImageSelected(url: String, at location: CGPoint) {
         // location是objectLayerView坐标系中的位置，直接就是画布内容坐标
         let contentLocation = location
+        
+        // 异步加载图片获取原始尺寸
+        loadImageForSize(from: url) { [weak self] originalSize in
+            guard let self = self else { return }
+            
+            // 限制最大尺寸，避免图片过大（与相册导入保持一致）
+            let maxSize: CGFloat = 600
+            let scaledSize = self.scaleImageSizeToFit(originalSize, maxSize: maxSize)
+            
+            // 计算图片frame（中心点在点击位置）
+            let imageFrame = CGRect(
+                x: contentLocation.x - scaledSize.width / 2,
+                y: contentLocation.y - scaledSize.height / 2,
+                width: scaledSize.width,
+                height: scaledSize.height
+            )
 
-        // 创建默认图片尺寸（300x300）
-        let imageSize = CGSize(width: 300, height: 300)
+            // 创建图片图层节点
+            let imageLayer = LayerNode(
+                id: UUID(),
+                type: .userImage,
+                url: url,
+                frame: imageFrame,
+                originalSize: originalSize,
+                rotation: 0,
+                isLocked: false,
+                zIndex: self.getNextImageZIndex(),
+                opacity: 1.0,
+                createdAt: Date()
+            )
 
-        // 计算图片frame（中心点在点击位置）
-        let imageFrame = CGRect(
-            x: contentLocation.x - imageSize.width / 2,
-            y: contentLocation.y - imageSize.height / 2,
-            width: imageSize.width,
-            height: imageSize.height
-        )
+            // 添加图片到画布
+            self.addLayer(imageLayer)
 
-        // 创建图片图层节点
-        let imageLayer = LayerNode(
-            id: UUID(),
-            type: .userImage,
-            url: url,
-            frame: imageFrame,
-            rotation: 0,
-            isLocked: false,
-            zIndex: getNextImageZIndex(),
-            opacity: 1.0,
-            createdAt: Date()
-        )
-
-        // 添加图片到画布
-        addLayer(imageLayer)
-
-        // 不自动选中图片，避免显示选中状态（角点等）
-        // 用户需要手动切换到选择工具才能操作图片
+            // 不自动选中图片，避免显示选中状态（角点等）
+            // 用户需要手动切换到选择工具才能操作图片
+        }
+    }
+    
+    /// 加载图片获取尺寸（支持本地和远程URL）
+    private func loadImageForSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
+        // 默认尺寸（加载失败时使用）
+        let defaultSize = CGSize(width: 300, height: 300)
+        
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { completion(defaultSize) }
+            return
+        }
+        
+        // 本地文件
+        if url.isFileURL {
+            if let data = try? Data(contentsOf: url),
+               let image = UIImage(data: data) {
+                DispatchQueue.main.async { completion(image.size) }
+            } else {
+                DispatchQueue.main.async { completion(defaultSize) }
+            }
+            return
+        }
+        
+        // 远程图片
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            if let data = data, let image = UIImage(data: data) {
+                DispatchQueue.main.async { completion(image.size) }
+            } else {
+                DispatchQueue.main.async { completion(defaultSize) }
+            }
+        }.resume()
     }
     
     /// 处理图片数据选择（来自相机/相册）
@@ -1610,6 +1648,8 @@ class NativeCanvasView: UIView {
 
     func clearArrows() {
         arrowLayerManager.clearAll()
+        arrowViews.values.forEach { $0.removeFromSuperview() }
+        arrowViews.removeAll()
         onCanvasUpdated?()
     }
 
