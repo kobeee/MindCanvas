@@ -23,7 +23,6 @@ struct CanvasContainerView: View {
     
     private var helpButton: some View {
         Button {
-            print("显示帮助")
         } label: {
             Image(systemName: "questionmark.circle.fill")
                 .font(.title2)

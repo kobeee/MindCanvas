@@ -130,8 +130,8 @@ struct LoginView: View {
                     Task {
                         await authManager.loginWithApple()
                     }
-                case .failure(let error):
-                    print("Apple登录失败: \(error.localizedDescription)")
+                case .failure:
+                    break
                 }
             }
             .frame(height: Theme.Sizes.buttonHeight)

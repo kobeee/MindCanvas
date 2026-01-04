@@ -1449,20 +1449,11 @@ class NativeCanvasView: UIView {
 
     /// 将视口坐标映射到画布内容坐标
     func contentRect(forViewportRect viewportRect: CGRect) -> CGRect {
-        print("[contentRect] ===== Begin contentRect calculation =====")
-        print("[contentRect] viewportRect (input): \(viewportRect)")
-
-        // 从视口坐标转换到Canvas坐标
         let rectInCanvas = pencilCanvas.convert(viewportRect, from: self)
-        print("[contentRect] rectInCanvas (after convert): \(rectInCanvas)")
 
-        // 获取缩放和偏移
         let scale = pencilCanvas.zoomScale
         let offset = pencilCanvas.contentOffset
-        print("[contentRect] zoomScale: \(scale)")
-        print("[contentRect] contentOffset: \(offset)")
 
-        // 应用缩放和偏移
         let result = CGRect(
             x: (rectInCanvas.origin.x + offset.x) / scale,
             y: (rectInCanvas.origin.y + offset.y) / scale,
@@ -1470,8 +1461,6 @@ class NativeCanvasView: UIView {
             height: rectInCanvas.height / scale
         )
 
-        print("[contentRect] contentRect (result): \(result)")
-        print("[contentRect] ===== End contentRect calculation =====")
         return result
     }
 
@@ -1515,28 +1504,18 @@ class NativeCanvasView: UIView {
     /// - Parameter viewportRect: 视口坐标（相对于 NativeCanvasView）
     /// - Returns: 截取的图片，失败返回 nil
     func captureVisibleAreaSnapshot(viewportRect: CGRect) -> UIImage? {
-        print("[Snapshot] ===== Begin captureVisibleAreaSnapshot =====")
-        print("[Snapshot] viewportRect: \(viewportRect)")
-
-        // 验证尺寸
         guard viewportRect.width >= 10, viewportRect.height >= 10 else {
-            print("[Snapshot] Error: viewportRect too small")
             return nil
         }
 
-        // 确保区域在视图范围内
         let clippedRect = viewportRect.intersection(bounds)
-        print("[Snapshot] clippedRect: \(clippedRect)")
         guard !clippedRect.isEmpty else {
-            print("[Snapshot] Error: clippedRect is empty")
             return nil
         }
 
-        // 确保布局完成
         layoutIfNeeded()
         syncOverlayTransform()
 
-        // 配置渲染器
         let scale = UIScreen.main.scale
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
@@ -1547,21 +1526,14 @@ class NativeCanvasView: UIView {
         let result = renderer.image { context in
             let ctx = context.cgContext
 
-            // 1. 绘制白色背景（确保所有内容都可见）
             ctx.setFillColor(UIColor.white.cgColor)
             ctx.fill(CGRect(origin: .zero, size: clippedRect.size))
 
-            // 2. 平移坐标系：使 clippedRect 的左上角对应图片的 (0, 0)
             ctx.translateBy(x: -clippedRect.origin.x, y: -clippedRect.origin.y)
 
-            // 3. 使用 drawViewHierarchy 捕获整个视图层级
-            // 这是 iOS 推荐的方式，能正确捕获所有子视图
-            // 包括 PKCanvasView、objectLayerView、textOverlayView
             self.drawHierarchy(in: self.bounds, afterScreenUpdates: true)
         }
 
-        print("[Snapshot] result.size: \(result.size)")
-        print("[Snapshot] ===== End captureVisibleAreaSnapshot =====")
         return result
     }
 

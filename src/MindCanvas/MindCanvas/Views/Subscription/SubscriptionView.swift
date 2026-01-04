@@ -112,7 +112,6 @@ struct SubscriptionView: View {
     
     private var subscribeButton: some View {
         Button {
-            print("订阅: \(selectedPlan)")
         } label: {
             VStack(spacing: Theme.Spacing.xs) {
                 Text("立即订阅")

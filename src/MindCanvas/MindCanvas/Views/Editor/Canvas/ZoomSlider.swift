@@ -97,7 +97,7 @@ struct ZoomSlider: View {
         HStack {
             ZoomSlider(
                 zoomScale: .constant(1.0),
-                onZoomChanged: { print("Zoom: \($0)") }
+                onZoomChanged: { _ in }
             )
             Spacer()
         }

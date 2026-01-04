@@ -247,58 +247,40 @@ final class NativeEditorViewModel {
     /// 图生图：准备预览（立即截取选框内容，然后弹出确认浮窗）
     @discardableResult
     func prepareImageToImageFlow() -> Bool {
-        print("[ImageToImage] ===== Begin prepareImageToImageFlow =====")
-        
         guard !isGenerating else {
-            print("[ImageToImage] Error: Already generating")
             return false
         }
-        
-        // 验证提示词
+
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("[ImageToImage] prompt: \(trimmed.isEmpty ? "(empty)" : trimmed)")
         guard !trimmed.isEmpty else {
-            print("[ImageToImage] Error: Prompt is empty")
             flowHintMessage = "请输入生成描述"
             return false
         }
-        
-        // 验证画布视图
+
         guard let canvasView else {
-            print("[ImageToImage] Error: canvasView is nil")
             flowHintMessage = "画布尚未就绪"
             return false
         }
-        
-        // 验证 Magic Frame 可见性
+
         guard stateManager.isMagicFrameVisible else {
-            print("[ImageToImage] Error: Magic Frame not visible")
             flowHintMessage = "请先显示选框并框选区域"
             return false
         }
 
-        // 获取选框区域（视口坐标，相对于 NativeCanvasView）
         let viewportRect = stateManager.magicFrame
-        print("[ImageToImage] magicFrame: \(viewportRect)")
-        print("[ImageToImage] canvasView.bounds: \(canvasView.bounds)")
-        
-        // 使用新的截图方法（更健壮的坐标处理）
+
         guard let snapshot = canvasView.captureVisibleAreaSnapshot(viewportRect: viewportRect),
               let imageData = snapshot.pngData() else {
-            print("[ImageToImage] Error: Failed to capture snapshot")
             pendingImageToImagePreview = nil
             pendingImageToImageBase64 = nil
             flowHintMessage = "预览准备失败：截图失败"
             return false
         }
 
-        print("[ImageToImage] Snapshot captured successfully!")
-        print("[ImageToImage] Snapshot size: \(snapshot.size)")
         pendingImageToImagePreview = snapshot
         pendingImageToImageBase64 = imageData.base64EncodedString()
         flowHintMessage = nil
-        
-        print("[ImageToImage] ===== End prepareImageToImageFlow (success) =====")
+
         return true
     }
 
@@ -412,7 +394,6 @@ final class NativeEditorViewModel {
             let maxZ = canvasDocument.maxZIndex
             // 回填必须使用“画布内容坐标”frame，而不是视口 magicFrame
             let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
-            print("[ImageToImage] Adding generated layer to canvas, frame: \(contentRect)")
 
             let generatedLayer = LayerNode.aiGenerated(
                 url: response.imageUrl,
@@ -426,23 +407,16 @@ final class NativeEditorViewModel {
             prompt = ""
             stateManager.hideMagicFrame()
 
-            print("[ImageToImage] ===== End confirmImageToImageGenerate (success) =====")
-
         } catch {
-            print("[ImageToImage] Generation failed: \(error)")
-
             context.delete(loadingAsset)
             do {
                 try context.save()
-                print("[ImageToImage] Loading asset deleted successfully")
             } catch {
-                print("[ImageToImage] Error: Failed to delete loading asset: \(error)")
             }
 
             loadAssets()
 
             flowHintMessage = "生成失败：\(error.localizedDescription)"
-            print("[ImageToImage] ===== End confirmImageToImageGenerate (failed) =====")
         }
 
         isGenerating = false
@@ -450,41 +424,31 @@ final class NativeEditorViewModel {
 
     /// 文生图：生成资源（不自动上画布）
     func generateTextToImage(prompt: String, ratio: ImageAspectRatio) async {
-        print("[TextToImage] ===== Begin generateTextToImage =====")
-
         guard !isGenerating else {
-            print("[TextToImage] Error: Already generating")
             flowHintMessage = "正在生成中，请稍候"
             return
         }
 
         // 提前验证 API Key
         guard KeychainManager.shared.hasAPIKey() else {
-            print("[TextToImage] Error: API Key not configured")
             flowHintMessage = "请先在设置中配置 API Key"
             return
         }
 
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("[TextToImage] prompt: \(trimmed.isEmpty ? "(empty)" : trimmed)")
-        print("[TextToImage] ratio: \(ratio.rawValue)")
 
         guard !trimmed.isEmpty else {
-            print("[TextToImage] Error: Prompt is empty")
             flowHintMessage = "请输入生成描述"
             return
         }
 
         guard let context = modelContext else {
-            print("[TextToImage] Error: modelContext is nil")
             flowHintMessage = "数据上下文不可用"
             return
         }
 
         isGenerating = true
         flowHintMessage = nil
-
-        print("[TextToImage] Creating loading asset...")
 
         let loadingAsset = Asset(
             url: "",
@@ -499,9 +463,7 @@ final class NativeEditorViewModel {
         context.insert(loadingAsset)
         do {
             try context.save()
-            print("[TextToImage] Loading asset saved successfully")
         } catch {
-            print("[TextToImage] Error: Failed to save loading asset: \(error)")
             flowHintMessage = "保存失败：\(error.localizedDescription)"
             isGenerating = false
             return
@@ -510,8 +472,6 @@ final class NativeEditorViewModel {
         loadAssets()
 
         do {
-            print("[TextToImage] Calling generationService.generate...")
-
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: nil,
@@ -520,30 +480,22 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request)
 
-            print("[TextToImage] Generation success, url: \(response.imageUrl)")
-
             loadingAsset.url = response.imageUrl
             loadingAsset.thumbnailUrl = response.thumbnailUrl
             loadingAsset.isLoading = false
 
             do {
                 try context.save()
-                print("[TextToImage] Asset updated successfully")
             } catch {
-                print("[TextToImage] Error: Failed to update asset: \(error)")
             }
 
             loadAssets()
 
         } catch {
-            print("[TextToImage] Generation failed: \(error)")
-
             context.delete(loadingAsset)
             do {
                 try context.save()
-                print("[TextToImage] Loading asset deleted successfully")
             } catch {
-                print("[TextToImage] Error: Failed to delete loading asset: \(error)")
             }
 
             loadAssets()
@@ -552,7 +504,6 @@ final class NativeEditorViewModel {
         }
 
         isGenerating = false
-        print("[TextToImage] ===== End generateTextToImage =====")
     }
     
     // MARK: - Asset 操作
@@ -623,37 +574,27 @@ final class NativeEditorViewModel {
     /// 保存画布文档（带数据验证）
     @discardableResult
     func saveCanvasDocument() -> SaveResult {
-        // 关键：如果正在加载数据，跳过保存（防止加载过程中清空数据后被保存）
         guard !isLoadingData else {
-            print("⏭️ [saveCanvasDocument] 正在加载数据，跳过保存")
             return .success
         }
-        
+
         guard let canvasView = canvasView else {
             return .failure(.canvasViewNotAvailable)
         }
-        
+
         do {
-            // 同步所有画布数据
             syncDataFromCanvas(canvasView)
-            
-            // 验证数据完整性
+
             let validationErrors = canvasDocument.validate()
             if !validationErrors.isEmpty {
-                print("⚠️ 画布数据验证失败: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
-                
-                // 尝试自动修复
                 canvasDocument.repair()
-                print("✅ 已自动修复画布数据")
             }
-            
-            // 执行实际保存
+
             try performSave()
-            
+
             return .success
-            
+
         } catch {
-            print("❌ 画布文档保存失败: \(error)")
             return .failure(.saveError(error))
         }
     }
@@ -661,62 +602,35 @@ final class NativeEditorViewModel {
     /// 加载画布文档（带错误处理和版本兼容性）
     @discardableResult
     func loadCanvasDocument() -> LoadResult {
-        // 防止重复加载
         guard !hasLoadedDocument else {
-            print("⏭️ [loadCanvasDocument] 已经加载过，跳过")
             return .success
         }
-        
+
         guard let canvasView = canvasView else {
-            print("⚠️ [loadCanvasDocument] canvasView 不可用，稍后重试")
             return .failure(.canvasViewNotAvailable)
         }
-        
-        // 尝试加载文件，如果文件不存在则使用默认空文档
+
         do {
             try performLoad()
-            print("✅ [loadCanvasDocument] 文档文件加载成功")
         } catch DocumentError.fileNotFound {
-            // 文件不存在是正常情况（第一次打开项目）
-            print("ℹ️ [loadCanvasDocument] 文档文件不存在，使用默认空文档")
-            // canvasDocument 已经在 init 中初始化为空文档，无需操作
         } catch {
-            print("❌ [loadCanvasDocument] 加载失败: \(error)")
             return .failure(.loadError(error))
         }
-        
-        // 版本兼容性检查
+
         if canvasDocument.version > 1 {
-            print("⚠️ 检测到较新版本的文档 (v\(canvasDocument.version))，可能存在兼容性问题")
         }
-        
-        // 验证加载的数据
+
         let validationErrors = canvasDocument.validate()
         if !validationErrors.isEmpty {
-            print("⚠️ 加载的画布数据存在问题: \(validationErrors.map(\.localizedDescription).joined(separator: ", "))")
-            
-            // 自动修复数据
             canvasDocument.repair()
-            print("✅ 已修复加载的画布数据")
         }
-        
-        // 同步数据到画布视图（即使是空文档也要执行，确保视图状态正确）
-        print("ℹ️ [loadCanvasDocument] 开始同步数据到画布...")
-        print("  - layers: \(canvasDocument.layers.count)")
-        print("  - arrows: \(canvasDocument.arrows.count)")
-        print("  - shapes: \(canvasDocument.shapes.count)")
-        print("  - texts: \(canvasDocument.texts.count)")
-        print("  - drawingData: \(canvasDocument.drawingData?.count ?? 0) bytes")
-        
+
         syncDataToCanvas(canvasView)
-        
-        // 标记已加载
+
         hasLoadedDocument = true
-        
-        // 清空撤销栈（新会话开始）
+
         stateManager.clearUndoRedoStacks()
-        
-        print("✅ 画布文档加载成功 - \(canvasDocument.statistics)")
+
         return .success
     }
     
@@ -725,14 +639,12 @@ final class NativeEditorViewModel {
         guard let canvasView = canvasView else {
             return .failure(.canvasViewNotAvailable)
         }
-        
+
         do {
             syncDataFromCanvas(canvasView)
             try performSave()
-            print("✅ 强制保存完成")
             return .success
         } catch {
-            print("❌ 强制保存失败: \(error)")
             return .failure(.saveError(error))
         }
     }
@@ -804,17 +716,8 @@ final class NativeEditorViewModel {
         
         // 同步标注数据
         canvasDocument.annotations = canvasView.getAnnotationLayerManager().annotations
-        
-        // 同步绘图数据
+
         canvasDocument.drawingData = canvasView.getDrawingData()
-        
-        // 调试日志
-        print("📤 [syncDataFromCanvas] 从画布同步数据:")
-        print("  - layers: \(canvasDocument.layers.count)")
-        print("  - arrows: \(canvasDocument.arrows.count)")
-        print("  - shapes: \(canvasDocument.shapes.count)")
-        print("  - texts: \(canvasDocument.texts.count)")
-        print("  - drawingData: \(canvasDocument.drawingData?.count ?? 0) bytes")
     }
     
     /// 标记是否正在加载数据（防止加载过程中触发保存）
@@ -866,8 +769,6 @@ final class NativeEditorViewModel {
         if let drawingData = canvasDocument.drawingData {
             canvasView.loadDrawing(from: drawingData)
         }
-        
-        print("ℹ️ [syncDataToCanvas] 数据同步完成")
     }
     
     /// 执行实际的保存操作

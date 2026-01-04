@@ -50,24 +50,14 @@ struct MindCanvasApp: App {
     // MARK: - 第三方 SDK 初始化
 
     private func initializeThirdPartySDKs() {
-        print("=== MindCanvasApp.initializeThirdPartySDKs() 开始 ===")
-        print("应用 Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
-        print("应用版本: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "nil")")
-        print("构建版本: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "nil")")
-
         do {
             try GoogleSignInManager.shared.configure()
-            print("✅ Google Sign In initialized successfully")
         } catch {
-            print("❌ Failed to initialize Google Sign In: \(error.localizedDescription)")
-            // 不要静默失败，让应用崩溃以便发现问题
             if let apiError = error as? APIError {
-                print("❌ API Error: \(apiError.errorDescription ?? "Unknown error")")
+                fatalError("Google Sign In 初始化失败: \(apiError.errorDescription ?? "Unknown error")")
             }
             fatalError("Google Sign In 初始化失败: \(error.localizedDescription)")
         }
-
-        print("=== MindCanvasApp.initializeThirdPartySDKs() 完成 ===")
     }
 
     // MARK: - URL Scheme 处理

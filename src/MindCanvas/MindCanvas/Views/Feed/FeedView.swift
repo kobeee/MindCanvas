@@ -127,13 +127,11 @@ struct FeedCard: View {
             
             Menu {
                 Button {
-                    print("举报")
                 } label: {
                     Label("举报", systemImage: "exclamationmark.triangle")
                 }
-                
+
                 Button(role: .destructive) {
-                    print("拉黑")
                 } label: {
                     Label("拉黑用户", systemImage: "person.crop.circle.badge.xmark")
                 }

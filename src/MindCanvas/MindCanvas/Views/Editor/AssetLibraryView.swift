@@ -38,7 +38,6 @@ struct AssetLibraryView: View {
                 }
                 
                 Button {
-                    print("拍照功能")
                 } label: {
                     Label("拍照", systemImage: Theme.Icons.camera)
                 }

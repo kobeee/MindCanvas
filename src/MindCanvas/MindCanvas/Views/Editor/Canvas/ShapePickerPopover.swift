@@ -108,7 +108,6 @@ private struct ShapePickerButtonStyle: ButtonStyle {
 
 #Preview {
     ShapePickerPopover(shapes: ShapeType.popoverShapes) { shape in
-        print("Selected: \(shape.displayName)")
     }
     .padding(40)
     .background(Color.gray.opacity(0.3))

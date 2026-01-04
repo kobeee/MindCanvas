@@ -29,15 +29,14 @@ final class EditorViewModel {
     
     private func loadAssets() {
         guard let context = modelContext else { return }
-        
+
         let descriptor = FetchDescriptor<Asset>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        
+
         do {
             assets = try context.fetch(descriptor)
         } catch {
-            print("加载资源失败: \(error)")
         }
     }
     

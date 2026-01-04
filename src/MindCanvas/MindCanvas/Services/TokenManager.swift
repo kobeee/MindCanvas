@@ -75,13 +75,10 @@ final class TokenManager {
     }
 
     func refreshAccessToken() async throws -> Bool {
-        print("🔄 开始刷新 token...")
-
         do {
             let refreshToken = try getRefreshToken()
 
             guard let url = URL(string: baseURL + "/api/v1/auth/refresh") else {
-                print("❌ Token 刷新失败: 无效的 URL")
                 throw APIError.invalidURL
             }
 
@@ -92,19 +89,13 @@ final class TokenManager {
             let body = RefreshTokenRequest(refreshToken: refreshToken)
             request.httpBody = try JSONEncoder().encode(body)
 
-            print("📤 刷新 token 请求: POST \(url.absoluteString)")
-
             let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ Token 刷新失败: 无效的响应")
                 throw APIError.invalidResponse
             }
 
-            print("📡 刷新 token 响应状态码: \(httpResponse.statusCode)")
-
             guard (200...299).contains(httpResponse.statusCode) else {
-                print("❌ Token 刷新失败: HTTP \(httpResponse.statusCode)")
                 throw APIError.httpError(statusCode: httpResponse.statusCode, message: nil)
             }
 
@@ -115,17 +106,11 @@ final class TokenManager {
             let expiresAt = Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
             keychainManager.save(Keys.tokenExpiresAt, value: ISO8601DateFormatter().string(from: expiresAt))
 
-            print("✅ Token 刷新成功，新的 access token: \(String(tokenResponse.accessToken.prefix(20)))...")
-
             return true
         } catch {
-            // 只在 token 无效时清除 token，网络错误等临时性问题不清除
             if case APIError.httpError(let statusCode, _) = error,
                statusCode == 401 {
-                print("❌ Token 无效，清除所有 token")
                 clearTokens()
-            } else {
-                print("❌ Token 刷新失败（临时性错误，不清除 token）: \(error)")
             }
             return false
         }

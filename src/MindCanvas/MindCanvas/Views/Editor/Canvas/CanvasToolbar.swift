@@ -254,8 +254,8 @@ private struct TextToolButtonView: View {
         Spacer()
         CanvasToolbar(
             stateManager: CanvasStateManager(),
-            onImageImport: { print("Import image") },
-            onShapeSelected: { shape in print("Selected shape: \(shape.displayName)") },
+            onImageImport: { },
+            onShapeSelected: { _ in },
             penColor: .constant(.black),
             penWidth: .constant(2.0)
         )

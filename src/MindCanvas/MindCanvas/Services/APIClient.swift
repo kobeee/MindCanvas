@@ -57,7 +57,6 @@ final class APIClient {
         }
 
         if requiresAuth {
-            print("🔐 需要认证，使用 ensureValidToken")
             let token = try await tokenManager.ensureValidToken()
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -67,32 +66,14 @@ final class APIClient {
             urlRequest.httpBody = try JSONEncoder().encode(body)
         }
 
-        print("🌐 API 请求: \(method.rawValue) \(baseURL + endpoint)")
-        if let body = body, method != .GET {
-            if let bodyString = String(data: try JSONEncoder().encode(body), encoding: .utf8) {
-                print("📤 请求体: \(bodyString)")
-            }
-        }
-        print("🔐 需要认证: \(requiresAuth)")
-
         let (data, response) = try await session.data(for: urlRequest)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
 
-        print("📡 响应状态码: \(httpResponse.statusCode)")
-        if let responseHeaders = httpResponse.allHeaderFields as? [String: String] {
-            print("📋 响应头: \(responseHeaders)")
-        }
-        if let responseString = String(data: data, encoding: .utf8) {
-            print("📦 响应数据: \(responseString)")
-        }
-
         if httpResponse.statusCode == 401 && requiresAuth && retryCount == 0 {
-            print("⚠️ 收到 401 错误，尝试刷新 token...")
             if try await tokenManager.refreshAccessToken() {
-                print("✅ Token 刷新成功，重试请求...")
                 return try await request(
                     endpoint: endpoint,
                     method: method,
@@ -102,7 +83,6 @@ final class APIClient {
                     retryCount: retryCount + 1
                 )
             } else {
-                print("❌ Token 刷新失败")
                 throw APIError.tokenExpired
             }
         }
@@ -118,7 +98,6 @@ final class APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            print("❌ 解码错误: \(error)")
             throw APIError.decodingError(error)
         }
     }

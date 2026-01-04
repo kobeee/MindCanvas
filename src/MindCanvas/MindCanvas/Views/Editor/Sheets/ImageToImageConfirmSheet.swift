@@ -286,8 +286,8 @@ private struct CheckerboardPattern: View {
     ImageToImageConfirmSheet(
         previewImage: UIImage(systemName: "photo.artframe")!,
         prompt: "一只可爱的猫咪在草地上玩耍",
-        onConfirm: { print("Confirm") },
-        onCancel: { print("Cancel") }
+        onConfirm: { },
+        onCancel: { }
     )
 }
 

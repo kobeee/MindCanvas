@@ -77,10 +77,6 @@ final class RSAEncryptionService {
             throw RSAEncryptionError.encryptionFailed("无法将字符串转换为数据")
         }
 
-        print("🔐 [RSAEncryptionService] Starting encryption, plaintext length=\(plaintextData.count)")
-        print("🔐 [RSAEncryptionService] Plaintext (first 10 chars): \(String(data: plaintextData.prefix(10), encoding: .utf8) ?? "N/A")...")
-
-        // 使用 SecKey 加密
         var error: Unmanaged<CFError>?
         guard let encryptedData = SecKeyCreateEncryptedData(
             publicKey,
@@ -89,16 +85,10 @@ final class RSAEncryptionService {
             &error
         ) else {
             let errorMessage = error?.takeRetainedValue().localizedDescription ?? "未知错误"
-            print("❌ [RSAEncryptionService] Encryption failed: \(errorMessage)")
             throw RSAEncryptionError.encryptionFailed(errorMessage)
         }
 
-        print("🔐 [RSAEncryptionService] Encryption successful, encrypted data length=\((encryptedData as Data).count)")
-
-        // Base64 编码
         let base64Encoded = (encryptedData as Data).base64EncodedString()
-        print("🔐 [RSAEncryptionService] Base64 encoded, length=\(base64Encoded.count)")
-        print("🔐 [RSAEncryptionService] Base64 (first 50 chars): \(String(base64Encoded.prefix(50)))...")
 
         return base64Encoded
     }
@@ -149,7 +139,6 @@ final class RSAEncryptionService {
             options as CFDictionary,
             &error
         ) else {
-            print("❌ SecKeyCreateWithData failed: \(error.debugDescription)")
             throw RSAEncryptionError.invalidPublicKey
         }
 

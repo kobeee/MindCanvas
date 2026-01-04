@@ -144,10 +144,8 @@ struct TextToImageSheet: View {
 #Preview {
     TextToImageSheet(
         onGenerate: { prompt, ratio in
-            print("Generate: \(prompt), ratio: \(ratio)")
         },
         onCancel: {
-            print("Cancel")
         }
     )
 }

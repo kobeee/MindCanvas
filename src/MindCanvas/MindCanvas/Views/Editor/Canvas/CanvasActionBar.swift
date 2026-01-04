@@ -116,11 +116,11 @@ private struct ActionButton: View {
                 canUndo: true,
                 canRedo: false,
                 hasSelection: true,
-                onUndo: { print("Undo") },
-                onRedo: { print("Redo") },
-                onDuplicate: { print("Duplicate") },
-                onClear: { print("Clear") },
-                onDeleteSelected: { print("Delete Selected") }
+                onUndo: { },
+                onRedo: { },
+                onDuplicate: { },
+                onClear: { },
+                onDeleteSelected: { }
             )
             Spacer()
         }

@@ -13,15 +13,14 @@ final class FeedViewModel {
     func loadFeed() async {
         guard !isLoading else { return }
         isLoading = true
-        
+
         do {
             let newItems = try await feedService.fetchFeed(page: currentPage)
             items.append(contentsOf: newItems)
             currentPage += 1
         } catch {
-            print("加载失败: \(error)")
         }
-        
+
         isLoading = false
     }
     
