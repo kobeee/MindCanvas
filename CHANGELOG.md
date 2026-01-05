@@ -1,5 +1,121 @@
 # 开发记录
 
+## 2026-01-05 - 画布持久化核心Bug修复（完成）✅
+
+### 问题描述
+
+用户反馈：
+1. 资源栏图片添加到画布后，进行缩放移动操作，退出画布再次进入时，图片的位置和大小没有正确还原
+2. 资源栏新生成的图片加入到画布后，也没有成功持久化
+
+### 第一性原理分析
+
+画布持久化的本质就是：**变更时保存** + **进入时还原**
+
+从这个角度排查：
+1. **保存时机**：什么操作触发保存？
+2. **保存内容**：保存的数据是否完整？
+3. **加载时机**：什么时候加载？
+4. **加载内容**：加载的数据是否正确应用？
+
+### 根因分析
+
+**根因1：图层操作没有触发保存**
+
+在 `NativeCanvasView` 中，`addLayer`、`updateLayer`、`removeLayer` 这些图层操作**只调用了 `onLayersUpdated`，没有调用 `onCanvasUpdated`**！
+
+```swift
+// 原代码
+func addLayer(_ layer: LayerNode, recordUndo: Bool = true) {
+    layers.append(layer)
+    // ...
+    onLayersUpdated?(layers)  // ← 只通知了这个
+    // onCanvasUpdated 没有被调用！
+}
+```
+
+而 `onCanvasUpdated` 才是触发 `saveCanvasDocument()` 的回调：
+
+```swift
+// NativeCanvasViewWrapper 中
+onCanvasUpdated: {
+    viewModel.saveCanvasDocument()  // ← 只有 onCanvasUpdated 触发保存
+}
+```
+
+**根因2：防抖逻辑不完整**
+
+`SelectableImageView.syncToNode()` 的防抖逻辑只检查宽高，不检查位置：
+
+```swift
+// 原代码（有bug）
+if let lastFrame = lastSyncedFrame,
+   abs(lastFrame.width - newFrame.width) < 0.1,
+   abs(lastFrame.height - newFrame.height) < 0.1 {
+    return  // 移动操作被错误跳过！
+}
+```
+
+### 修复方案
+
+**修复1：图层操作触发保存**
+
+```swift
+func addLayer(_ layer: LayerNode, recordUndo: Bool = true) {
+    // ...
+    if recordUndo {
+        // ...
+        onCanvasUpdated?()  // ← 新增：触发保存
+    }
+}
+
+func updateLayer(_ layer: LayerNode) {
+    // ...
+    onCanvasUpdated?()  // ← 新增：触发保存
+}
+
+func removeLayer(id: UUID, recordUndo: Bool = true) {
+    // ...
+    if recordUndo {
+        // ...
+        onCanvasUpdated?()  // ← 新增：触发保存
+    }
+}
+```
+
+**修复2：防抖逻辑增加位置检查**
+
+```swift
+if let lastFrame = lastSyncedFrame,
+   abs(lastFrame.origin.x - newFrame.origin.x) < 0.1,  // ← 新增
+   abs(lastFrame.origin.y - newFrame.origin.y) < 0.1,  // ← 新增
+   abs(lastFrame.width - newFrame.width) < 0.1,
+   abs(lastFrame.height - newFrame.height) < 0.1 {
+    return
+}
+```
+
+**修复3：添加关键日志**
+
+在 `saveCanvasDocument`、`loadCanvasDocument`、`addLayer`、`updateLayer` 等关键方法添加日志，便于排查问题。
+
+### 修改文件
+
+| 文件 | 修改内容 |
+|:---|:---|
+| `NativeCanvasView.swift` | `addLayer`/`updateLayer`/`removeLayer` 添加 `onCanvasUpdated()` 调用，添加调试日志 |
+| `SelectableImageView.swift` | `syncToNode()` 防抖逻辑增加位置检查 |
+| `NativeEditorViewModel.swift` | `saveCanvasDocument`/`loadCanvasDocument`/`addAssetToCanvas` 添加调试日志 |
+
+### 经验总结
+
+1. **第一性原理**：从最基本的原理出发分析问题，画布持久化 = 变更时保存 + 进入时还原
+2. **回调链路要完整**：`onLayersUpdated` 和 `onCanvasUpdated` 是不同的回调，只有后者触发保存
+3. **防抖逻辑要全面**：必须考虑所有可能变化的维度
+4. **日志是调试利器**：在关键路径添加日志，可以快速定位问题
+
+---
+
 ## 2026-01-05 - 资源栏隔离与画布持久化修复（完成）✅
 
 ### 问题描述

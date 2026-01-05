@@ -246,8 +246,11 @@ class SelectableImageView: UIView {
             height: bounds.height
         )
 
-        // 防护：如果与上次同步的 frame 几乎相同，不再更新（防抖机制）
+        // 防护：如果与上次同步的 frame 完全相同，不再更新（防抖机制）
+        // 注意：必须同时检查位置和大小，否则移动操作会被错误地跳过
         if let lastFrame = lastSyncedFrame,
+           abs(lastFrame.origin.x - newFrame.origin.x) < 0.1,
+           abs(lastFrame.origin.y - newFrame.origin.y) < 0.1,
            abs(lastFrame.width - newFrame.width) < 0.1,
            abs(lastFrame.height - newFrame.height) < 0.1 {
             return  // 跳过微小变化

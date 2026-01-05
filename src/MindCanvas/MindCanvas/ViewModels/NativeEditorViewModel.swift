@@ -125,7 +125,12 @@ final class NativeEditorViewModel {
     
     /// 添加图片到画布
     func addAssetToCanvas(_ asset: Asset) {
-        guard let canvasView = canvasView else { return }
+        guard let canvasView = canvasView else {
+            print("❌ [AddAsset] canvasView 不可用")
+            return
+        }
+        
+        print("🖼️ [AddAsset] 开始添加资源: \(asset.url.prefix(50))...")
         
         // 异步加载图片获取原始尺寸
         loadImageSize(from: asset.url) { [weak self] originalSize in
@@ -150,9 +155,13 @@ final class NativeEditorViewModel {
                 originalSize: originalSize
             )
             
-            // 添加到画布
+            print("🖼️ [AddAsset] 创建图层: id=\(layer.id), frame=\(layer.frame)")
+            
+            // 添加到画布（这会触发 onCanvasUpdated -> saveCanvasDocument）
             canvasView.addLayer(layer)
             self.canvasDocument.addLayer(layer)
+            
+            print("✅ [AddAsset] 图层已添加到画布和文档")
         }
     }
     
@@ -575,15 +584,23 @@ final class NativeEditorViewModel {
     @discardableResult
     func saveCanvasDocument() -> SaveResult {
         guard !isLoadingData else {
+            print("⏭️ [Save] 跳过保存：正在加载数据")
             return .success
         }
 
         guard let canvasView = canvasView else {
+            print("❌ [Save] 失败：canvasView 不可用")
             return .failure(.canvasViewNotAvailable)
         }
 
         do {
             syncDataFromCanvas(canvasView)
+            
+            // 打印保存的数据摘要
+            print("💾 [Save] 保存数据: layers=\(canvasDocument.layers.count), arrows=\(canvasDocument.arrows.count), shapes=\(canvasDocument.shapes.count), texts=\(canvasDocument.texts.count)")
+            if let firstLayer = canvasDocument.layers.first {
+                print("   └─ 首个图层: frame=\(firstLayer.frame), url=\(firstLayer.url?.prefix(50) ?? "nil")")
+            }
 
             let validationErrors = canvasDocument.validate()
             if !validationErrors.isEmpty {
@@ -591,10 +608,12 @@ final class NativeEditorViewModel {
             }
 
             try performSave()
+            print("✅ [Save] 保存成功")
 
             return .success
 
         } catch {
+            print("❌ [Save] 保存失败: \(error)")
             return .failure(.saveError(error))
         }
     }
@@ -603,17 +622,25 @@ final class NativeEditorViewModel {
     @discardableResult
     func loadCanvasDocument() -> LoadResult {
         guard !hasLoadedDocument else {
+            print("⏭️ [Load] 跳过加载：已加载过文档")
             return .success
         }
 
         guard let canvasView = canvasView else {
+            print("❌ [Load] 失败：canvasView 不可用")
             return .failure(.canvasViewNotAvailable)
         }
 
         do {
             try performLoad()
+            print("📂 [Load] 加载数据: layers=\(canvasDocument.layers.count), arrows=\(canvasDocument.arrows.count), shapes=\(canvasDocument.shapes.count), texts=\(canvasDocument.texts.count)")
+            if let firstLayer = canvasDocument.layers.first {
+                print("   └─ 首个图层: frame=\(firstLayer.frame), url=\(firstLayer.url?.prefix(50) ?? "nil")")
+            }
         } catch DocumentError.fileNotFound {
+            print("📂 [Load] 文件不存在，使用空文档")
         } catch {
+            print("❌ [Load] 加载失败: \(error)")
             return .failure(.loadError(error))
         }
 
@@ -626,6 +653,7 @@ final class NativeEditorViewModel {
         }
 
         syncDataToCanvas(canvasView)
+        print("✅ [Load] 同步到画布完成")
 
         hasLoadedDocument = true
 
