@@ -377,7 +377,6 @@ class NativeCanvasView: UIView {
 
     /// 添加图层
     func addLayer(_ layer: LayerNode, recordUndo: Bool = true) {
-        print("📌 [CanvasView.addLayer] id=\(layer.id), frame=\(layer.frame), recordUndo=\(recordUndo)")
         layers.append(layer)
         sortLayers()
         createImageView(for: layer)
@@ -387,14 +386,12 @@ class NativeCanvasView: UIView {
             let action = AddLayerAction(layer: layer, canvasView: self)
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             // 触发保存（只在用户操作时，加载数据时 recordUndo=false）
-            print("📌 [CanvasView.addLayer] 触发 onCanvasUpdated")
             onCanvasUpdated?()
         }
     }
 
     /// 移除图层
     func removeLayer(id: UUID, recordUndo: Bool = true) {
-        print("📌 [CanvasView.removeLayer] id=\(id), recordUndo=\(recordUndo)")
         let removedLayer = layers.first { $0.id == id }
 
         layers.removeAll { $0.id == id }
@@ -406,7 +403,6 @@ class NativeCanvasView: UIView {
             let action = RemoveLayerAction(layer: layer, canvasView: self)
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             // 触发保存
-            print("📌 [CanvasView.removeLayer] 触发 onCanvasUpdated")
             onCanvasUpdated?()
         }
     }
@@ -414,13 +410,11 @@ class NativeCanvasView: UIView {
     /// 更新图层（移动、缩放、旋转等操作后调用）
     func updateLayer(_ layer: LayerNode) {
         if let index = layers.firstIndex(where: { $0.id == layer.id }) {
-            print("📌 [CanvasView.updateLayer] id=\(layer.id), frame=\(layer.frame)")
             layers[index] = layer
             imageViews[layer.id]?.layerNode = layer
             sortLayers()
             onLayersUpdated?(layers)
             // 触发保存（用户操作后必须保存）
-            print("📌 [CanvasView.updateLayer] 触发 onCanvasUpdated")
             onCanvasUpdated?()
         }
     }
