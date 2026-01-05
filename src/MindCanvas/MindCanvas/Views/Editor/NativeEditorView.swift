@@ -21,6 +21,10 @@ struct NativeEditorView: View {
     @State private var showCamera = false
     @State private var pendingCanvasImageLocation: CGPoint?
     
+    // 标题编辑状态
+    @State private var isEditingTitle = false
+    @FocusState private var isTitleFocused: Bool
+    
     init(project: Project) {
         self.project = project
         self._viewModel = State(initialValue: NativeEditorViewModel(project: project))
@@ -43,65 +47,80 @@ struct NativeEditorView: View {
     }
     
     var body: some View {
-        HStack(spacing: 0) {
-            // 左侧：资源库
-            NativeAssetLibraryView(
-                assets: viewModel.assets,
-                selectedAsset: $viewModel.selectedAsset,
-                onImport: { imageData in
-                    Task {
-                        await viewModel.importImage(imageData)
-                    }
-                },
-                onAddToCanvas: { asset in
-                    viewModel.addAssetToCanvas(asset)
-                },
-                onDelete: { asset in
-                    viewModel.deleteAsset(asset)
-                },
-                onDownload: { asset in
-                    viewModel.downloadAsset(asset)
-                },
-                onPublish: { asset, title in
-                    Task {
-                        await viewModel.publishAsset(asset, title: title)
-                    }
-                },
-                onClose: {
-                    dismiss()
-                }
-            )
-            .frame(width: 300)
-            
-            Divider()
-            
-            // 中间：原生画布
-            NativeCanvasContainer(
-                viewModel: viewModel,
-                onImageImport: {
-                    // 图片导入时取消选中状态
-                    viewModel.stateManager.clearSelection()
-                    showImageSourcePicker = true
+        VStack(spacing: 0) {
+            // 顶部：标题栏
+            EditorTitleBar(
+                projectName: $viewModel.projectName,
+                isEditingTitle: $isEditingTitle,
+                isTitleFocused: _isTitleFocused,
+                onSave: {
+                    viewModel.saveProjectName()
                 }
             )
             
             Divider()
             
-            // 右侧：控制面板
-            NativeControlPanel(
-                viewModel: viewModel,
-                onImageToImageTapped: {
-                    let ok = viewModel.prepareImageToImageFlow()
-                    if ok, viewModel.getPendingImageToImagePreview() != nil {
-                        didConfirmImageToImage = false
-                        activeSheet = .img2imgConfirm
+            // 主内容区
+            HStack(spacing: 0) {
+                // 左侧：资源库
+                NativeAssetLibraryView(
+                    assets: viewModel.assets,
+                    selectedAsset: $viewModel.selectedAsset,
+                    onImport: { imageData in
+                        Task {
+                            await viewModel.importImage(imageData)
+                        }
+                    },
+                    onAddToCanvas: { asset in
+                        viewModel.addAssetToCanvas(asset)
+                    },
+                    onDelete: { asset in
+                        viewModel.deleteAsset(asset)
+                    },
+                    onDownload: { asset in
+                        viewModel.downloadAsset(asset)
+                    },
+                    onPublish: { asset, title in
+                        Task {
+                            await viewModel.publishAsset(asset, title: title)
+                        }
+                    },
+                    onClose: {
+                        dismiss()
                     }
-                },
-                onTextToImageTapped: {
-                    activeSheet = .txt2img
-                }
-            )
-            .frame(width: 320)
+                )
+                .frame(width: 300)
+                
+                Divider()
+                
+                // 中间：原生画布
+                NativeCanvasContainer(
+                    viewModel: viewModel,
+                    onImageImport: {
+                        // 图片导入时取消选中状态
+                        viewModel.stateManager.clearSelection()
+                        showImageSourcePicker = true
+                    }
+                )
+                
+                Divider()
+                
+                // 右侧：控制面板
+                NativeControlPanel(
+                    viewModel: viewModel,
+                    onImageToImageTapped: {
+                        let ok = viewModel.prepareImageToImageFlow()
+                        if ok, viewModel.getPendingImageToImagePreview() != nil {
+                            didConfirmImageToImage = false
+                            activeSheet = .img2imgConfirm
+                        }
+                    },
+                    onTextToImageTapped: {
+                        activeSheet = .txt2img
+                    }
+                )
+                .frame(width: 320)
+            }
         }
         .onAppear {
             // 设置 modelContext
@@ -402,6 +421,23 @@ struct NativeEditorView: View {
                 }
             }
         }
+        // 下载成功 Toast 提示
+        .overlay(alignment: .bottom) {
+            if viewModel.showDownloadSuccessToast {
+                ToastView(message: "已保存至相册", icon: "checkmark.circle.fill")
+                    .padding(.bottom, 100)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        // 2秒后自动隐藏
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                viewModel.showDownloadSuccessToast = false
+                            }
+                        }
+                    }
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.showDownloadSuccessToast)
         .sheet(item: $activeSheet, onDismiss: {
             if lastPresentedSheet == .img2imgConfirm, didConfirmImageToImage == false {
                 viewModel.cancelImageToImageFlow()
@@ -571,13 +607,13 @@ private struct NativeCanvasContainer: View {
                             // 根据选择的形状类型决定是否显示箭头头部
                             let hasArrowHead = viewModel.selectedShapeType != .line
                             
-                            // 创建箭头或直线图层
+                            // 创建箭头或直线图层（使用全局 zIndex 确保正确的层级顺序）
                             let arrow = ArrowLayerNode(
                                 startPoint: contentStart,
                                 endPoint: contentEnd,
                                 color: viewModel.stateManager.arrowColor,
                                 lineWidth: viewModel.stateManager.arrowLineWidth,
-                                zIndex: canvasView.getArrowLayerManager().getNextZIndex(),
+                                zIndex: canvasView.getNextGlobalZIndex(),
                                 hasArrowHead: hasArrowHead
                             )
                             canvasView.addArrow(arrow)
@@ -640,13 +676,14 @@ private struct NativeCanvasContainer: View {
                                 )
                             }
                             
+                            // 使用全局 zIndex 确保正确的层级顺序
                             let shape = ShapeLayerNode(
                                 frame: finalFrame,
                                 shapeType: viewModel.selectedShapeType,
                                 color: viewModel.stateManager.shapeStrokeColor,
                                 lineWidth: viewModel.stateManager.shapeLineWidth,
                                 isFilled: viewModel.stateManager.shapeIsFilled,
-                                zIndex: canvasView.getShapeLayerManager().getNextZIndex()
+                                zIndex: canvasView.getNextGlobalZIndex()
                             )
                             canvasView.addShape(shape)
                         }
@@ -695,14 +732,14 @@ private struct NativeCanvasContainer: View {
                             lineWidth: viewModel.stateManager.annotationLineWidth,
                             fontSize: viewModel.stateManager.annotationFontSize
                         ) { rect, text in
-                            // 创建标注图层
+                            // 创建标注图层（使用全局 zIndex 确保正确的层级顺序）
                             let annotation = AnnotationLayerNode(
                                 rect: rect,
                                 text: text,
                                 fontSize: viewModel.stateManager.annotationFontSize,
                                 color: viewModel.stateManager.annotationColor,
                                 lineWidth: viewModel.stateManager.annotationLineWidth,
-                                zIndex: viewModel.canvasView?.getAnnotationLayerManager().getNextZIndex() ?? 0
+                                zIndex: viewModel.canvasView?.getNextGlobalZIndex() ?? 0
                             )
                             viewModel.canvasView?.addAnnotation(annotation)
                         }
@@ -1261,6 +1298,103 @@ private struct NativePublishSheetView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Toast 提示组件
+
+private struct ToastView: View {
+    let message: String
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+            
+            Text(message)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.85))
+                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+        )
+    }
+}
+
+// MARK: - 编辑器标题栏
+
+private struct EditorTitleBar: View {
+    @Binding var projectName: String
+    @Binding var isEditingTitle: Bool
+    @FocusState var isTitleFocused: Bool
+    let onSave: () -> Void
+    
+    var body: some View {
+        HStack(spacing: Theme.Spacing.lg) {
+            Spacer()
+            
+            // 标题区域
+            if isEditingTitle {
+                TextField("输入创作名称", text: $projectName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.primaryText)
+                    .multilineTextAlignment(.center)
+                    .textFieldStyle(.plain)
+                    .focused($isTitleFocused)
+                    .frame(maxWidth: 300)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Theme.Colors.appBackground)
+                    .cornerRadius(8)
+                    .onSubmit {
+                        finishEditing()
+                    }
+            } else {
+                Button {
+                    isEditingTitle = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        isTitleFocused = true
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(projectName.isEmpty ? "未命名创作" : projectName)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.primaryText)
+                            .lineLimit(1)
+                        
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.clear)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            
+            Spacer()
+        }
+        .frame(height: 44)
+        .background(.ultraThinMaterial)
+        .onChange(of: isTitleFocused) { _, focused in
+            if !focused && isEditingTitle {
+                finishEditing()
+            }
+        }
+    }
+    
+    private func finishEditing() {
+        isEditingTitle = false
+        isTitleFocused = false
+        onSave()
     }
 }
 

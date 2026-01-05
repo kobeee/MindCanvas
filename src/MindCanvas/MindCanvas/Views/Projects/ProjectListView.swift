@@ -5,22 +5,34 @@ struct ProjectListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Project.lastModified, order: .reverse) private var projects: [Project]
     @State private var selectedProject: Project?
+    @State private var projectToDelete: Project?
+    @State private var showDeleteConfirmation = false
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 20) {
-                    ForEach(projects) { project in
-                        Button {
-                            selectedProject = project
+            List {
+                ForEach(projects) { project in
+                    Button {
+                        selectedProject = project
+                    } label: {
+                        ProjectCard(project: project)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            projectToDelete = project
+                            showDeleteConfirmation = true
                         } label: {
-                            ProjectCard(project: project)
+                            Label("删除", systemImage: "trash")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(Theme.Spacing.lg)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Theme.Colors.appBackground)
             .navigationTitle("我的创作")
             .toolbar {
@@ -40,6 +52,19 @@ struct ProjectListView: View {
             .fullScreenCover(item: $selectedProject) { project in
                 NativeEditorView(project: project)
             }
+            .alert("确认删除", isPresented: $showDeleteConfirmation) {
+                Button("取消", role: .cancel) {
+                    projectToDelete = nil
+                }
+                Button("删除", role: .destructive) {
+                    if let project = projectToDelete {
+                        deleteProject(project)
+                    }
+                    projectToDelete = nil
+                }
+            } message: {
+                Text("不可恢复，确认删除？")
+            }
         }
     }
     
@@ -52,6 +77,11 @@ struct ProjectListView: View {
         for index in offsets {
             modelContext.delete(projects[index])
         }
+    }
+    
+    private func deleteProject(_ project: Project) {
+        modelContext.delete(project)
+        try? modelContext.save()
     }
     
     private func createSampleProjects() {

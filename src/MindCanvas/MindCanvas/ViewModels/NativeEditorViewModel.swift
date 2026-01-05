@@ -35,8 +35,11 @@ final class NativeEditorViewModel {
     
     var prompt = ""
     var isGenerating = false
-    /// 图生图/文生图流程的提示（用于 UI 呈现失败原因，避免“点了没反应/空 sheet”）
+    /// 图生图/文生图流程的提示（用于 UI 呈现失败原因，避免"点了没反应/空 sheet"）
     var flowHintMessage: String?
+    
+    /// 下载成功提示
+    var showDownloadSuccessToast = false
 
     // MARK: - 生成流程（由 View 的 activeSheet 驱动）
     // 这里不再维护 sheet 的 presented 状态，避免出现“双状态源”导致的无法再次打开问题。
@@ -74,6 +77,21 @@ final class NativeEditorViewModel {
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
         loadAssets()
+    }
+    
+    /// 保存项目名称
+    func saveProjectName() {
+        guard let context = modelContext else { return }
+        
+        // 更新项目名称
+        project.name = projectName
+        project.lastModified = Date()
+        
+        do {
+            try context.save()
+        } catch {
+            print("保存项目名称失败: \(error)")
+        }
     }
     
     // MARK: - 资源管理
@@ -527,7 +545,11 @@ final class NativeEditorViewModel {
                 
                 // 保存到相册
                 try await saveImageToPhotoLibrary(image)
-                print("图片已保存到相册")
+                
+                // 显示成功提示
+                await MainActor.run {
+                    showDownloadSuccessToast = true
+                }
                 
             } catch {
                 print("下载图片失败: \(error)")
@@ -763,6 +785,9 @@ final class NativeEditorViewModel {
         if let drawingData = canvasDocument.drawingData {
             canvasView.loadDrawing(from: drawingData)
         }
+        
+        // 8. 更新全局 zIndex 计数器，确保新添加的对象在最顶层
+        canvasView.updateGlobalZIndexCounter()
     }
     
     /// 执行实际的保存操作

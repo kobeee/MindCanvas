@@ -135,6 +135,9 @@ class NativeCanvasView: UIView {
     /// 文字图层管理器
     private let textLayerManager = TextLayerManager()
     
+    /// 全局 zIndex 计数器 - 所有对象类型共享
+    private var globalZIndexCounter: Int = 0
+    
     /// 图片选择弹窗状态
     private var pendingImageLocation: CGPoint?
     private var isShowingImagePicker = false
@@ -451,12 +454,8 @@ class NativeCanvasView: UIView {
     /// 按 zIndex 排序图层
     private func sortLayers() {
         layers.sort { $0.zIndex < $1.zIndex }
-
-        for (index, layer) in layers.enumerated() {
-            if let imageView = imageViews[layer.id] {
-                objectLayerView.insertSubview(imageView, at: index)
-            }
-        }
+        // 使用全局排序方法，确保所有类型对象正确排序
+        sortAllSubviewsByZIndex()
     }
 
     /// 创建图片视图
@@ -522,7 +521,8 @@ class NativeCanvasView: UIView {
             imageView.enableImageGestures()
         }
 
-        sortLayers()
+        // 重新排列所有子视图的层级（替代原来的 sortLayers）
+        sortAllSubviewsByZIndex()
     }
     
     /// 创建箭头视图
@@ -591,8 +591,9 @@ class NativeCanvasView: UIView {
         // 关键修复：强制立即布局，确保视图可见
         arrowView.setNeedsLayout()
         arrowView.layoutIfNeeded()
-        objectLayerView.setNeedsLayout()
-        objectLayerView.layoutIfNeeded()
+        
+        // 重新排列所有子视图的层级
+        sortAllSubviewsByZIndex()
     }
 
     /// 更新选中状态
@@ -633,6 +634,8 @@ class NativeCanvasView: UIView {
     func setLayers(_ newLayers: [LayerNode]) {
         removeAllLayers()
         newLayers.forEach { addLayer($0, recordUndo: false) }
+        // 更新全局 zIndex 计数器
+        updateGlobalZIndexCounter()
     }
 
     // MARK: - 获取所有图形对象（用于清屏撤销）
@@ -700,17 +703,14 @@ class NativeCanvasView: UIView {
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
         // 文字工具模式
         if currentTool == .text {
-            // 关键修复：在textOverlayView中检查文本点击
-            let textLocation = gesture.location(in: textOverlayView)
-            let hitTextView = textOverlayView.hitTest(textLocation, with: nil)
+            // 修复：在objectLayerView中检查文本点击（文字视图现在在objectLayerView中）
+            let location = gesture.location(in: objectLayerView)
+            let hitView = objectLayerView.hitTest(location, with: nil)
 
             // 如果点击在已有文字上，让其自己处理（进入编辑模式）
-            if hitTextView is SelectableTextView {
+            if hitView is SelectableTextView {
                 return
             }
-
-            // 获取objectLayerView中的坐标用于创建新文本
-            let location = gesture.location(in: objectLayerView)
 
             // 点击空白区域创建新文字
             createTextAtLocationWithEditing(location)
@@ -763,7 +763,7 @@ class NativeCanvasView: UIView {
             fontName = ".SF Pro Display"
         }
         
-        // 创建文字
+        // 创建文字（使用全局 zIndex 确保正确的层级顺序）
         let text = TextLayerNode(
             position: contentLocation,
             text: "新文字",
@@ -772,7 +772,7 @@ class NativeCanvasView: UIView {
             fontName: fontName ?? ".SF Pro Display",
             rotation: 0,
             scale: 1.0,
-            zIndex: textLayerManager.getNextZIndex()
+            zIndex: getNextGlobalZIndex()
         )
         
         // 添加文字
@@ -802,7 +802,7 @@ class NativeCanvasView: UIView {
             fontName: defaultFontName,
             rotation: 0,
             scale: 1.0,
-            zIndex: textLayerManager.getNextZIndex()
+            zIndex: getNextGlobalZIndex()
         )
 
         addText(text)
@@ -858,7 +858,7 @@ class NativeCanvasView: UIView {
                 height: scaledSize.height
             )
 
-            // 创建图片图层节点
+            // 创建图片图层节点（使用全局 zIndex 确保正确的层级顺序）
             let imageLayer = LayerNode(
                 id: UUID(),
                 type: .userImage,
@@ -867,7 +867,7 @@ class NativeCanvasView: UIView {
                 originalSize: originalSize,
                 rotation: 0,
                 isLocked: false,
-                zIndex: self.getNextImageZIndex(),
+                zIndex: self.getNextGlobalZIndex(),
                 opacity: 1.0,
                 createdAt: Date()
             )
@@ -935,6 +935,7 @@ class NativeCanvasView: UIView {
         // 保存图片到临时文件
         let tempURL = saveImageToTempFile(imageData)
 
+        // 使用全局 zIndex 确保正确的层级顺序
         let imageLayer = LayerNode(
             id: UUID(),
             type: .userImage,
@@ -943,7 +944,7 @@ class NativeCanvasView: UIView {
             originalSize: originalSize,
             rotation: 0,
             isLocked: false,
-            zIndex: getNextImageZIndex(),
+            zIndex: getNextGlobalZIndex(),
             opacity: 1.0,
             createdAt: Date()
         )
@@ -1002,6 +1003,66 @@ class NativeCanvasView: UIView {
             .map(\.zIndex)
             .max() ?? 0
         return maxImageZIndex + 1
+    }
+    
+    /// 获取下一个全局 Z-Index（所有对象类型共享）
+    func getNextGlobalZIndex() -> Int {
+        globalZIndexCounter += 1
+        return globalZIndexCounter
+    }
+    
+    /// 更新全局 Z-Index 计数器（在加载数据时调用）
+    func updateGlobalZIndexCounter() {
+        // 获取所有对象的最大 zIndex
+        let maxLayerZ = layers.map(\.zIndex).max() ?? 0
+        let maxArrowZ = arrowLayerManager.arrows.map(\.zIndex).max() ?? 0
+        let maxShapeZ = shapeLayerManager.shapes.map(\.zIndex).max() ?? 0
+        let maxTextZ = textLayerManager.texts.map(\.zIndex).max() ?? 0
+        let maxAnnotationZ = annotationLayerManager.annotations.map(\.zIndex).max() ?? 0
+        
+        globalZIndexCounter = max(maxLayerZ, maxArrowZ, maxShapeZ, maxTextZ, maxAnnotationZ)
+    }
+    
+    /// 根据全局 zIndex 重新排列所有子视图的层级
+    private func sortAllSubviewsByZIndex() {
+        // 收集所有对象及其 zIndex
+        var allObjects: [(view: UIView, zIndex: Int)] = []
+        
+        // 图片视图
+        for layer in layers {
+            if let view = imageViews[layer.id] {
+                allObjects.append((view, layer.zIndex))
+            }
+        }
+        
+        // 箭头视图
+        for arrow in arrowLayerManager.arrows {
+            if let view = arrowViews[arrow.id] {
+                allObjects.append((view, arrow.zIndex))
+            }
+        }
+        
+        // 形状视图
+        for shape in shapeLayerManager.shapes {
+            if let view = shapeViews[shape.id] {
+                allObjects.append((view, shape.zIndex))
+            }
+        }
+        
+        // 文字视图
+        for text in textLayerManager.texts {
+            if let view = textViews[text.id] {
+                allObjects.append((view, text.zIndex))
+            }
+        }
+        
+        // 按 zIndex 排序
+        allObjects.sort { $0.zIndex < $1.zIndex }
+        
+        // 重新排列视图层级
+        for (index, item) in allObjects.enumerated() {
+            objectLayerView.insertSubview(item.view, at: index)
+        }
     }
     
     
@@ -1746,6 +1807,9 @@ class NativeCanvasView: UIView {
         if currentTool == .select {
             shapeView.enableShapeGestures()
         }
+        
+        // 重新排列所有子视图的层级
+        sortAllSubviewsByZIndex()
     }
 
     // MARK: - 矩形管理
@@ -1961,7 +2025,7 @@ class NativeCanvasView: UIView {
         }
         
         textViews[text.id] = textView
-        textOverlayView.addSubview(textView)  // 修复：添加到textOverlayView，确保正确的交互层级
+        objectLayerView.addSubview(textView)  // 修复：添加到objectLayerView，与其他对象统一管理层级
         
         // 根据当前工具状态设置手势
         if currentTool == .select {
@@ -1973,8 +2037,9 @@ class NativeCanvasView: UIView {
         // 关键修复：强制立即布局，确保视图可见
         textView.setNeedsLayout()
         textView.layoutIfNeeded()
-        textOverlayView.setNeedsLayout()
-        textOverlayView.layoutIfNeeded()
+        
+        // 重新排列所有子视图的层级
+        sortAllSubviewsByZIndex()
     }
     
     /// 清理资源
@@ -2017,13 +2082,13 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
             return true
         }
 
-        // 文字工具时，检查触摸是否在 textOverlayView 的文字视图上
+        // 文字工具时，检查触摸是否在 objectLayerView 的文字视图上
         if currentTool == .text {
-            let textLocation = touch.location(in: textOverlayView)
-            let textHitView = textOverlayView.hitTest(textLocation, with: nil)
+            let location = touch.location(in: objectLayerView)
+            let hitView = objectLayerView.hitTest(location, with: nil)
 
             // 如果点击在已有的 SelectableTextView 上，让其自己处理
-            if textHitView is SelectableTextView {
+            if hitView is SelectableTextView {
                 return false
             }
             // 其他区域由 canvasTapGesture 处理（创建新文字）

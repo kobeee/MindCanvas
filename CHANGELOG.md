@@ -1,5 +1,109 @@
 # 开发记录
 
+## 2026-01-05 - 编辑器功能优化与画布层级修复（完成）✅
+
+### 本次完成的功能
+
+#### 1. 创作详情页添加可编辑标题
+
+**功能描述**：在创作详情页顶部添加了可编辑的创作标题栏，用户可以点击标题进入编辑模式，修改创作名称。
+
+**实现方案**：
+- 新增 `EditorTitleBar` 组件，支持显示/编辑两种模式切换
+- 点击标题进入编辑模式，自动聚焦输入框
+- 按回车或失去焦点时保存并退出编辑模式
+- 修改 `NativeEditorViewModel` 添加 `saveProjectName()` 方法，保存项目名称到 SwiftData
+
+**修改文件**：
+- `NativeEditorView.swift`：添加标题栏组件和编辑状态管理
+- `NativeEditorViewModel.swift`：添加保存项目名称方法
+
+---
+
+#### 2. 修复画布对象层级问题
+
+**问题描述**：新增文字后再新增图片，文字会显示在图片上方，违背了"后添加的对象应该在最顶层"的预期行为。
+
+**根因分析**：
+
+1. **视图容器分离**：
+   - 文字视图被添加到 `textOverlayView`
+   - 图片、箭头、形状被添加到 `objectLayerView`
+   - 由于 `textOverlayView` 在 `objectLayerView` 之上，导致文字始终显示在其他对象上方
+
+2. **zIndex 独立管理**：
+   - 各类型对象使用独立的 zIndex 计数器（`arrowLayerManager.getNextZIndex()`、`shapeLayerManager.getNextZIndex()` 等）
+   - 无法跨类型比较层级顺序
+
+**修复方案**：
+
+1. **统一 zIndex 管理**：
+   - 添加全局 zIndex 计数器 `globalZIndexCounter`
+   - 新增 `getNextGlobalZIndex()` 方法，所有对象类型共享
+   - 新增 `updateGlobalZIndexCounter()` 方法，在加载数据后更新计数器
+
+2. **统一视图容器**：
+   - 将文字视图从 `textOverlayView` 移动到 `objectLayerView`
+   - 所有可选择对象（图片、箭头、形状、文字）在同一容器中管理
+
+3. **动态排序视图层级**：
+   - 新增 `sortAllSubviewsByZIndex()` 方法
+   - 收集所有类型对象的 zIndex，按升序排列子视图
+   - 在添加任何对象后自动调用排序
+
+**修改文件**：
+- `NativeCanvasView.swift`：
+  - 添加全局 zIndex 计数器和相关方法
+  - 修改 `createTextView()` 将文字添加到 `objectLayerView`
+  - 修改所有 `createXxxView()` 方法，添加排序调用
+  - 更新手势处理代码，适配新的视图结构
+- `NativeEditorView.swift`：修改箭头、形状、标注创建时使用全局 zIndex
+- `NativeEditorViewModel.swift`：在 `syncDataToCanvas()` 后更新全局计数器
+
+---
+
+#### 3. 创作列表添加左滑删除功能
+
+**功能描述**：在创作列表中支持左滑显示删除按钮，点击删除时弹出确认对话框，提示"不可恢复，确认删除？"。
+
+**实现方案**：
+- 将 `ScrollView + LazyVStack` 改为 `List`，以支持原生 `swipeActions`
+- 添加 `.swipeActions` 修饰符实现左滑删除
+- 使用 `.alert` 实现删除确认弹窗
+- 保持原有卡片样式，通过 `listRowBackground` 和 `listRowSeparator` 自定义
+
+**修改文件**：
+- `ProjectListView.swift`：
+  - 改用 List 布局
+  - 添加 `projectToDelete` 和 `showDeleteConfirmation` 状态
+  - 添加 `deleteProject()` 方法
+
+---
+
+#### 4. 下载成功显示"已保存至相册"提示
+
+**功能描述**：在资源栏点击"下载"按钮成功保存图片后，显示 Toast 提示"已保存至相册"，2秒后自动消失。
+
+**实现方案**：
+- 在 `NativeEditorViewModel` 中添加 `showDownloadSuccessToast` 状态
+- 新增 `ToastView` 组件，使用 Capsule + 渐变动画
+- 在 `NativeEditorView` 中通过 `.overlay` 显示 Toast
+- 使用 `DispatchQueue.main.asyncAfter` 实现2秒后自动隐藏
+
+**修改文件**：
+- `NativeEditorViewModel.swift`：添加下载成功状态
+- `NativeEditorView.swift`：添加 ToastView 组件和 overlay 显示逻辑
+
+---
+
+### 技术要点总结
+
+1. **统一层级管理的重要性**：在画布类应用中，所有可选择对象应该使用统一的 zIndex 序列，避免分散管理导致的层级混乱
+2. **SwiftUI List 的灵活性**：通过自定义 `listRowBackground`、`listRowInsets` 等属性，可以在保持原生交互（如 swipeActions）的同时实现自定义 UI
+3. **Toast 提示的最佳实践**：使用 overlay + 动画 + 定时器实现优雅的 Toast 效果
+
+---
+
 ## 2026-01-05 - 画布持久化核心Bug修复（完成）✅
 
 ### 问题描述
