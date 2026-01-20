@@ -9,6 +9,14 @@ import asyncio
 import resend
 from typing import Optional
 import logging
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log
+)
+import urllib3.exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +113,22 @@ class EmailService:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
             raise EmailServiceError(f"Failed to send email: {str(e)}")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((
+            urllib3.exceptions.SSLError,
+            urllib3.exceptions.HTTPError,
+            RuntimeError
+        )),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True
+    )
     def _send_via_resend(self, to_email: str, code: str, expiry_minutes: int):
         """
         通过 Resend API 发送邮件（同步方法）
+
+        使用 tenacity 实现重试逻辑，处理 SSL 错误和网络错误。
 
         Args:
             to_email: 收件人邮箱
@@ -116,6 +137,9 @@ class EmailService:
 
         Returns:
             Resend 响应对象
+
+        Raises:
+            RuntimeError: 如果重试 3 次后仍然失败
         """
         params = {
             "from": f"{self.from_name} <{self.from_email}>",
