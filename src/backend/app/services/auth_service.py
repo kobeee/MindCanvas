@@ -503,12 +503,10 @@ class AuthService:
         from app.services.email_service import EmailService
 
         email_service = EmailService(
-            host=settings.SMTP_HOST,
-            port=settings.SMTP_PORT,
-            username=settings.SMTP_USERNAME,
-            password=settings.SMTP_PASSWORD,
-            use_tls=settings.SMTP_USE_TLS,
-            use_ssl=(settings.SMTP_PORT == 465)  # 端口465使用SSL
+            api_key=settings.RESEND_API_KEY,
+            from_email=settings.EMAIL_FROM,
+            from_name=settings.EMAIL_FROM_NAME,
+            reply_to=settings.EMAIL_REPLY_TO
         )
 
         await email_service.send_verification_code(email, code)

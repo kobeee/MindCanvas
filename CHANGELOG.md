@@ -1,5 +1,128 @@
 # 开发记录
 
+## 2026-01-20 - 邮件服务从 SMTP 迁移到 Resend API（完成）✅
+
+### 背景
+
+用户尝试使用 Gmail 的 "Accounts and Import" → "add another email address" 功能配置别名邮箱后，发现邮件发件人地址仍显示为 Gmail 原邮箱地址，而不是配置的别名邮箱。
+
+**经过调研确认**：Gmail 的 "Add another address" 功能**不能完全隐藏原邮箱地址**。虽然收件人界面的 `From` 字段可以显示别名，但邮件头信息（`Return-Path`、`Received`、`SPF` 等字段）会暴露原始 Gmail 地址。
+
+### 决策
+
+从 SMTP（Gmail）迁移到专业的邮件服务 Resend，并购买自定义域名 `escapemobius.cc`。
+
+### 实施过程
+
+#### 1. 尝试 SendGrid（失败）
+- 注册 SendGrid 账户
+- 账户审核被拒绝：`unable to proceed with activating your account at this time`
+- 原因：SendGrid 审核严格，对个人开发者不友好
+
+#### 2. 切换到 Resend + 购买域名
+- 在 Cloudflare 购买域名：`escapemobius.cc`
+- 注册 Resend 账户：https://resend.com/
+- 在 Resend 添加并验证域名（配置 SPF、DKIM DNS 记录）
+- 域名验证状态：**Verified** ✅
+
+#### 3. 代码改造
+**修改文件**：
+- `src/backend/app/services/email_service.py` - 从 aiosmtplib 改为 Resend SDK
+- `src/backend/app/config.py` - 配置从 SMTP 改为 RESEND_API_KEY
+- `src/backend/requirements.txt` - 从 aiosmtplib 改为 resend
+- `src/backend/app/services/auth_service.py` - 更新 EmailService 初始化
+
+#### 4. 排查修复的问题
+
+**问题 1：`.env` 文件 `EMAIL_FROM` 重复**
+
+`.env` 文件中存在两个 `EMAIL_FROM`，旧的配置覆盖了新的：
+```bash
+# 旧配置（在前面，会被使用）
+EMAIL_FROM=escapemobius@sina.com
+
+# 新配置（在后面，被忽略）
+EMAIL_FROM=noreply@escapemobius.cc
+```
+
+**解决**：删除旧的 SMTP 配置，只保留 Resend 配置。
+
+**问题 2：`docker-compose.yml` 缺少 Resend 环境变量**
+
+`docker-compose.yml` 只有旧的 SMTP 环境变量，没有 Resend 相关配置：
+```yaml
+# 旧配置
+- SMTP_HOST=${SMTP_HOST}
+- SMTP_PORT=${SMTP_PORT}
+...
+```
+
+**解决**：更新为 Resend 环境变量：
+```yaml
+- RESEND_API_KEY=${RESEND_API_KEY}
+- EMAIL_FROM=${EMAIL_FROM}
+- EMAIL_FROM_NAME=${EMAIL_FROM_NAME}
+- EMAIL_REPLY_TO=${EMAIL_REPLY_TO}
+```
+
+**问题 3：Resend SDK 响应格式检查错误**
+
+代码中检查响应的方式不正确：
+```python
+# 错误：Resend 返回字典，不是对象
+if response and hasattr(response, 'id'):
+    logger.info(f"message_id: {response.id}")
+
+# 正确：检查字典
+if response and isinstance(response, dict) and 'id' in response:
+    logger.info(f"message_id: {response['id']}")
+```
+
+### 最终配置
+
+**`.env` 邮件配置**：
+```bash
+RESEND_API_KEY=re_NaRuZQwe_xxxxxxxxxxxxx
+EMAIL_FROM=noreply@escapemobius.cc
+EMAIL_FROM_NAME=MindCanvas
+EMAIL_REPLY_TO=support@escapemobius.cc
+```
+
+### 验证结果
+
+```bash
+curl -X POST "http://localhost:8008/api/v1/auth/send-verification-code" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com"}'
+
+# 返回
+{"message":"Verification code sent successfully","expires_in":300}
+```
+
+- ✅ 邮件发送成功
+- ✅ 发件人显示为 `MindCanvas <noreply@escapemobius.cc>`
+- ✅ 完全隐藏了原 Gmail 地址
+
+### 修改文件清单
+
+**修改文件**（5个）:
+- `src/backend/app/services/email_service.py` - 使用 Resend SDK，修复响应检查逻辑
+- `src/backend/app/config.py` - 添加 RESEND_API_KEY 配置
+- `src/backend/requirements.txt` - 添加 resend 依赖
+- `src/backend/app/services/auth_service.py` - 更新 EmailService 初始化
+- `src/backend/docker-compose.yml` - 更新环境变量配置
+
+### 经验总结
+
+1. **Gmail 别名功能的局限性**：Gmail 的 "Add another address" 功能只能在 UI 层面隐藏原邮箱，邮件头中仍会暴露原地址
+2. **专业邮件服务的必要性**：对于需要完全控制发件人身份的场景，必须使用专业邮件服务（Resend、SendGrid、Mailgun 等）+ 自定义域名
+3. **环境变量配置要点**：
+   - `.env` 文件中不能有重复的变量名
+   - `docker-compose.yml` 必须显式声明需要传递的环境变量
+4. **SDK 返回值类型**：使用第三方 SDK 时要注意返回值的实际类型（字典 vs 对象）
+
+---
+
 ## 2026-01-05 - 编辑器功能优化与画布层级修复（完成）✅
 
 ### 本次完成的功能

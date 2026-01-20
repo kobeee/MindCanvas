@@ -17,12 +17,11 @@ class Settings(BaseSettings):
     # 数据库配置
     DATABASE_URL: str = "postgresql://mindcanvas:mindcanvas@localhost:5432/mindcanvas"
 
-    # 邮件服务配置
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_USE_TLS: bool = True
+    # 邮件服务配置（Resend）
+    RESEND_API_KEY: str = ""  # Resend API Key
+    EMAIL_FROM: str = ""  # 发件人邮箱地址（需要在 Resend 中验证）
+    EMAIL_FROM_NAME: str = "MindCanvas"  # 发件人显示名称
+    EMAIL_REPLY_TO: Optional[str] = None  # 回复邮箱地址（可选）
 
     # Redis 配置
     REDIS_URL: str = "redis://localhost:6379/0"
