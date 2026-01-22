@@ -120,7 +120,7 @@ async def global_exception_handler(request, exc):
 
 
 # 导入路由
-from app.routers import auth, assets, feed, tasks, users
+from app.routers import auth, assets, feed, tasks, users, admin
 
 # 注册路由
 app.include_router(auth.router)
@@ -128,6 +128,7 @@ app.include_router(assets.router)
 app.include_router(feed.router)
 app.include_router(tasks.router)
 app.include_router(users.router)
+app.include_router(admin.router)
 
 # 配置静态文件服务
 # 使用配置中的存储路径（支持 Docker 环境变量覆盖）

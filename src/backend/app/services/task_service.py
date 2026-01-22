@@ -2,13 +2,14 @@
 任务服务模块
 
 提供生图任务的创建、状态查询和异步处理功能。
-整合 EncryptionService、GoogleAPIClient、ImageStorage 实现完整的生图流程。
+整合 EncryptionService、ProviderFactory、QuotaService、ImageStorage 实现完整的生图流程。
 
 安全特性：
 - API Key 加密存储，任务完成后立即删除
 - API Key 只在任务处理时解密到内存，用完即销毁
 - 完善的错误处理和日志记录
 - 支持异步任务处理
+- 支持多提供商（Google API、Laozhang API）
 """
 
 import asyncio
@@ -23,6 +24,8 @@ from app.models.task import Task
 from app.services.rsa_encryption_service import RSAEncryptionService, RSAEncryptionError
 from app.services.encryption import EncryptionService, EncryptionError, DecryptionError
 from app.services.google_api import GoogleAPIClient, GoogleAPIError
+from app.services.provider_factory import ProviderFactory
+from app.services.quota_service import QuotaService
 from app.storage.image_storage import ImageStorage, ImageType
 
 logger = logging.getLogger(__name__)
@@ -43,14 +46,13 @@ class TaskService:
     任务服务类
 
     提供生图任务的创建、状态查询和异步处理功能。
-    整合 EncryptionService、GoogleAPIClient、ImageStorage 实现完整的生图流程。
+    整合 EncryptionService、ProviderFactory、QuotaService、ImageStorage 实现完整的生图流程。
 
     使用方法：
         # 初始化服务
         task_service = TaskService(
             db=db_session,
             encryption_service=encryption_service,
-            google_client=google_client,
             storage=image_storage
         )
 
@@ -70,7 +72,6 @@ class TaskService:
         self,
         db: AsyncSession,
         encryption_service: RSAEncryptionService,
-        google_client: GoogleAPIClient,
         storage: Optional[ImageStorage] = None
     ):
         """
@@ -79,24 +80,24 @@ class TaskService:
         Args:
             db: 异步数据库会话
             encryption_service: RSA 加密服务实例
-            google_client: Google API 客户端实例
             storage: 图片存储服务实例（可选，默认创建新实例）
 
         注意：
             - 所有服务实例必须正确初始化
             - storage 参数可选，如果不提供会创建新实例
+            - 使用 ProviderFactory 动态创建 API 提供商实例
         """
         self.db = db
         self.encryption_service = encryption_service
-        self.google_client = google_client
         self.storage = storage or ImageStorage()
+        self.quota_service = QuotaService(db)
 
         logger.info("TaskService initialized successfully")
 
     async def create_task(
         self,
         user_id: str,
-        encrypted_api_key: str,
+        encrypted_api_key: Optional[str],
         prompt: str,
         base_image: Optional[str] = None
     ) -> str:
@@ -105,7 +106,7 @@ class TaskService:
 
         Args:
             user_id: 用户 ID
-            encrypted_api_key: 加密的 API Key（从 iOS APP 传输）
+            encrypted_api_key: 加密的 API Key（从 iOS APP 传输，Google API 需要，Laozhang API 不需要）
             prompt: 提示词（描述要生成的图片）
             base_image: 参考图的 Base64 编码字符串（可选，用于图片到图片生成）
 
@@ -117,29 +118,43 @@ class TaskService:
 
         注意：
             - 任务创建后立即加入后台处理队列
-            - API Key 加密存储到数据库
-            - 任务完成后会自动清除 API Key
+            - Google API：API Key 加密存储到数据库，任务完成后会自动清除
+            - Laozhang API：使用配置中的 API Key，不需要用户提供
+            - 自动选择用户使用的 API 提供商
         """
         if not user_id:
             logger.error("user_id is empty")
             raise TaskServiceError("user_id is required")
-
-        if not encrypted_api_key:
-            logger.error("encrypted_api_key is empty")
-            raise TaskServiceError("encrypted_api_key is required")
 
         if not prompt:
             logger.error("prompt is empty")
             raise TaskServiceError("prompt is required")
 
         try:
+            # 获取用户使用的 API 提供商
+            api_provider = await self.quota_service.get_user_api_provider(user_id)
+            logger.info(f"User {user_id} uses API provider: {api_provider}")
+
+            # 确定图片尺寸
+            image_size = "2K" if api_provider == "laozhang" else "1K"
+
+            # 检查 API Key
+            if api_provider == "google":
+                if not encrypted_api_key:
+                    raise TaskServiceError("encrypted_api_key is required for Google API")
+            elif api_provider == "laozhang":
+                # Laozhang API 不需要用户提供 API Key
+                encrypted_api_key = None
+
             # 创建任务记录
             task = Task(
                 user_id=user_id,
                 encrypted_api_key=encrypted_api_key,
                 prompt=prompt,
                 base_image=base_image,
-                status="pending"
+                status="pending",
+                api_provider=api_provider,
+                image_size=image_size
             )
 
             # 保存到数据库
@@ -147,7 +162,7 @@ class TaskService:
             await self.db.commit()
             await self.db.refresh(task)
 
-            logger.info(f"Task created: {task.id}, user_id={user_id}, prompt_length={len(prompt)}")
+            logger.info(f"Task created: {task.id}, user_id={user_id}, prompt_length={len(prompt)}, provider={api_provider}, size={image_size}")
 
             # 异步处理任务（不等待完成）
             asyncio.create_task(self._process_task(str(task.id)))
@@ -234,11 +249,12 @@ class TaskService:
             - 此方法在后台异步执行，不阻塞主线程
             - 处理流程：
               1. 更新状态为 processing
-              2. 解密 API Key（临时内存）
-              3. 调用 Google API 生成图片
-              4. 保存图片到本地存储
-              5. 更新状态为 completed
-              6. 清除 API Key（安全措施）
+              2. 获取 API Key（Google API 解密用户密钥，Laozhang API 使用配置密钥）
+              3. 使用工厂模式创建 API 提供商实例
+              4. 调用 API 生成图片
+              5. 保存图片到本地存储
+              6. 更新状态为 completed
+              7. 清除 API Key（安全措施）
             - 任何步骤失败都会更新状态为 failed 并清除 API Key
         """
         logger.info(f"Starting to process task: {task_id}")
@@ -254,35 +270,60 @@ class TaskService:
             )
             task = result.scalar_one()
 
-            if not task.encrypted_api_key:
-                raise TaskServiceError("Task has no encrypted_api_key")
+            # 获取 API Key
+            api_key = None
 
-            # 解密 API Key（临时内存）
-            try:
-                # iOS 端发送的是 Base64 编码的 RSA 加密数据
-                import base64
-                logger.info(f"Task {task_id}: Starting API Key decryption, encrypted_api_key length={len(task.encrypted_api_key)}")
-                encrypted_bytes = base64.b64decode(task.encrypted_api_key)
-                logger.info(f"Task {task_id}: Base64 decoded, encrypted_bytes length={len(encrypted_bytes)}")
-                logger.debug(f"Task {task_id}: Encrypted bytes (first 50): {encrypted_bytes[:50].hex()}")
-                api_key = self.encryption_service.decrypt(encrypted_bytes)
-                logger.info(f"Task {task_id}: API Key decrypted successfully, length={len(api_key)}")
-                logger.debug(f"Task {task_id}: API Key (first 10 chars): {api_key[:10]}...")
-            except RSAEncryptionError as e:
-                logger.error(f"Failed to decrypt API Key for task {task_id}: {str(e)}")
-                raise TaskServiceError(f"Failed to decrypt API Key: {str(e)}")
+            if task.api_provider == "google":
+                # Google API：解密用户提供的 API Key
+                if not task.encrypted_api_key:
+                    raise TaskServiceError("Task has no encrypted_api_key for Google API")
 
-            # 调用 Google API 生成图片
+                try:
+                    # iOS 端发送的是 Base64 编码的 RSA 加密数据
+                    import base64
+                    logger.info(f"Task {task_id}: Starting API Key decryption, encrypted_api_key length={len(task.encrypted_api_key)}")
+                    encrypted_bytes = base64.b64decode(task.encrypted_api_key)
+                    logger.info(f"Task {task_id}: Base64 decoded, encrypted_bytes length={len(encrypted_bytes)}")
+                    logger.debug(f"Task {task_id}: Encrypted bytes (first 50): {encrypted_bytes[:50].hex()}")
+                    api_key = self.encryption_service.decrypt(encrypted_bytes)
+                    logger.info(f"Task {task_id}: API Key decrypted successfully, length={len(api_key)}")
+                    logger.debug(f"Task {task_id}: API Key (first 10 chars): {api_key[:10]}...")
+                except RSAEncryptionError as e:
+                    logger.error(f"Failed to decrypt API Key for task {task_id}: {str(e)}")
+                    raise TaskServiceError(f"Failed to decrypt API Key: {str(e)}")
+
+            elif task.api_provider == "laozhang":
+                # Laozhang API：使用配置中的 API Key
+                from app.config import settings
+                if not settings.LAOZHANG_API_KEY:
+                    raise TaskServiceError("Laozhang API Key not configured")
+
+                api_key = settings.LAOZHANG_API_KEY
+                logger.info(f"Task {task_id}: Using Laozhang API Key from config, length={len(api_key)}")
+
+            else:
+                raise TaskServiceError(f"Unknown API provider: {task.api_provider}")
+
+            # 使用工厂模式创建 API 提供商实例
             try:
-                image_data = await self.google_client.generate_image(
+                provider = ProviderFactory.create_provider(task.api_provider)
+                logger.info(f"Task {task_id}: Using API provider: {task.api_provider}")
+            except ValueError as e:
+                logger.error(f"Failed to create provider for task {task_id}: {str(e)}")
+                raise TaskServiceError(f"Failed to create provider: {str(e)}")
+
+            # 调用 API 生成图片
+            try:
+                image_data = await provider.generate_image(
                     api_key=api_key,
                     prompt=task.prompt,
-                    base_image=task.base_image
+                    base_image=task.base_image,
+                    image_size=task.image_size
                 )
                 logger.info(f"Image generated successfully for task {task_id}, size={len(image_data)} bytes")
-            except GoogleAPIError as e:
-                logger.error(f"Google API error for task {task_id}: {str(e)}")
-                raise TaskServiceError(f"Google API error: {str(e)}")
+            except Exception as e:
+                logger.error(f"API error for task {task_id}: {str(e)}")
+                raise TaskServiceError(f"API error: {str(e)}")
 
             # 立即清除内存中的 API Key（安全措施）
             api_key = None
@@ -307,6 +348,11 @@ class TaskService:
                 image_expires_at=image_expires_at
             )
             logger.info(f"Task {task_id} completed successfully")
+
+            # 扣减配额（Laozhang API）
+            if task.api_provider == "laozhang":
+                await self.quota_service.decrement_quota(task.user_id)
+                logger.info(f"Quota decremented for user {task.user_id}")
 
             # 清除数据库中的 API Key（安全措施）
             await self._clear_api_key(task_id)

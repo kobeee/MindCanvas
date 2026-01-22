@@ -1,5 +1,272 @@
 # 开发记录
 
+## 2026-01-22 - Laozhang API 集成实现（完成）✅
+
+### 概述
+
+完成 Laozhang API 集成后端实现，实现多提供商支持和免费额度管理功能。
+
+### 核心功能
+
+1. **多提供商支持**：Google API + Laozhang API
+2. **后端统一管理 Laozhang API Key**：用户无需提供 API Key
+3. **动态邮箱配额注入**：通过管理员接口为指定邮箱分配免费额度
+4. **自动提供商选择**：根据邮箱配额自动选择 API 提供商
+5. **配额管理**：免费额度自动扣减，支持配额查询
+6. **默认 2K 分辨率**：Laozhang API 默认使用 2K 分辨率
+
+### 后端实现
+
+**核心组件**：
+- `LaozhangAPIClient`：Laozhang API 客户端（支持 1K/2K/4K 分辨率）
+- `QuotaService`：配额管理服务（查询、扣减、提供商选择）
+- `ProviderFactory`：API 提供商工厂（抽象基类 + 工厂模式）
+- `TaskService`：任务服务改造（支持多提供商，自动配额扣减）
+
+**管理员接口**：
+- `POST /api/v1/admin/email-quota`：注入邮箱配额
+- `GET /api/v1/admin/email-quota`：查询邮箱配额列表
+- `DELETE /api/v1/admin/email-quota`：删除邮箱配额
+
+**命令行脚本**：
+- `scripts/inject_email_quota.py`：注入邮箱配额
+- `scripts/list_email_quotas.py`：查询邮箱配额
+
+### 数据库设计
+
+**新增表**：`email_quota_configs`
+- `email`：用户邮箱（唯一）
+- `initial_quota`：初始配额（免费次数）
+- `created_at`：创建时间
+- `created_by`：创建者标识
+
+**User 表扩展**：
+- `api_provider`：用户使用的 API 提供商（'google' or 'laozhang'）
+- `free_quota`：免费额度
+- `total_quota_used`：总使用次数
+- `subscription_tier`：订阅等级（'free', 'pro', 'enterprise'）
+- `subscription_expires_at`：订阅过期时间
+
+**Task 表扩展**：
+- `api_provider`：任务使用的 API 提供商（'google' or 'laozhang'）
+- `image_size`：生成的图片尺寸（'1K', '2K', '4K'）
+
+### 部署脚本增强
+
+**deploy.sh** 新增命令：
+- `./deploy.sh deploy`：部署并启动服务
+- `./deploy.sh start/stop/restart`：启动/停止/重启服务
+- `./deploy.sh status/logs`：查看状态/日志
+- `./deploy.sh rebuild`：重新构建并启动
+- `./deploy.sh clean`：清理服务（保留数据）
+- `./deploy.sh reset`：重置服务（删除所有数据）
+- `./deploy.sh quota <email> <quota>`：注入邮箱配额
+- `./deploy.sh list-quota`：查询邮箱配额
+
+### 环境变量配置
+
+**新增配置**：
+- `LAOZHANG_API_KEY`：Laozhang API Key（后端统一管理）
+- `ADMIN_SECRET_KEY`：管理员密钥（用于邮箱配额注入接口认证）
+
+### 测试验证
+
+**测试场景**：
+1. 邮箱配额注入：`POST /api/v1/admin/email-quota` ✅
+2. 用户注册登录：邮箱验证码注册 ✅
+3. 创建生图任务（Laozhang API，无 API Key）：`POST /api/v1/generate/tasks` ✅
+4. 任务状态查询：`GET /api/v1/generate/tasks/{id}/status` ✅
+5. 图片生成成功：2K 分辨率（2048x2048）✅
+6. 配额自动扣减：`total_quota_used` 从 0 变成 1 ✅
+
+**测试结果**：
+```bash
+# 邮箱配额注入
+curl -X POST "http://localhost:8008/api/v1/admin/email-quota" \
+  -H "admin-secret: xxx" \
+  -d '{"email": "test3@example.com", "quota": 3}'
+# 返回：{"success": true, "message": "Email quota injected successfully"}
+
+# 创建生图任务（无需用户提供 API Key）
+curl -X POST "http://localhost:8008/api/v1/generate/tasks" \
+  -H "Authorization: Bearer xxx" \
+  -d '{"prompt": "A cat sitting on a windowsill"}'
+# 返回：任务 ID，状态为 pending
+
+# 查询任务状态
+curl -X GET "http://localhost:8008/api/v1/generate/tasks/572184c1-8355-4c3e-a350-0406986ab047/status"
+# 返回：{"status": "completed", "image_url": "http://localhost:8008/images/generated/572184c1-8355-4c3e-a350-0406986ab047.png"}
+
+# 配额扣减验证
+# total_quota_used: 0 → 1
+```
+
+### 修改文件清单
+
+**新增文件**（7个）：
+- `src/backend/app/services/laozhang_api.py` - Laozhang API 客户端
+- `src/backend/app/services/quota_service.py` - 配额管理服务
+- `src/backend/app/services/provider_factory.py` - API 提供商工厂
+- `src/backend/app/routers/admin.py` - 管理员路由
+- `src/backend/migrations/002_add_laozhang_support.sql` - 数据库迁移脚本
+- `src/backend/scripts/inject_email_quota.py` - 邮箱配额注入脚本
+- `src/backend/scripts/list_email_quotas.py` - 邮箱配额查询脚本
+
+**修改文件**（9个）：
+- `src/backend/app/models/user.py` - 扩展 User 模型
+- `src/backend/app/models/task.py` - 扩展 Task 模型
+- `src/backend/app/models/schemas.py` - 添加配额相关响应模型
+- `src/backend/app/services/task_service.py` - 改造支持多提供商和配额扣减
+- `src/backend/app/routers/tasks.py` - 修复 API Key 参数处理
+- `src/backend/app/main.py` - 注册管理员路由
+- `src/backend/app/config.py` - 添加 LAOZHANG_API_KEY 和 ADMIN_SECRET_KEY
+- `src/backend/.env.example` - 添加环境变量配置
+- `src/backend/docker-compose.yml` - 添加环境变量传递
+- `src/backend/deploy.sh` - 增强部署脚本功能
+
+### 技术亮点
+
+1. **抽象工厂模式**：统一的 API 提供商接口，便于扩展
+2. **配额原子操作**：确保并发安全
+3. **动态配置**：邮箱配额动态注入，无需重启服务
+4. **统一部署脚本**：支持部署、管理、清理、重置等全生命周期操作
+5. **数据持久化**：Docker 卷挂载 PostgreSQL 和 Redis 数据
+
+### 下一步
+
+1. iOS 端配额查询和提示功能
+2. iOS 端支持无 API Key 生图
+3. 单元测试和集成测试
+4. 生产环境部署
+
+---
+
+## 2026-01-22 - Laozhang API 集成方案设计（完成）✅
+
+### 概述
+
+在现有 Google API 生图功能的基础上，设计了 Laozhang API 集成方案，实现多提供商支持和免费额度管理。
+
+### 核心功能
+
+1. **多提供商支持**：Google API + Laozhang API
+2. **动态邮箱配额注入**：通过 API 接口和命令行脚本动态配置邮箱配额
+3. **自动提供商选择**：根据邮箱自动选择 API 提供商
+4. **配额管理**：免费额度 + 订阅等级
+5. **默认 2K 分辨率**：Laozhang API 默认使用 2K
+6. **iOS 配额提醒**：在 iOS 端显示配额提示信息
+
+### 后端设计方案
+
+**文件**：`docs/design/backend/laozhang_api_integration_design.md`
+
+**核心组件**：
+- `LaozhangAPIClient`：Laozhang API 客户端
+- `QuotaService`：配额管理服务
+- `ProviderFactory`：API 提供商工厂
+- `TaskService`：任务服务（支持多提供商）
+
+**管理员接口**：
+- `POST /api/v1/admin/email-quota`：注入邮箱配额
+- `GET /api/v1/admin/email-quota`：查询邮箱配额列表
+
+**用户接口**：
+- `GET /api/v1/users/me/quota`：查询用户配额
+
+**命令行脚本**：
+- `inject_email_quota.py`：注入邮箱配额
+- `list_email_quotas.py`：查询邮箱配额
+
+**关键约束**：
+- 已使用的邮箱再次注入无效（检查 `total_quota_used > 0`）
+- 超过初始指定次数后无效（检查 `total_quota_used >= initial_quota`）
+- 超额后只能走 Google API Key 方式
+
+### iOS 端设计方案
+
+**文件**：`docs/design/ui/laozhang_quota_ios_integration.md`
+
+**核心改动**：
+- `QuotaService`：配额查询服务
+- `NativeEditorViewModel`：添加配额相关属性和方法
+- `NativeEditorView`：添加配额提示 UI
+- `RealGenerationService`：支持无 API Key 生图
+
+**UI 设计**：
+- 配额提示：蓝色背景，显示"您还有 X 次免费额度"
+- API Key 提示：蓝色背景，显示"请先在设置中配置 API Key"
+- 风格一致：使用现有主题颜色和样式
+
+**关键特性**：
+- 异步加载配额信息，不阻塞 UI
+- 智能提示：根据配额状态显示不同的提示信息
+- 无缝集成：不影响现有功能，保持 UI 风格一致
+
+### 数据库设计
+
+**新增表**：`email_quota_configs`
+- `email`：用户邮箱（唯一）
+- `initial_quota`：初始配额（免费次数）
+- `created_at`：创建时间
+- `created_by`：创建者标识
+
+**User 表扩展**：
+- `api_provider`：用户使用的 API 提供商
+- `free_quota`：免费额度
+- `total_quota_used`：总使用次数
+- `subscription_tier`：订阅等级
+- `subscription_expires_at`：订阅过期时间
+
+**Task 表扩展**：
+- `api_provider`：任务使用的 API 提供商
+- `image_size`：生成的图片尺寸
+
+### 使用方式
+
+```bash
+# 注入邮箱配额
+export ADMIN_SECRET_KEY="your-admin-secret-key"
+python src/backend/scripts/inject_email_quota.py test@example.com 10
+
+# 查询邮箱配额
+python src/backend/scripts/list_email_quotas.py
+```
+
+### 实施优先级
+
+**P0（必须）**：
+- Laozhang API 客户端
+- 配额管理服务
+- 任务服务改造
+- 数据库迁移
+- 管理员接口
+- 命令行注入脚本
+
+**P1（重要）**：
+- 用户配额查询接口
+- iOS 配额查询服务
+- iOS 编辑器视图更新
+- 单元测试
+- 日志和监控
+
+### 技术亮点
+
+1. **抽象工厂模式**：统一的 API 提供商接口
+2. **配额原子操作**：确保并发安全
+3. **安全加密**：RSA 加密存储 API Key
+4. **可扩展设计**：为未来订阅功能预留
+5. **动态配置**：邮箱配额动态注入，无需重启服务
+6. **智能提示**：根据配额状态显示不同的提示信息
+
+### 风险控制
+
+1. **不影响现有功能**：所有改动都是增量式的
+2. **UI 风格一致**：保持与现有设计风格一致
+3. **最小改动**：只修改必要的代码
+4. **配额约束**：已使用的邮箱再次注入无效，超额后只能走 Google API Key
+
+---
+
 ## 2026-01-21 - Resend API SSL 错误修复（完成）✅
 
 ### 问题描述

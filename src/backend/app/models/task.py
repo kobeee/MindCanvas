@@ -47,6 +47,17 @@ class Task(Base, UUIDMixin, TimestampMixin):
     # API Key（加密存储，任务完成后删除）
     encrypted_api_key: Mapped[str | None] = mapped_column(Text)
 
+    # API 提供商和图片尺寸
+    api_provider: Mapped[str] = mapped_column(
+        String(50),
+        default="google",
+        index=True
+    )  # 'google' or 'laozhang'
+    image_size: Mapped[str] = mapped_column(
+        String(10),
+        default="1K"
+    )  # '1K', '2K', '4K'
+
     # 生成结果
     image_url: Mapped[str | None] = mapped_column(String(500))
     image_expires_at: Mapped[datetime | None] = mapped_column(
@@ -65,6 +76,7 @@ class Task(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index("idx_generation_tasks_user_id", "user_id"),
         Index("idx_generation_tasks_status", "status"),
+        Index("idx_generation_tasks_api_provider", "api_provider"),
         Index("idx_generation_tasks_created_at", "created_at"),
         Index("idx_generation_tasks_image_expires_at", "image_expires_at"),
     )

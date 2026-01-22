@@ -69,13 +69,11 @@ async def get_task_service(
     # 从配置获取 RSA 私钥
     private_key_pem = base64.b64decode(settings.RSA_PRIVATE_KEY_BASE64)
     rsa_service = RSAEncryptionService(private_key_pem=private_key_pem)
-    google_client = GoogleAPIClient()
     storage = ImageStorage()
 
     return TaskService(
         db=db,
         encryption_service=rsa_service,
-        google_client=google_client,
         storage=storage
     )
 
@@ -193,12 +191,6 @@ async def create_task(
     """
     try:
         # 验证请求参数
-        if not request.encrypted_api_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="encrypted_api_key is required"
-            )
-
         if not request.prompt:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -242,10 +234,12 @@ async def create_task(
             detail=str(e)
         )
     except Exception as e:
+        import traceback
         logger.error(f"Unexpected error while creating task: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while creating task"
+            detail=f"An unexpected error occurred while creating task: {str(e)}"
         )
 
 

@@ -39,6 +39,24 @@ class User(Base, UUIDMixin, TimestampMixin):
     refresh_token: Mapped[str | None] = mapped_column(String(500))
     refresh_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
+    # API 提供商配置
+    api_provider: Mapped[str] = mapped_column(
+        String(50),
+        default="google",
+        nullable=False,
+        index=True
+    )  # 'google' or 'laozhang'
+    free_quota: Mapped[int] = mapped_column(default=0)  # 免费额度
+    total_quota_used: Mapped[int] = mapped_column(default=0)  # 总使用次数
+
+    # 订阅信息（为未来订阅功能预留）
+    subscription_tier: Mapped[str] = mapped_column(
+        String(50),
+        default="free",
+        index=True
+    )  # 'free', 'pro', 'enterprise'
+    subscription_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
     # 头像
     avatar_url: Mapped[str | None] = mapped_column(String(500))
 
@@ -70,6 +88,8 @@ class User(Base, UUIDMixin, TimestampMixin):
         Index("idx_users_email", "email"),
         Index("idx_users_provider_id", "provider_id"),
         Index("idx_users_refresh_token", "refresh_token"),
+        Index("idx_users_api_provider", "api_provider"),
+        Index("idx_users_subscription_tier", "subscription_tier"),
     )
 
     def __repr__(self) -> str:

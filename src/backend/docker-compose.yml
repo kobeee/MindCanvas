@@ -21,6 +21,8 @@ services:
       - IMAGE_RETENTION_DAYS=${IMAGE_RETENTION_DAYS}
       - IMAGE_BASE_URL=${IMAGE_BASE_URL}
       - IMAGE_STORAGE_PATH=${IMAGE_STORAGE_PATH}
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
+      - LAOZHANG_API_KEY=${LAOZHANG_API_KEY}
     volumes:
       - ./app:/app/app
       - ./storage:/app/storage

@@ -194,7 +194,7 @@ class TaskBase(BaseModel):
 
 class TaskCreate(TaskBase):
     """创建任务"""
-    encrypted_api_key: str = Field(..., description="加密的 API Key")
+    encrypted_api_key: Optional[str] = Field(None, description="加密的 API Key（Google API 需要，Laozhang API 不需要）")
 
 
 class TaskUpdate(BaseModel):
@@ -302,3 +302,14 @@ class AssetFilterParams(PaginationParams):
 class TaskFilterParams(PaginationParams):
     """任务过滤参数"""
     status: Optional[str] = Field(default=None, description="任务状态: pending, processing, completed, failed")
+
+
+# ==================== 配额相关模型 ====================
+class UserQuotaResponse(BaseModel):
+    """用户配额响应"""
+    api_provider: str = Field(..., description="API 提供商: google, laozhang")
+    has_free_quota: bool = Field(..., description="是否有免费额度")
+    max_quota: int = Field(..., description="最大配额（-1 表示无限制）")
+    used_quota: int = Field(..., description="已使用配额")
+    remaining_quota: int = Field(..., description="剩余配额（-1 表示无限制）")
+    subscription_tier: str = Field(..., description="订阅等级: free, pro, enterprise")

@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # 内容安全审核
     ENABLE_STRICT_AUDIT: bool = False
 
+    # 管理员密钥（用于邮箱配额注入接口认证）
+    ADMIN_SECRET_KEY: str = "your-admin-secret-key-change-in-production"
+
+    # Laozhang API Key（后端统一管理，用于给用户分配免费额度）
+    LAOZHANG_API_KEY: str = ""
+
     # Google OAuth 配置
     GOOGLE_CLIENT_ID: str = "356898960552-aq7iv1iooas0ihn2j391becn9jvsuoou.apps.googleusercontent.com"
 
