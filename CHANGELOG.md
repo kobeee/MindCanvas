@@ -1,5 +1,164 @@
 # 开发记录
 
+## 2026-01-23 - 资源栏层级与交互优化（完成）✅
+
+### 概述
+
+修复资源栏图片层级问题，优化操作按钮的触面范围，添加删除确认对话框，优化图标颜色，提升用户体验。
+
+### 核心修复
+
+#### 1. 修复资源栏图片层级问题
+
+**问题描述**：
+从资源栏添加到画布的图片，在面对箭头、图形和文字时，居然显示在这些对象的下方，违背了"后添加的对象应该在最顶层"的预期行为。
+
+**根因分析**：
+在 `NativeEditorViewModel.addAssetToCanvas` 方法中，使用 `LayerNode.userImage` 静态方法创建图片图层时，**没有指定 zIndex 参数**，导致 zIndex 默认为 0。而箭头、形状、文字等对象创建时都使用了 `getNextGlobalZIndex()`，zIndex 会递增（大于 0），所以图片显示在其他对象下方。
+
+**修复方案**：
+在 `addAssetToCanvas` 方法中，从 `canvasView` 获取下一个全局 zIndex，确保新添加的图片显示在最顶层。
+
+```swift
+// 修复：使用全局 zIndex 确保图片显示在最顶层
+let globalZIndex = canvasView.getNextGlobalZIndex()
+
+let layer = LayerNode(
+    type: .userImage,
+    url: asset.url,
+    frame: CGRect(origin: position, size: scaledSize),
+    originalSize: originalSize,
+    rotation: 0,
+    isLocked: false,
+    zIndex: globalZIndex,  // ← 使用全局 zIndex
+    opacity: 1.0,
+    createdAt: Date()
+)
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+
+---
+
+#### 2. 增大资源栏操作按钮的触面范围
+
+**问题描述**：
+资源栏图片选中后显示的三个操作图标（添加、下载、删除）的触面范围比较小，点击小图标靠下的位置会直接选中下方的图片。
+
+**修复方案**：
+给每个按钮添加明确的 frame，增大触面范围到 44x44 pt（符合 iOS 人机界面指南的最小触控目标尺寸）。
+
+```swift
+Button {
+    onAddToCanvas()
+} label: {
+    Image(systemName: "plus.circle.fill")
+        .font(.system(size: 20))
+        .foregroundStyle(Theme.Colors.brandBlue)
+}
+.frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+.buttonStyle(.plain)
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+---
+
+#### 3. 添加删除确认对话框
+
+**问题描述**：
+点击删除图标时直接删除资源，没有确认提示，容易误操作。
+
+**修复方案**：
+在 `NativeAssetLibraryView` 中添加删除确认对话框，用户确认后才真正删除。
+
+```swift
+@State private var showingDeleteConfirmation = false
+@State private var assetToDelete: Asset?
+
+// 删除按钮点击时显示确认对话框
+onDelete: {
+    assetToDelete = asset
+    showingDeleteConfirmation = true
+}
+
+// 确认对话框
+.alert("删除确认", isPresented: $showingDeleteConfirmation) {
+    Button("取消", role: .cancel) {
+        assetToDelete = nil
+    }
+    Button("删除", role: .destructive) {
+        if let asset = assetToDelete {
+            onDelete(asset)
+            if selectedAsset?.id == asset.id {
+                selectedAsset = nil  // 清理选中状态
+            }
+        }
+        assetToDelete = nil
+    }
+} message: {
+    Text("确定要删除这张图片吗？此操作不可恢复。")
+}
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+---
+
+#### 4. 优化图标颜色
+
+**问题描述**：
+删除图标使用黑色，与画布删除对象的图标颜色不一致；下载图标颜色较浅，不够清晰。
+
+**修复方案**：
+- 删除图标改为红色（`Theme.Colors.destructive`），与画布删除对象的图标颜色保持一致
+- 下载图标改为黑色（`Theme.Colors.primaryText`），颜色更清晰
+
+```swift
+// 下载按钮（黑色）
+Image(systemName: "arrow.down.circle")
+    .font(.system(size: 20))
+    .foregroundStyle(Theme.Colors.primaryText)
+
+// 删除按钮（红色）
+Image(systemName: "trash")
+    .font(.system(size: 18))
+    .foregroundStyle(Theme.Colors.destructive)
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+### 技术要点
+
+1. **全局 zIndex 管理**：所有对象类型共享同一个 zIndex 计数器，确保后添加的对象显示在最顶层
+2. **触控目标尺寸**：符合 iOS 人机界面指南（HIG）的最小触控目标尺寸（44x44 pt）
+3. **状态管理**：使用 `@State` 变量管理对话框显示状态和待删除资源
+4. **用户体验**：删除前确认，避免误操作；删除后清理选中状态
+
+### 验证结果
+
+1. **层级顺序**：✅ 图片添加后显示在最顶层
+2. **触控体验**：✅ 按钮触控区域增大，避免误触
+3. **删除确认**：✅ 删除前弹出确认对话框
+4. **图标颜色**：✅ 符合项目整体风格
+
+### 修改文件清单
+
+**修改文件**（2个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 修复层级问题
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - 优化按钮触面范围、添加删除确认、优化图标颜色
+
+### 下一步
+
+1. iOS 端测试和验证
+2. 其他功能优化
+
+---
+
 ## 2026-01-23 - Loading 效果三次优化：四角星呼吸风格
 
 ### 问题

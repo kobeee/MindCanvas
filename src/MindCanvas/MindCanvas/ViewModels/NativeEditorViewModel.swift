@@ -179,12 +179,20 @@ final class NativeEditorViewModel {
                 y: (canvasSize.height - scaledSize.height) / 2
             )
 
+            // 修复：使用全局 zIndex 确保图片显示在最顶层
+            let globalZIndex = canvasView.getNextGlobalZIndex()
+
             // 创建图层节点
-            let layer = LayerNode.userImage(
+            let layer = LayerNode(
+                type: .userImage,
                 url: asset.url,
-                at: position,
-                size: scaledSize,
-                originalSize: originalSize
+                frame: CGRect(origin: position, size: scaledSize),
+                originalSize: originalSize,
+                rotation: 0,
+                isLocked: false,
+                zIndex: globalZIndex,
+                opacity: 1.0,
+                createdAt: Date()
             )
 
             // 添加到画布（这会触发 onCanvasUpdated -> saveCanvasDocument）

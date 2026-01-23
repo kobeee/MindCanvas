@@ -1079,6 +1079,8 @@ private struct NativeAssetLibraryView: View {
     @State private var showingPublishSheet = false
     @State private var publishTitle = ""
     @State private var assetToPublish: Asset?
+    @State private var showingDeleteConfirmation = false
+    @State private var assetToDelete: Asset?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -1147,7 +1149,8 @@ private struct NativeAssetLibraryView: View {
                                 onAddToCanvas(asset)
                             },
                             onDelete: {
-                                onDelete(asset)
+                                assetToDelete = asset
+                                showingDeleteConfirmation = true
                             },
                             onDownload: {
                                 onDownload(asset)
@@ -1178,6 +1181,22 @@ private struct NativeAssetLibraryView: View {
                     }
                 )
             }
+        }
+        .alert("删除确认", isPresented: $showingDeleteConfirmation) {
+            Button("取消", role: .cancel) {
+                assetToDelete = nil
+            }
+            Button("删除", role: .destructive) {
+                if let asset = assetToDelete {
+                    onDelete(asset)
+                    if selectedAsset?.id == asset.id {
+                        selectedAsset = nil
+                    }
+                }
+                assetToDelete = nil
+            }
+        } message: {
+            Text("确定要删除这张图片吗？此操作不可恢复。")
         }
     }
 }
@@ -1316,19 +1335,27 @@ private struct NativeAssetCardView: View {
             
             // 操作按钮
             if isSelected && !asset.isLoading {
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     Button {
                         onAddToCanvas()
                     } label: {
                         Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(Theme.Colors.brandBlue)
                     }
+                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .buttonStyle(.plain)
                     
                     // 下载按钮（对所有类型资源都显示）
                     Button {
                         onDownload()
                     } label: {
                         Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(Theme.Colors.primaryText)
                     }
+                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .buttonStyle(.plain)
                     
                     // 发布按钮暂时隐藏（功能待上线）
                     // if asset.type == .generated {
@@ -1343,9 +1370,12 @@ private struct NativeAssetCardView: View {
                         onDelete()
                     } label: {
                         Image(systemName: "trash")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.Colors.destructive)
                     }
+                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .buttonStyle(.plain)
                 }
-                .font(.title3)
                 .padding(.vertical, 8)
             }
         }
