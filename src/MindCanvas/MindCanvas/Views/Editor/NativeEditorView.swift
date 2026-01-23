@@ -1182,6 +1182,105 @@ private struct NativeAssetLibraryView: View {
     }
 }
 
+// MARK: - 资源加载视图 (四角星呼吸效果)
+
+private struct AssetLoadingView: View {
+    @State private var shimmerOffset: CGFloat = -1.0
+    @State private var breatheScale: CGFloat = 1.0
+    @State private var breatheOpacity: Double = 0.5
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // 纯净的浅灰背景
+                Color(white: 0.97)
+
+                // 微妙的shimmer光带 (骨架屏风格)
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        Color.white.opacity(0.8),
+                        .clear
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: geometry.size.width * 0.4)
+                .offset(x: shimmerOffset * geometry.size.width)
+                .blur(radius: 20)
+
+                // 中心内容
+                VStack(spacing: 14) {
+                    // 四角星星组合
+                    ZStack {
+                        // 周围小星星 (固定位置，跟随呼吸)
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(Theme.Colors.brandBlue.opacity(0.4))
+                            .offset(x: -22, y: -14)
+                            .scaleEffect(breatheScale * 0.9)
+                            .opacity(breatheOpacity + 0.2)
+
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 6, weight: .medium))
+                            .foregroundStyle(Theme.Colors.brandBlue.opacity(0.35))
+                            .offset(x: 20, y: -18)
+                            .scaleEffect(breatheScale * 0.85)
+                            .opacity(breatheOpacity + 0.15)
+
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.Colors.brandBlue.opacity(0.45))
+                            .offset(x: 24, y: 10)
+                            .scaleEffect(breatheScale * 0.95)
+                            .opacity(breatheOpacity + 0.25)
+
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 7, weight: .medium))
+                            .foregroundStyle(Theme.Colors.brandBlue.opacity(0.3))
+                            .offset(x: -18, y: 16)
+                            .scaleEffect(breatheScale * 0.8)
+                            .opacity(breatheOpacity + 0.1)
+
+                        // 中心大星星
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(Theme.Colors.brandBlue.opacity(0.6))
+                            .scaleEffect(breatheScale)
+                            .opacity(breatheOpacity + 0.3)
+                    }
+
+                    // 简洁的文字
+                    Text("生成中")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(white: 0.5))
+                        .tracking(0.5)
+                }
+            }
+        }
+        .frame(height: 150)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .onAppear {
+            // Shimmer 流动 (缓慢、优雅)
+            withAnimation(
+                .easeInOut(duration: 2.0)
+                .repeatForever(autoreverses: false)
+            ) {
+                shimmerOffset = 1.0
+            }
+
+            // 星星呼吸动画
+            withAnimation(
+                .easeInOut(duration: 1.6)
+                .repeatForever(autoreverses: true)
+            ) {
+                breatheScale = 1.15
+                breatheOpacity = 0.8
+            }
+        }
+    }
+}
+
 // MARK: - 资源卡片视图 (简化版)
 
 private struct NativeAssetCardView: View {
@@ -1202,7 +1301,7 @@ private struct NativeAssetCardView: View {
                     .aspectRatio(contentMode: .fill)
             } placeholder: {
                 if asset.isLoading {
-                    ProgressView()
+                    AssetLoadingView()
                 } else {
                     Color.gray.opacity(0.2)
                 }

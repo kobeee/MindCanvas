@@ -1,5 +1,184 @@
 # 开发记录
 
+## 2026-01-23 - Loading 效果三次优化：四角星呼吸风格
+
+### 问题
+
+同心圆脉冲效果视觉上仍不够理想，缺乏辨识度。
+
+### 优化方案
+
+改用四角星（sparkle）+ 呼吸动画：
+
+**视觉元素**：
+1. 保留浅灰背景和shimmer光带
+2. 中心大四角星（24pt）
+3. 周围4个小四角星（6-10pt），位置错落，大小不一
+4. 文字改为"生成中"，去掉"AI"
+
+**动画设计**：
+- shimmer: 2秒周期，保持不变
+- 呼吸: 1.6秒周期，easeInOut缓动，缩放1.0→1.15，透明度同步渐变，autoreverses
+
+**设计特点**：
+- 使用 SF Symbols `sparkle` 图标
+- 所有星星同步呼吸，整体感强
+- 小星星透明度和缩放略有差异，增加层次感
+
+### 修改文件
+
+- `NativeEditorView.swift`: 修改 `AssetLoadingView` 组件
+
+---
+
+## 2026-01-23 - Loading 效果二次优化：简约脉冲风格
+
+### 问题
+
+之前的"魔法星尘"效果过于花哨：
+- 中心星星转圈圈显得幼稚
+- 8个粒子环绕旋转太杂乱
+- 多层动画叠加反而显得廉价
+- 整体缺乏高端感和设计品味
+
+### 优化方案
+
+采用极简主义设计，参考Apple风格：
+
+**视觉元素**：
+1. 纯净浅灰背景 `Color(white: 0.97)` - 干净、不抢眼
+2. 微妙的白色shimmer光带 - 骨架屏风格，优雅流动
+3. 同心圆脉冲 - 外圈扩散淡出，内圈静态，中心小圆点
+4. 简洁文字 "AI 生成中" - 灰色、字间距微调
+
+**动画设计**：
+- shimmer: 2秒周期，easeInOut缓动，柔和流动
+- 脉冲: 1.8秒周期，easeOut缓动，从0.8倍扩散到1.6倍并淡出
+
+**设计原则**：
+- 去掉所有花哨元素（星星、粒子、渐变填充）
+- 减少动画数量（从4个减到2个）
+- 使用中性色调而非品牌蓝色主导
+- 保持克制，让用户专注于等待而非被动画分心
+
+### 修改文件
+
+- `NativeEditorView.swift`: 重写 `AssetLoadingView` 组件
+
+---
+
+## 2026-01-23 - 资源栏 Loading 效果优化（完成）✅
+
+### 概述
+
+优化资源栏生图时的 loading 效果，从简单的 ProgressView 升级为"魔法星尘"效果，通过多层动画组合创造吸引人的视觉体验，让用户在等待时感到愉悦。
+
+### 核心改进
+
+**新增组件**：
+- `AssetLoadingView` - 魔法星尘 loading 视图
+
+**动画特性**：
+1. **对角线流动光带**：使用对角线长度和角度，光带从左上到右下流动
+2. **中心发光星星**：旋转（6秒周期）+ 缩放脉冲（1.5秒周期）+ 光晕效果
+3. **周围小星星粒子**：8 个小星星围绕中心旋转（8秒周期），大小不一
+4. **渐变背景**：使用品牌蓝色的渐变背景（0.04 → 0.08 → 0.04 透明度）
+5. **文字呼吸**：底部"生成中"文字随星星旋转而闪烁
+
+### UI 设计
+
+**视觉风格**：
+- 符合项目设计规范：高级、优雅、大方、简约、清新脱俗
+- 使用品牌色：`Theme.Colors.brandBlue` (#007AFF)
+- 占位符大小：150pt 高度，与图片框一致
+- 多层动画组合，创造有机的、非重复的视觉效果
+
+**对角线光带实现**：
+```swift
+// 计算对角线长度和角度
+let diagonalLength = sqrt(pow(geometry.size.width, 2) + pow(geometry.size.height, 2))
+let diagonalAngle = atan2(geometry.size.height, geometry.size.width) * 180 / .pi
+
+// 流动的光带
+LinearGradient(...)
+    .frame(width: diagonalLength * 0.5)
+    .offset(x: shimmerPosition * diagonalLength * 1.5)
+    .rotationEffect(.degrees(diagonalAngle))
+    .blur(radius: 10)
+```
+
+**中心星星动画**：
+```swift
+// 发光光晕
+Circle()
+    .fill(Theme.Colors.brandBlue.opacity(0.15))
+    .frame(width: 60, height: 60)
+    .blur(radius: 15)
+
+// 主星星（旋转 + 缩放 + 渐变填充）
+Image(systemName: "sparkles")
+    .rotationEffect(.degrees(starRotation))
+    .scaleEffect(starScale)
+    .foregroundStyle(LinearGradient(...))
+    .shadow(color: Theme.Colors.brandBlue.opacity(0.3), radius: 8)
+```
+
+**周围粒子动画**：
+```swift
+ForEach(0..<8, id: \.self) { index in
+    let angle = particleAngle + Double(index) * (360.0 / 8.0)
+    let x = cos(angle * .pi / 180) * radius
+    let y = sin(angle * .pi / 180) * radius
+
+    Circle()
+        .fill(Theme.Colors.brandBlue.opacity(0.3))
+        .frame(width: 4 + CGFloat(index % 3) * 2, height: 4 + CGFloat(index % 3) * 2)
+        .offset(x: x, y: y)
+        .blur(radius: 2)
+}
+```
+
+### 修改文件
+
+**修改文件**（1个）：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`：
+  - 新增 `AssetLoadingView` 组件
+  - 修改 `NativeAssetCardView` 使用新的 loading 视图
+
+### 技术亮点
+
+1. **多层动画组合**：4 个不同周期的动画（2.5s、6.0s、1.5s、8.0s）创造有机的、非重复的视觉效果
+2. **对角线计算**：使用勾股定理和对角线角度计算，确保光带完美对齐
+3. **粒子系统**：8 个小星星围绕中心旋转，大小不一，增加视觉层次
+4. **渐变填充**：中心星星使用渐变填充，增加立体感
+5. **光晕效果**：中心星星周围有模糊光晕，增强发光感
+6. **响应式设计**：使用 GeometryReader 获取容器尺寸，避免硬编码
+
+### 对比
+
+**修改前**：
+- 使用系统默认的 `ProgressView()`
+- 尺寸小，不够明显
+- 没有品牌色，不够专业
+
+**第一次尝试（呼吸效果）**：
+- 使用圆圈圆点实现呼吸动画
+- 效果过于简单，不够高级
+
+**第二次尝试（Shimmer 效果）**：
+- 流动光带效果
+- 光带长度不够，只有半截
+- 倾斜角度固定，不够自然
+
+**最终版本（魔法星尘）**：
+- 对角线光带，完美对齐方框
+- 中心星星旋转 + 缩放 + 光晕
+- 周围 8 个小星星粒子围绕旋转
+- 多层动画组合，有机的、非重复的视觉效果
+- 像魔法生成过程，吸引人的视觉体验
+
+---
+
 ## 2026-01-23 - 配额管理完整实现与优化（完成）✅
 
 ### 概述
