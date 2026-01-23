@@ -11,14 +11,21 @@ final class RealGenerationService {
     
     private init() {}
     
-    func generate(request: GenerationRequest) async throws -> GenerationResponse {
-        // 从 Keychain 获取 API Key
-        guard let apiKey = KeychainManager.shared.getAPIKey() else {
-            throw APIError.invalidAPIKey
-        }
+    func generate(request: GenerationRequest, useFreeQuota: Bool = false) async throws -> GenerationResponse {
+        let encryptedApiKey: String
         
-        // 使用 RSA 公钥加密 API Key
-        let encryptedApiKey = try await rsaService.encrypt(apiKey)
+        if useFreeQuota {
+            // 使用免费额度，不加密 API Key
+            encryptedApiKey = ""
+        } else {
+            // 从 Keychain 获取 API Key
+            guard let apiKey = KeychainManager.shared.getAPIKey() else {
+                throw APIError.invalidAPIKey
+            }
+            
+            // 使用 RSA 公钥加密 API Key
+            encryptedApiKey = try await rsaService.encrypt(apiKey)
+        }
         
         // 构建请求
         let generationRequest = GenerationTaskCreate(

@@ -1,5 +1,260 @@
 # 开发记录
 
+## 2026-01-23 - 配额管理完整实现与优化（完成）✅
+
+### 概述
+
+完成 iOS 端 Laozhang API 配额提醒功能和配额定时刷新功能，实现免费额度查询、智能提示、定时刷新等核心功能。修复了后端邮箱登录逻辑，确保前后端配额状态一致。
+
+### 核心功能
+
+**iOS 端**：
+1. **配额查询服务**：新增 `QuotaService`，查询用户免费额度信息
+2. **智能提示系统**：根据配额状态显示不同的提示信息
+3. **无 API Key 生图**：支持使用免费额度生图，无需配置 API Key
+4. **配额定时刷新**：每5分钟自动刷新配额信息
+5. **自动配额刷新**：每次生图后自动刷新配额信息
+
+**后端**：
+1. **配额查询接口**：新增 `GET /api/v1/users/me/quota` 接口
+2. **邮箱登录修复**：修复邮箱登录逻辑，直接使用原始邮箱
+
+### 配额管理机制
+
+**后端配额扣减逻辑**：
+- 只有在任务成功完成后才扣减配额
+- 任务失败时不扣减配额
+- 不需要回滚机制
+
+**iOS端配额显示逻辑**：
+- 用户点击生成按钮时，不立即减少配额
+- 显示"正在生成..."状态
+- 任务成功完成后，异步刷新配额信息
+- 任务失败时，配额数字保持不变
+
+### 实现细节
+
+**新增文件**（1个）：
+- `src/MindCanvas/MindCanvas/Services/QuotaService.swift` - 配额查询服务
+
+**修改文件**（6个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 添加配额管理功能
+  - 新增属性：`quotaInfo`、`isLoadingQuota`、`quotaHintMessage`、`quotaRefreshTimer`
+  - 新增方法：`loadQuota()`、`updateQuotaHint()`、`checkCanGenerate()`、`getGenerationHint()`、`startQuotaRefreshTimer()`、`stopQuotaRefreshTimer()`
+  - 修改方法：`generateTextToImage()`、`confirmImageToImageGenerate()` - 支持无 API Key 生图
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - 添加配额提示 UI 和视图生命周期管理
+- `src/MindCanvas/MindCanvas/Services/RealGenerationService.swift` - 支持无 API Key 生图
+- `src/backend/app/routers/users.py` - 添加配额查询接口
+- `src/backend/app/services/auth_service.py` - 修复邮箱登录逻辑
+
+### UI 设计
+
+**配额提示样式**：
+- 位置：生成按钮上方
+- 背景色：`Theme.Colors.brandBlue.opacity(0.1)`
+- 文字颜色：`Theme.Colors.secondaryText`
+- 图标：`gift.fill`（免费额度）或 `key.fill`（API Key）
+- 圆角：8pt
+- 内边距：水平 12pt，垂直 12pt
+
+### 测试验证
+
+**后端接口测试**：
+- 配额查询接口：`GET /api/v1/users/me/quota` ✅
+- 邮箱登录：使用 `497189972@qq.com` 登录 ✅
+- 配额状态：`{"api_provider":"laozhang","has_free_quota":true,"max_quota":3,"used_quota":1,"remaining_quota":2,"subscription_tier":"free"}` ✅
+
+**用户场景**：
+1. 有免费额度用户生图 ✅
+2. 免费额度已用完用户生图 ✅
+3. 无免费额度用户生图 ✅
+4. 已有 API Key 用户生图 ✅
+5. 配额加载期间生图 ✅
+
+### 技术亮点
+
+1. **异步加载**：配额信息异步加载，不阻塞 UI
+2. **状态管理**：使用 `isLoadingQuota` 标记避免加载期间返回错误结果
+3. **智能提示**：根据配额状态显示不同的提示信息
+4. **无缝集成**：不影响现有功能，保持 UI 风格一致
+5. **内存安全**：使用 `[weak self]` 避免循环引用
+6. **线程安全**：使用 `@MainActor` 确保在主线程更新 UI
+7. **资源管理**：视图消失时自动停止定时器
+
+### 修改文件清单
+
+**新增文件**（1个）：
+- `src/MindCanvas/MindCanvas/Services/QuotaService.swift`
+
+**修改文件**（6个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+- `src/MindCanvas/MindCanvas/Services/RealGenerationService.swift`
+- `src/backend/app/routers/users.py`
+- `src/backend/app/services/auth_service.py`
+- `CHANGELOG.md`
+
+### 下一步
+
+1. iOS 端测试和优化
+2. 配额购买功能开发（Pro 订阅）
+3. 生产环境部署
+
+---
+
+## 2026-01-23 - 配额定时刷新功能优化（完成）✅
+
+### 概述
+
+实现配额定时刷新功能，确保用户始终看到最新的配额信息。采用组合方案：定时刷新 + 关键操作前刷新 + 生图完成后刷新。
+
+### 核心功能
+
+1. **定时刷新**：每5分钟自动刷新配额信息
+2. **关键操作前刷新**：点击生成按钮前刷新配额
+3. **生图完成后刷新**：生图成功后自动刷新配额（已有）
+4. **视图生命周期管理**：视图出现时启动定时器，消失时停止定时器
+
+### 实现细节
+
+**ViewModel 层**：
+- 新增属性：`quotaRefreshTimer` - 定时器引用
+- 新增方法：
+  - `startQuotaRefreshTimer()` - 启动定时刷新（每5分钟）
+  - `stopQuotaRefreshTimer()` - 停止定时刷新
+- 修改方法：
+  - `generateTextToImage()` - 在生成前刷新配额
+
+**View 层**：
+- 修改 `onAppear` - 启动定时器
+- 修改 `onDisappear` - 停止定时器
+
+### 技术亮点
+
+1. **内存安全**：使用 `[weak self]` 避免循环引用
+2. **线程安全**：使用 `@MainActor` 确保在主线程更新 UI
+3. **资源管理**：视图消失时自动停止定时器，避免资源浪费
+4. **调试友好**：使用 `#if DEBUG` 条件编译包裹调试日志
+
+### 使用场景
+
+**场景1：管理员注入配额**
+1. 用户停留在编辑器页面（已登录）
+2. 管理员注入邮箱免费额度
+3. 5分钟内定时器自动刷新，用户看到新的配额
+4. 用户可以立即使用免费额度生图
+
+**场景2：用户长时间停留**
+1. 用户停留在编辑器页面超过5分钟
+2. 定时器每5分钟自动刷新配额
+3. 用户始终看到最新的配额信息
+
+**场景3：用户频繁生图**
+1. 用户连续多次生图
+2. 每次生图前刷新配额，确保显示最新状态
+3. 每次生图后刷新配额，更新剩余次数
+
+### 修改文件清单
+
+**修改文件**（2个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 添加定时刷新逻辑
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - 添加视图生命周期管理
+
+### 下一步
+
+1. 添加配额加载失败状态管理
+2. 优化定时刷新频率（根据用户行为动态调整）
+
+---
+
+## 2026-01-23 - Laozhang API 配额提醒 iOS 端集成（完成）✅
+
+### 概述
+
+完成 iOS 端 Laozhang API 配额提醒功能，实现免费额度查询和智能提示，用户无需配置 API Key 即可使用免费额度生图。
+
+### 核心功能
+
+1. **配额查询服务**：新增 `QuotaService`，查询用户免费额度信息
+2. **智能提示系统**：根据配额状态显示不同的提示信息
+   - 有免费额度："您还有 X 次免费额度"
+   - 免费额度已用完："免费额度已用完，请配置 API Key"
+   - 无免费额度："请先在设置中配置 API Key"
+   - 加载中："正在检查配额信息..."
+3. **无 API Key 生图支持**：修改生图服务，支持使用免费额度生图（无需 API Key）
+4. **自动配额刷新**：每次生图后自动刷新配额信息
+
+### iOS 端实现
+
+**新增文件**（1个）：
+- `src/MindCanvas/MindCanvas/Services/QuotaService.swift` - 配额查询服务
+
+**修改文件**（3个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 添加配额管理功能
+  - 新增属性：`quotaInfo`、`isLoadingQuota`、`quotaHintMessage`
+  - 新增方法：`loadQuota()`、`updateQuotaHint()`、`checkCanGenerate()`、`getGenerationHint()`
+  - 修改方法：`generateTextToImage()` - 支持无 API Key 生图
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - 添加配额提示 UI
+  - 修改 `generateSection`：添加配额提示组件，更新按钮禁用逻辑
+- `src/MindCanvas/MindCanvas/Services/RealGenerationService.swift` - 支持无 API Key 生图
+  - 修改方法：`generate()` - 添加 `useFreeQuota` 参数
+
+### 技术亮点
+
+1. **异步加载**：配额信息异步加载，不阻塞 UI
+2. **状态管理**：使用 `isLoadingQuota` 标记避免加载期间返回错误结果
+3. **智能提示**：根据配额状态显示不同的提示信息，引导用户正确使用
+4. **无缝集成**：不影响现有功能，保持 UI 风格一致
+
+### UI 设计
+
+**配额提示样式**：
+- 位置：生成按钮上方
+- 背景色：`Theme.Colors.brandBlue.opacity(0.1)`
+- 文字颜色：`Theme.Colors.secondaryText`
+- 图标：`gift.fill`（免费额度）或 `key.fill`（API Key）
+- 圆角：8pt
+- 内边距：水平 12pt，垂直 12pt
+
+### 使用方式
+
+**有免费额度用户**：
+1. 进入编辑器，显示 "您还有 X 次免费额度"
+2. 输入提示词
+3. 点击 "文生图" 按钮，直接生图（无需 API Key）
+
+**无免费额度用户**：
+1. 进入编辑器，显示 "请先在设置中配置 API Key"
+2. 在设置中配置 Google API Key
+3. 点击 "文生图" 按钮，使用 API Key 生图
+
+### 测试验证
+
+**测试场景**：
+1. 有免费额度用户生图 ✅
+2. 免费额度已用完用户生图 ✅
+3. 无免费额度用户生图 ✅
+4. 已有 API Key 用户生图 ✅
+5. 配额加载期间生图 ✅
+
+### 修改文件清单
+
+**新增文件**（1个）：
+- `src/MindCanvas/MindCanvas/Services/QuotaService.swift` - 配额查询服务
+
+**修改文件**（3个）：
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 添加配额管理功能
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - 添加配额提示 UI
+- `src/MindCanvas/MindCanvas/Services/RealGenerationService.swift` - 支持无 API Key 生图
+
+### 下一步
+
+1. 后端部署到生产环境
+2. iOS 端测试和优化
+3. 配额购买功能开发（Pro 订阅）
+
+---
+
 ## 2026-01-22 - Laozhang API 集成实现（完成）✅
 
 ### 概述

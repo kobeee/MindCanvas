@@ -143,6 +143,9 @@ struct NativeEditorView: View {
                 viewModel.loadCanvasDocument()
             }
             
+            // 启动配额定时刷新
+            viewModel.startQuotaRefreshTimer()
+            
             // 绑定清屏回调（支持撤销）
             viewModel.stateManager.onClearCanvas = { [weak viewModel] in
                 guard let viewModel = viewModel, let canvasView = viewModel.canvasView else { return }
@@ -155,8 +158,6 @@ struct NativeEditorView: View {
                 let previousTexts = canvasView.getTexts()
                 let previousAnnotations = canvasView.getAnnotations()
                 let previousDrawingData = canvasView.getDrawingData()
-                
-                
                 
                 let action = ClearCanvasAction(
                     previousLayers: previousLayers,
@@ -172,6 +173,7 @@ struct NativeEditorView: View {
                 // 执行清屏
                 canvasView.clearCanvas()
             }
+            
             // 绑定复制回调（支持撤销）
             viewModel.stateManager.onDuplicateSelected = { [weak viewModel] in
                 guard let viewModel = viewModel,
@@ -203,18 +205,16 @@ struct NativeEditorView: View {
                 // 选中新复制的图层
                 viewModel.stateManager.selectNode(duplicatedLayer.id)
             }
+            
             // 修复：绑定删除选中节点回调（增强错误处理）
             viewModel.stateManager.onDeleteSelected = { [weak viewModel] in
                 guard let viewModel = viewModel,
                       let canvasView = viewModel.canvasView,
                       let selectedID = viewModel.stateManager.selectedNodeID
-                else { 
-                    
-                    return 
+                else {
+                    return
                 }
                 
-                
-
                 var deletionSuccess = false
                 
                 // 尝试删除不同类型的对象
@@ -252,7 +252,7 @@ struct NativeEditorView: View {
                 if !deletionSuccess {
                     // Deletion failed
                 }
-
+                
                 // 清除选中状态
                 viewModel.stateManager.clearSelection()
             }
@@ -263,6 +263,10 @@ struct NativeEditorView: View {
             setupDrawingUndoSupport()
         }
         .onDisappear {
+            // 停止配额定时刷新
+            viewModel.stopQuotaRefreshTimer()
+            
+            // 保存画布文档
             viewModel.saveCanvasDocument()
         }
         .onChange(of: activeSheet) { _, newValue in
@@ -945,24 +949,21 @@ private struct NativeControlPanel: View {
     
     private var generateSection: some View {
         VStack(spacing: 12) {
-            // API Key 未配置提示
-            if !KeychainManager.shared.hasAPIKey() {
+            // 配额提示或 API Key 提示
+            if let hint = viewModel.getGenerationHint() {
                 HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                    Image(systemName: viewModel.quotaInfo?.hasFreeQuota == true ? "gift.fill" : "key.fill")
+                        .foregroundStyle(Theme.Colors.brandBlue)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("API Key 未配置")
+                        Text(hint)
                             .font(.caption)
                             .fontWeight(.medium)
-                            .foregroundStyle(.red)
-                        Text("请在设置中添加 API Key")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.Colors.secondaryText)
                     }
                     Spacer()
                 }
                 .padding(12)
-                .background(Color.red.opacity(0.1))
+                .background(Theme.Colors.brandBlue.opacity(0.1))
                 .cornerRadius(8)
             }
             
@@ -984,7 +985,7 @@ private struct NativeControlPanel: View {
                 viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                 viewModel.isGenerating ||
                 !viewModel.stateManager.isMagicFrameVisible ||
-                !KeychainManager.shared.hasAPIKey()
+                !viewModel.checkCanGenerate()
             )
             .frame(maxWidth: .infinity)
             .frame(height: 50)
@@ -995,7 +996,7 @@ private struct NativeControlPanel: View {
                 Label("文生图", systemImage: "paintpalette")
             }
             .buttonStyle(.bordered)
-            .disabled(viewModel.isGenerating || !KeychainManager.shared.hasAPIKey())
+            .disabled(viewModel.isGenerating || !viewModel.checkCanGenerate())
             .frame(maxWidth: .infinity)
         }
     }

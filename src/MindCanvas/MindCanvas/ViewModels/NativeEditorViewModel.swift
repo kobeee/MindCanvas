@@ -41,6 +41,20 @@ final class NativeEditorViewModel {
     /// 下载成功提示
     var showDownloadSuccessToast = false
 
+    // MARK: - 配额管理
+
+    /// 用户配额信息
+    var quotaInfo: QuotaInfo?
+
+    /// 是否正在加载配额信息
+    var isLoadingQuota = false
+
+    /// 配额提示信息
+    var quotaHintMessage: String?
+    
+    /// 定时刷新配额的定时器
+    private var quotaRefreshTimer: Timer?
+
     // MARK: - 生成流程（由 View 的 activeSheet 驱动）
     // 这里不再维护 sheet 的 presented 状态，避免出现“双状态源”导致的无法再次打开问题。
     // 仅保留流程中需要复用的数据（预览图 / base64）。
@@ -71,7 +85,10 @@ final class NativeEditorViewModel {
         // 初始化画布文档
         self.canvasDocument = CanvasDocument(projectID: project.id)
         
-        // TODO: 从持久化存储加载画布文档
+        // 加载配额信息
+        Task {
+            await loadQuota()
+        }
     }
     
     func setModelContext(_ context: ModelContext) {
@@ -262,6 +279,181 @@ final class NativeEditorViewModel {
         canvasDocument.layers = layers
     }
     
+    // MARK: - 配额管理
+    
+    
+    
+        /// 启动定时刷新配额（每5分钟刷新一次）
+    
+    
+    
+            func startQuotaRefreshTimer() {
+    
+    
+    
+                // 先停止已有的定时器
+    
+    
+    
+                stopQuotaRefreshTimer()
+    
+    
+    
+                
+    
+    
+    
+                // 创建新的定时器，每5分钟（300秒）刷新一次
+    
+    
+    
+                quotaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+    
+    
+    
+                    Task { @MainActor in
+    
+    
+    
+                        await self?.loadQuota()
+    
+    
+    
+                    }
+    
+    
+    
+                }
+    
+    
+    
+                
+    
+    
+    
+                #if DEBUG
+    
+    
+    
+                print("配额定时刷新已启动（每5分钟刷新一次）")
+    
+    
+    
+                #endif
+    
+    
+    
+            }
+    
+    
+    
+            
+    
+    
+    
+            /// 停止定时刷新配额
+    
+    
+    
+            func stopQuotaRefreshTimer() {
+    
+    
+    
+                quotaRefreshTimer?.invalidate()
+    
+    
+    
+                quotaRefreshTimer = nil
+    
+    
+    
+                
+    
+    
+    
+                #if DEBUG
+    
+    
+    
+                print("配额定时刷新已停止")
+    
+    
+    
+                #endif
+    
+    
+    
+            }
+    
+    
+    
+        /// 加载用户配额信息
+    
+        func loadQuota() async {
+        isLoadingQuota = true
+        
+        do {
+            let info = try await QuotaService.shared.fetchQuota()
+            quotaInfo = info
+            updateQuotaHint()
+        } catch {
+            print("加载配额信息失败: \(error)")
+        }
+        
+        isLoadingQuota = false
+    }
+
+    /// 更新配额提示信息
+    private func updateQuotaHint() {
+        guard let info = quotaInfo else {
+            quotaHintMessage = nil
+            return
+        }
+        
+        if info.apiProvider == "laozhang" {
+            if info.hasFreeQuota && info.remainingQuota > 0 {
+                quotaHintMessage = "您还有 \(info.remainingQuota) 次免费额度"
+            } else if info.hasFreeQuota && info.remainingQuota == 0 {
+                quotaHintMessage = "免费额度已用完，请配置 API Key"
+            } else {
+                quotaHintMessage = nil
+            }
+        } else {
+            quotaHintMessage = nil
+        }
+    }
+
+    /// 检查是否可以生图
+    func checkCanGenerate() -> Bool {
+        // 如果正在加载配额信息，暂时允许生图（避免用户体验问题）
+        if isLoadingQuota {
+            return true
+        }
+        
+        let hasAPIKey = KeychainManager.shared.hasAPIKey()
+        let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
+        return hasAPIKey || hasFreeQuota
+    }
+
+    /// 获取生图提示信息
+    func getGenerationHint() -> String? {
+        // 如果正在加载配额信息，显示加载提示
+        if isLoadingQuota {
+            return "正在检查配额信息..."
+        }
+        
+        let hasAPIKey = KeychainManager.shared.hasAPIKey()
+        let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
+        
+        if hasFreeQuota {
+            return quotaHintMessage
+        } else if !hasAPIKey {
+            return "请先在设置中配置 API Key"
+        }
+        
+        return nil
+    }
+
     // MARK: - AI 生成工作流
     
     /// 图生图：准备预览（立即截取选框内容，然后弹出确认浮窗）
@@ -383,13 +575,16 @@ final class NativeEditorViewModel {
         loadAssets()
 
         do {
+            // 检查是否有免费额度
+            let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
+            
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: base64String,
                 model: "Nano Banana Pro"
             )
 
-            let response = try await generationService.generate(request: request)
+            let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
 
             loadingAsset.url = response.imageUrl
@@ -418,6 +613,9 @@ final class NativeEditorViewModel {
 
             prompt = ""
             stateManager.hideMagicFrame()
+            
+            // 重新加载配额信息（确保与后端一致）
+            await loadQuota()
 
         } catch {
             context.delete(loadingAsset)
@@ -441,9 +639,12 @@ final class NativeEditorViewModel {
             return
         }
 
-        // 提前验证 API Key
-        guard KeychainManager.shared.hasAPIKey() else {
-            flowHintMessage = "请先在设置中配置 API Key"
+        // 生成前刷新配额信息，确保显示最新的配额状态
+        await loadQuota()
+
+        // 检查是否可以生图
+        guard checkCanGenerate() else {
+            flowHintMessage = getGenerationHint()
             return
         }
 
@@ -484,13 +685,16 @@ final class NativeEditorViewModel {
         loadAssets()
 
         do {
+            // 检查是否有免费额度
+            let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
+            
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: nil,
                 model: "Nano Banana Pro"
             )
 
-            let response = try await generationService.generate(request: request)
+            let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
             loadingAsset.url = response.imageUrl
             loadingAsset.thumbnailUrl = response.thumbnailUrl
@@ -502,6 +706,9 @@ final class NativeEditorViewModel {
             }
 
             loadAssets()
+
+            // 重新加载配额信息（确保与后端一致）
+            await loadQuota()
 
         } catch {
             context.delete(loadingAsset)

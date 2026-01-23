@@ -359,9 +359,9 @@ class AuthService:
                 logger.error(f"Unexpected error validating GitHub Token: {str(e)}")
                 raise ProviderTokenError(f"Unexpected error: {str(e)}")
         elif provider == "email":
-            # 邮箱登录 Mock（需要集成邮件服务）
+            # 邮箱登录：直接使用原始邮箱
             return {
-                "email": f"user_{token[:8]}@example.com",
+                "email": token,
                 "username": f"EmailUser_{token[:8]}",
                 "provider_id": None,
                 "avatar_url": None

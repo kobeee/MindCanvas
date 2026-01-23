@@ -158,3 +158,54 @@ async def get_current_user_info(
         "avatar_url": current_user.avatar_url,
         "auth_provider": current_user.auth_provider
     }
+
+
+class QuotaResponse(BaseModel):
+    """配额响应"""
+    api_provider: str
+    has_free_quota: bool
+    max_quota: int
+    used_quota: int
+    remaining_quota: int
+    subscription_tier: str
+
+
+@router.get("/me/quota", response_model=QuotaResponse)
+async def get_user_quota(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    """
+    获取当前用户配额信息
+
+    Returns:
+        配额信息，包括：
+        - api_provider: API 提供商
+        - has_free_quota: 是否有免费额度
+        - max_quota: 最大配额
+        - used_quota: 已使用次数
+        - remaining_quota: 剩余次数
+        - subscription_tier: 订阅等级
+    """
+    from app.services.quota_service import QuotaService
+    
+    quota_service = QuotaService(db)
+    
+    # 获取配额信息
+    quota_info = await quota_service.check_quota(str(current_user.id))
+    
+    # 计算是否有免费额度
+    has_free_quota = (
+        current_user.api_provider == "laozhang" and
+        current_user.free_quota > 0 and
+        quota_info.remaining_quota > 0
+    )
+    
+    return QuotaResponse(
+        api_provider=current_user.api_provider,
+        has_free_quota=has_free_quota,
+        max_quota=quota_info.max_quota if quota_info.max_quota != -1 else 0,
+        used_quota=quota_info.used_quota,
+        remaining_quota=quota_info.remaining_quota if quota_info.remaining_quota != -1 else 0,
+        subscription_tier=current_user.subscription_tier
+    )
