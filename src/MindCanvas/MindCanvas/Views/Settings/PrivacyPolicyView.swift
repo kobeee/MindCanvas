@@ -8,6 +8,7 @@ struct PrivacyPolicyView: View {
                     titleSection
                     contentSections
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Spacing.xl)
             }
             .background(Theme.Colors.appBackground)
@@ -127,7 +128,7 @@ struct PrivacyPolicyView: View {
     
     private var childrenPrivacyContent: String {
         """
-        MindCanvas 不面向 13 岁以下儿童。我们不会故意收集儿童的个人信息。
+        MindCanvas 不会故意收集儿童的个人信息。
         """
     }
     

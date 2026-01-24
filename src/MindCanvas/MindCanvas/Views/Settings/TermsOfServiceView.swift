@@ -8,6 +8,7 @@ struct TermsOfServiceView: View {
                     titleSection
                     contentSections
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Spacing.xl)
             }
             .background(Theme.Colors.appBackground)

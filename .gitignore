@@ -10,7 +10,7 @@ library/
 # Cocos Creator project files
 .creator/
 profiles/
-settings/
+# settings/  # 已注释，避免误伤 iOS 项目的 Settings 目录
 
 # Cocos Creator assets meta files (可选择性忽略)
 # *.meta
