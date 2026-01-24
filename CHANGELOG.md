@@ -1,5 +1,146 @@
 # 开发记录
 
+## 2026-01-24 - 远程服务器部署与 Nginx 反向代理（完成）✅
+
+### 概述
+
+完成 MindCanvas 后端服务在远程服务器（65.75.220.11）的部署，配置 Nginx 反向代理和 Cloudflare SSL，实现 HTTPS 访问和安全防护。
+
+### 核心改动
+
+#### 1. 远程服务器部署
+
+**服务器配置**：
+- 服务器地址：65.75.220.11
+- SSH 登录：root 用户，无需密码
+- 部署路径：/root/mind-canvas/
+
+**部署架构**：
+```
+用户浏览器
+    ↓ (HTTPS)
+Cloudflare (SSL 终止 + Always Use HTTPS)
+    ↓ (HTTP)
+Nginx (80 端口，反向代理)
+    ↓ (127.0.0.1:8008)
+Docker Backend 容器 (8000 端口)
+    ↓
+PostgreSQL + Redis (Docker 网络内)
+```
+
+#### 2. Nginx 反向代理配置
+
+**新增文件**：
+- `src/backend/nginx/mindcanvas.conf` - Nginx 配置文件
+- `src/backend/scripts/setup_nginx.sh` - Nginx 安装和配置脚本
+
+**Nginx 配置要点**：
+- 监听 80 端口
+- 反向代理到 127.0.0.1:8008
+- 只允许通过域名访问（mindcanvas.escapemobius.cc）
+- 拒绝通过 IP 地址访问（返回 444）
+- 添加安全头部（X-Frame-Options、X-Content-Type-Options 等）
+
+#### 3. Docker Compose 配置优化
+
+**修改文件**：`src/backend/docker-compose.yml`
+
+**改动**：
+- Backend 服务端口映射改为 127.0.0.1:8008:8000（只监听本地）
+- Admin 服务不暴露端口（Docker 网络内访问）
+- PostgreSQL 和 Redis 不暴露端口
+
+#### 4. 部署脚本集成 Nginx 管理
+
+**修改文件**：`src/backend/deploy.sh`
+
+**新增命令**：
+- `./deploy.sh setup-nginx` - 安装和配置 Nginx
+- `./deploy.sh start-nginx` - 启动 Nginx
+- `./deploy.sh stop-nginx` - 停止 Nginx
+- `./deploy.sh restart-nginx` - 重启 Nginx
+
+#### 5. Cloudflare 配置
+
+**DNS 配置**：
+- 类型：A 记录
+- 名称：mindcanvas
+- IPv4 地址：65.75.220.11
+- 代理状态：已代理（橙色云朵）
+
+**SSL 配置**：
+- 模式：Flexible（Cloudflare 到源服务器使用 HTTP）
+- Always Use HTTPS：启用（自动重定向 HTTP 到 HTTPS）
+- SSL 证书：Cloudflare Origin Certificate
+
+#### 6. 安全配置
+
+**多层安全防护**：
+1. **Cloudflare 层面**：
+   - Always Use HTTPS 自动重定向 HTTP 到 HTTPS
+   - DDoS 防护
+   - CDN 加速
+
+2. **Nginx 层面**：
+   - 拒绝通过 IP 地址访问
+   - 只允许通过域名访问
+   - 添加安全头部
+
+3. **Docker 层面**：
+   - Backend 只监听 127.0.0.1
+   - Admin 服务不暴露端口
+   - PostgreSQL 和 Redis 不暴露端口
+
+### 测试验证
+
+**功能测试**：
+- ✅ `https://mindcanvas.escapemobius.cc/health` - 200 OK
+- ✅ `https://mindcanvas.escapemobius.cc/` - 200 OK
+- ✅ `https://mindcanvas.escapemobius.cc/api/v1/auth/send-verification-code` - 200 OK
+
+**安全测试**：
+- ✅ `http://mindcanvas.escapemobius.cc/health` - 301 重定向到 HTTPS
+- ✅ `http://65.75.220.11/health` - 连接被拒绝（444）
+- ✅ 只允许通过域名访问，IP 访问被拒绝
+
+**服务状态**：
+- ✅ Docker 服务运行正常（4个容器全部 healthy）
+- ✅ Nginx 运行正常（监听 80 端口）
+- ✅ Backend 服务监听 127.0.0.1:8008
+
+### 部署文件清单
+
+**新增文件**（2个）：
+- `src/backend/nginx/mindcanvas.conf` - Nginx 配置文件
+- `src/backend/scripts/setup_nginx.sh` - Nginx 安装脚本
+
+**修改文件**（2个）：
+- `src/backend/docker-compose.yml` - 端口映射优化
+- `src/backend/deploy.sh` - 集成 Nginx 管理命令
+
+### iOS 端配置更新
+
+**需要更新的配置**：
+- API_BASE_URL: `https://mindcanvas.escapemobius.cc`
+- IMAGE_BASE_URL: `https://mindcanvas.escapemobius.cc/images/`
+
+### 技术亮点
+
+1. **子域名架构**：使用 mindcanvas.escapemobius.cc 子域名，便于多应用管理
+2. **多层安全防护**：Cloudflare + Nginx + Docker 三层安全防护
+3. **SSL 终止**：Cloudflare 处理 SSL，源服务器使用 HTTP
+4. **域名隔离**：只允许通过域名访问，禁止 IP 访问
+5. **一键部署**：集成 Nginx 管理到部署脚本，支持一键安装和配置
+
+### 下一步
+
+1. 更新 iOS 端 API_BASE_URL 配置
+2. 更新后端 IMAGE_BASE_URL 配置
+3. 生产环境监控和日志优化
+4. 性能优化
+
+---
+
 ## 2026-01-24 - 管理员接口安全隔离与 Docker 化（完成）✅
 
 ### 概述

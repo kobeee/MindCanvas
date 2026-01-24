@@ -47,6 +47,10 @@ show_help() {
     echo "  rebuild      重新构建并启动服务"
     echo "  clean        清理服务（保留数据）"
     echo "  reset        重置服务（删除所有数据）"
+    echo "  setup-nginx  安装和配置 Nginx"
+    echo "  start-nginx  启动 Nginx"
+    echo "  stop-nginx   停止 Nginx"
+    echo "  restart-nginx 重启 Nginx"
     echo "  start-admin  启动管理服务（仅本地）"
     echo "  stop-admin   停止管理服务"
     echo "  quota        注入邮箱配额"
@@ -55,6 +59,7 @@ show_help() {
     echo ""
     echo "示例:"
     echo "  ./deploy.sh deploy          # 部署并启动服务"
+    echo "  ./deploy.sh setup-nginx     # 安装和配置 Nginx"
     echo "  ./deploy.sh start-admin     # 启动管理服务"
     echo "  ./deploy.sh quota test@example.com 10  # 注入邮箱配额"
     echo "  ./deploy.sh list-quota      # 查看邮箱配额"
@@ -292,6 +297,78 @@ stop_admin() {
     echo -e "${GREEN}✓ 管理服务已停止${NC}"
 }
 
+# 安装和配置 Nginx
+setup_nginx() {
+    echo -e "${YELLOW}正在安装和配置 Nginx...${NC}"
+
+    if [ ! -f "scripts/setup_nginx.sh" ]; then
+        echo -e "${RED}错误: scripts/setup_nginx.sh 文件不存在${NC}"
+        exit 1
+    fi
+
+    chmod +x scripts/setup_nginx.sh
+    bash scripts/setup_nginx.sh
+
+    echo -e "${GREEN}✓ Nginx 安装和配置完成${NC}"
+    echo -e "${YELLOW}提示: 请确保 SSL 证书已正确放置${NC}"
+    echo -e "  - 证书: /etc/ssl/certs/cloudflare-origin.pem"
+    echo -e "  - 私钥: /etc/ssl/private/cloudflare-origin.key"
+}
+
+# 启动 Nginx
+start_nginx() {
+    echo -e "${YELLOW}正在启动 Nginx...${NC}"
+
+    if ! command -v nginx &> /dev/null; then
+        echo -e "${RED}错误: Nginx 未安装，请先运行 './deploy.sh setup-nginx'${NC}"
+        exit 1
+    fi
+
+    systemctl start nginx
+    systemctl enable nginx
+
+    if systemctl is-active --quiet nginx; then
+        echo -e "${GREEN}✓ Nginx 已启动${NC}"
+    else
+        echo -e "${RED}✗ Nginx 启动失败${NC}"
+        systemctl status nginx
+        exit 1
+    fi
+}
+
+# 停止 Nginx
+stop_nginx() {
+    echo -e "${YELLOW}正在停止 Nginx...${NC}"
+
+    if ! command -v nginx &> /dev/null; then
+        echo -e "${YELLOW}Nginx 未安装${NC}"
+        exit 0
+    fi
+
+    systemctl stop nginx
+    echo -e "${GREEN}✓ Nginx 已停止${NC}"
+}
+
+# 重启 Nginx
+restart_nginx() {
+    echo -e "${YELLOW}正在重启 Nginx...${NC}"
+
+    if ! command -v nginx &> /dev/null; then
+        echo -e "${RED}错误: Nginx 未安装，请先运行 './deploy.sh setup-nginx'${NC}"
+        exit 1
+    fi
+
+    systemctl restart nginx
+
+    if systemctl is-active --quiet nginx; then
+        echo -e "${GREEN}✓ Nginx 已重启${NC}"
+    else
+        echo -e "${RED}✗ Nginx 重启失败${NC}"
+        systemctl status nginx
+        exit 1
+    fi
+}
+
 # 显示成功信息
 show_success() {
     echo ""
@@ -300,15 +377,19 @@ show_success() {
     echo "=========================================="
     echo ""
     echo "服务地址："
-    echo "  - 后端 API: http://localhost:8008"
-    echo "  - API 文档: http://localhost:8008/docs"
-    echo "  - 健康检查: http://localhost:8008/health"
+    echo "  - 后端 API (容器内): http://localhost:8000"
+    echo "  - Nginx 反向代理: http://localhost:8008"
+    echo "  - 生产环境: https://mindcanvas.escapemobius.cc"
+    echo "  - API 文档: https://mindcanvas.escapemobius.cc/docs"
+    echo "  - 健康检查: https://mindcanvas.escapemobius.cc/health"
     echo ""
     echo "常用命令："
     echo "  - 查看日志: ./deploy.sh logs"
     echo "  - 停止服务: ./deploy.sh stop"
     echo "  - 重启服务: ./deploy.sh restart"
     echo "  - 查看状态: ./deploy.sh status"
+    echo "  - 安装 Nginx: ./deploy.sh setup-nginx"
+    echo "  - 启动 Nginx: ./deploy.sh start-nginx"
     echo "  - 注入配额: ./deploy.sh quota <email> <quota>"
     echo "  - 查询配额: ./deploy.sh list-quota"
     echo ""
@@ -344,6 +425,18 @@ main() {
             ;;
         reset)
             reset
+            ;;
+        setup-nginx)
+            setup_nginx
+            ;;
+        start-nginx)
+            start_nginx
+            ;;
+        stop-nginx)
+            stop_nginx
+            ;;
+        restart-nginx)
+            restart_nginx
             ;;
         start-admin)
             start_admin

@@ -394,6 +394,159 @@ private var projects: [Project]
 - 开发记录使用 `CHANGELOG.md`，每次以换行追加到文件头部，**无论变更是否在同一天内发送，总是最新的修改出现在文件的最顶部，除非明确要求整合CHANGELOG的内容，否则不允许以修改的方式覆盖CHANGELOG，CHANGELOG就是要记录过程的！！！！！！！**
 - 在 Plan 模式下产出的方案需保存到 `docs/design/` 目录
 
+## 远程服务器部署信息
+
+**服务器地址**: 65.75.220.11
+
+**SSH 登录**:
+- 用户: root
+- 方式: SSH 密钥登录（无需密码）
+- 命令: `ssh root@65.75.220.11`
+
+**部署路径**: `/root/mind-canvas/`
+
+**部署架构**:
+```
+用户浏览器
+    ↓ (HTTPS)
+Cloudflare (SSL 终止 + Always Use HTTPS)
+    ↓ (HTTP)
+Nginx (80 端口，反向代理)
+    ↓ (127.0.0.1:8008)
+Docker Backend 容器 (8000 端口)
+    ↓
+PostgreSQL + Redis (Docker 网络内)
+```
+
+**服务配置**:
+- **Backend 服务**: 对外暴露端口 8008（映射到容器内 8000，仅监听 127.0.0.1）
+- **Nginx**: 监听 80 端口，反向代理到 Backend 服务
+- **PostgreSQL**: 未暴露端口（仅在 Docker 网络内访问）
+- **Redis**: 未暴露端口（仅在 Docker 网络内访问）
+- **Admin 服务**: 未暴露端口（仅在 Docker 网络内访问）
+
+**域名配置**:
+- **子域名**: mindcanvas.escapemobius.cc
+- **SSL**: Cloudflare Origin Certificate + Always Use HTTPS
+- **Cloudflare 模式**: Flexible（Cloudflare 到源服务器使用 HTTP）
+
+**安全配置**:
+- PostgreSQL 和 Redis 端口未对外暴露，仅通过 Docker 网络访问
+- 管理服务在 Docker 容器内运行，不对外暴露
+- Backend 服务只监听 127.0.0.1，不对外暴露
+- Nginx 拒绝通过 IP 地址访问，只允许通过域名访问
+- Cloudflare Always Use HTTPS 自动重定向 HTTP 到 HTTPS
+
+**服务状态检查**:
+```bash
+# SSH 登录服务器
+ssh root@65.75.220.11
+
+# 进入部署目录
+cd /root/mind-canvas
+
+# 查看服务状态
+docker-compose ps
+
+# 查看服务日志
+docker-compose logs -f backend
+
+# 重启服务
+docker-compose restart
+
+# 停止服务
+docker-compose down
+
+# 启动服务
+docker-compose up -d
+
+# Nginx 相关命令
+systemctl status nginx
+systemctl restart nginx
+nginx -t  # 测试配置
+```
+
+**健康检查接口**:
+- URL: `https://mindcanvas.escapemobius.cc/health`
+- 返回: `{"status":"healthy","service":"MindCanvas Backend"}`
+- HTTP 访问: `http://mindcanvas.escapemobius.cc/health` 自动重定向到 HTTPS
+- IP 访问: 被拒绝（返回 444）
+
+**部署文件清单**:
+- docker-compose.yml
+- .env
+- Dockerfile
+- requirements.txt
+- app/（应用代码）
+- migrations/（数据库迁移脚本）
+- storage/（存储目录，包含 images/）
+- nginx/（Nginx 配置文件）
+- scripts/（部署脚本）
+
+**Docker 镜像**:
+- 镜像名: mindcanvas-backend:latest
+- 镜像文件: /root/mind-canvas/mindcanvas-backend.tar（已加载）
+
+**部署脚本命令**:
+```bash
+# 安装和配置 Nginx
+./deploy.sh setup-nginx
+
+# 启动 Nginx
+./deploy.sh start-nginx
+
+# 停止 Nginx
+./deploy.sh stop-nginx
+
+# 重启 Nginx
+./deploy.sh restart-nginx
+
+# 部署并启动服务
+./deploy.sh deploy
+
+# 启动服务
+./deploy.sh start
+
+# 停止服务
+./deploy.sh stop
+
+# 重启服务
+./deploy.sh restart
+
+# 查看状态
+./deploy.sh status
+
+# 查看日志
+./deploy.sh logs
+
+# 重新构建
+./deploy.sh rebuild
+
+# 清理服务（保留数据）
+./deploy.sh clean
+
+# 重置服务（删除所有数据）
+./deploy.sh reset
+
+# 启动管理服务
+./deploy.sh start-admin
+
+# 停止管理服务
+./deploy.sh stop-admin
+
+# 注入邮箱配额
+./deploy.sh quota <email> <quota>
+
+# 查询邮箱配额
+./deploy.sh list-quota
+```
+
+**注意**: 本地开发和远程部署使用相同的代码库，修改代码后需要重新构建镜像并部署到服务器。
+
+**iOS 端配置**:
+- API_BASE_URL: `https://mindcanvas.escapemobius.cc`
+- IMAGE_BASE_URL: `https://mindcanvas.escapemobius.cc/images/`
+
 ## 重要文件路径
 
 ### 应用核心
