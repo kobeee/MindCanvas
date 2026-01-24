@@ -1,5 +1,193 @@
 # 开发记录
 
+## 2026-01-24 - 邮箱配额管理增强（完成）✅
+
+### 概述
+
+增强邮箱配额管理功能，支持重复注入配额并累加额度，新增查询指定邮箱剩余额度和减少指定邮箱额度的功能，并集成到部署脚本中。实现"能加能减"的灵活配额管理。
+
+### 核心改动
+
+#### 1. 允许重复注入邮箱配额并累加额度
+
+**修改文件**：`src/backend/app/routers/admin.py`
+
+**改动**：
+- 移除"已使用的邮箱再次注入无效"的限制
+- 移除"超过初始指定次数后无效"的限制
+- 如果邮箱已存在配额配置，新的配额将累加到现有配额上
+- 如果邮箱不存在，则创建新记录
+
+**修改后逻辑**：
+```python
+if existing:
+    # 邮箱已存在，累加配额
+    new_quota = existing[0] + request.quota
+    await db.execute(
+        text("""
+            UPDATE email_quota_configs
+            SET initial_quota = :new_quota
+            WHERE email = :email
+        """),
+        {"email": request.email, "new_quota": new_quota}
+    )
+else:
+    # 邮箱不存在，创建新记录
+    await db.execute(
+        text("""
+            INSERT INTO email_quota_configs (email, initial_quota)
+            VALUES (:email, :quota)
+        """),
+        {"email": request.email, "quota": request.quota}
+    )
+```
+
+#### 2. 新增查询指定邮箱配额接口
+
+**新增接口**：`GET /api/v1/admin/email-quota/{email}`
+
+**功能**：
+- 查询指定邮箱的配额信息
+- 返回初始配额、已使用配额、剩余配额
+
+**响应示例**：
+```json
+{
+  "email": "test@example.com",
+  "initial_quota": 10,
+  "used_quota": 3,
+  "remaining_quota": 7,
+  "created_at": "2026-01-24T10:00:00Z"
+}
+```
+
+#### 3. 新增减少指定邮箱初始配额接口
+
+**新增接口**：`POST /api/v1/admin/email-quota/reduce`
+
+**功能**：
+- 减少指定邮箱的初始配额（initial_quota）
+- 减少后的初始配额不能小于 0
+- 减少后的初始配额不能小于已使用配额（total_quota_used）
+
+**请求示例**：
+```json
+{
+  "email": "test@example.com",
+  "amount": 5
+}
+```
+
+**响应示例**：
+```json
+{
+  "success": true,
+  "message": "Email quota reduced successfully",
+  "old_initial": 10,
+  "reduced_by": 5,
+  "new_initial": 5,
+  "used_quota": 3,
+  "remaining_quota": 2
+}
+```
+
+**说明**：这是"能加能减"功能的核心，管理员可以收回已分配的配额。
+
+#### 4. 新增命令行脚本
+
+**新增文件**（2个）：
+- `src/backend/scripts/get_email_quota.py` - 查询指定邮箱配额
+- `src/backend/scripts/reduce_email_quota.py` - 减少指定邮箱配额
+
+**使用方式**：
+```bash
+# 查询指定邮箱配额
+python get_email_quota.py test@example.com
+
+# 减少指定邮箱配额
+python reduce_email_quota.py test@example.com 5
+```
+
+#### 5. 部署脚本增强
+
+**修改文件**：`src/backend/deploy.sh`
+
+**新增命令**：
+- `./deploy.sh get-quota <email>` - 查询指定邮箱配额
+- `./deploy.sh reduce-quota <email> <amount>` - 减少指定邮箱配额
+- `./deploy.sh sync` - 同步到远程服务器并重新部署
+
+**sync 命令功能**：
+- 使用 rsync 同步代码到远程服务器
+- 排除不必要的文件（.git、__pycache__、venv、logs、storage 等）
+- 在远程服务器上重新部署
+- 支持环境变量配置远程服务器信息
+
+**环境变量配置**：
+```bash
+export REMOTE_SERVER="65.75.220.11"
+export REMOTE_USER="root"
+export REMOTE_PATH="/root/mind-canvas"
+```
+
+### 使用场景
+
+**场景1：重复注入配额**
+```bash
+# 第一次注入 10 次配额
+./deploy.sh quota test@example.com 10
+
+# 第二次注入 5 次配额（累加到 15 次）
+./deploy.sh quota test@example.com 5
+
+# 查询配额（显示 15 次）
+./deploy.sh get-quota test@example.com
+```
+
+**场景2：减少初始配额（收回配额）**
+```bash
+# 注入 20 次配额
+./deploy.sh quota 497189972@qq.com 20
+
+# 减少 18 次配额（从 20 减到 2）
+./deploy.sh reduce-quota 497189972@qq.com 18
+
+# 查询配额（显示 2 次）
+./deploy.sh get-quota 497189972@qq.com
+```
+
+**场景3：同步到远程服务器**
+```bash
+# 同步代码到远程服务器并重新部署
+./deploy.sh sync
+```
+
+### 验证结果
+
+**远程服务器验证**：
+- 注入 20 次配额 ✅
+- 减少 18 次配额（从 20 减到 2）✅
+- 查询配额：初始配额 2，已使用 0，剩余 2 ✅
+
+### 修改文件清单
+
+**新增文件**（2个）：
+- `src/backend/scripts/get_email_quota.py` - 查询指定邮箱配额脚本
+- `src/backend/scripts/reduce_email_quota.py` - 减少指定邮箱配额脚本
+
+**修改文件**（2个）：
+- `src/backend/app/routers/admin.py` - 修改注入逻辑，新增查询和减少接口
+- `src/backend/deploy.sh` - 添加新命令
+
+### 技术亮点
+
+1. **配额累加**：支持重复注入配额并累加，灵活性更高
+2. **配额收回**：支持减少初始配额，实现"能加能减"
+3. **一键部署**：集成 sync 命令，一键同步到远程服务器并重新部署
+4. **环境变量配置**：支持通过环境变量配置远程服务器信息
+
+---
+
 ## 2026-01-24 - 远程服务器部署与 Nginx 反向代理（完成）✅
 
 ### 概述

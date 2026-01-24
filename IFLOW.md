@@ -537,8 +537,17 @@ nginx -t  # 测试配置
 # 注入邮箱配额
 ./deploy.sh quota <email> <quota>
 
-# 查询邮箱配额
+# 查询所有邮箱配额
 ./deploy.sh list-quota
+
+# 查询指定邮箱配额
+./deploy.sh get-quota <email>
+
+# 减少指定邮箱配额
+./deploy.sh reduce-quota <email> <amount>
+
+# 同步到远程服务器并重新部署
+./deploy.sh sync
 ```
 
 **注意**: 本地开发和远程部署使用相同的代码库，修改代码后需要重新构建镜像并部署到服务器。

@@ -54,7 +54,10 @@ show_help() {
     echo "  start-admin  启动管理服务（仅本地）"
     echo "  stop-admin   停止管理服务"
     echo "  quota        注入邮箱配额"
-    echo "  list-quota   查看邮箱配额"
+    echo "  list-quota   查看所有邮箱配额"
+    echo "  get-quota    查询指定邮箱配额"
+    echo "  reduce-quota 减少指定邮箱配额"
+    echo "  sync         同步到远程服务器并重新部署"
     echo "  help         显示帮助信息"
     echo ""
     echo "示例:"
@@ -62,7 +65,10 @@ show_help() {
     echo "  ./deploy.sh setup-nginx     # 安装和配置 Nginx"
     echo "  ./deploy.sh start-admin     # 启动管理服务"
     echo "  ./deploy.sh quota test@example.com 10  # 注入邮箱配额"
-    echo "  ./deploy.sh list-quota      # 查看邮箱配额"
+    echo "  ./deploy.sh list-quota      # 查看所有邮箱配额"
+    echo "  ./deploy.sh get-quota test@example.com  # 查询指定邮箱配额"
+    echo "  ./deploy.sh reduce-quota test@example.com 5  # 减少指定邮箱配额"
+    echo "  ./deploy.sh sync            # 同步到远程服务器并重新部署"
 }
 
 # 检查 .env 文件
@@ -258,6 +264,60 @@ list_quota() {
     echo ""
 }
 
+# 查询指定邮箱配额
+get_quota() {
+    if [ -z "$2" ]; then
+        echo "用法: ./deploy.sh get-quota <email>"
+        echo "示例: ./deploy.sh get-quota test@example.com"
+        exit 1
+    fi
+
+    check_env
+
+    EMAIL=$2
+
+    # 读取管理员密钥
+    ADMIN_KEY=$(grep "ADMIN_SECRET_KEY" .env | cut -d '=' -f2)
+
+    echo -e "${YELLOW}查询指定邮箱配额...${NC}"
+    echo "  Email: $EMAIL"
+
+    # 通过 docker exec 调用管理服务
+    docker-compose exec -T admin curl -s -X GET "http://localhost:8009/api/v1/admin/email-quota/$EMAIL" \
+        -H "admin-secret: $ADMIN_KEY"
+
+    echo ""
+}
+
+# 减少指定邮箱配额
+reduce_quota() {
+    if [ -z "$2" ] || [ -z "$3" ]; then
+        echo "用法: ./deploy.sh reduce-quota <email> <amount>"
+        echo "示例: ./deploy.sh reduce-quota test@example.com 5"
+        exit 1
+    fi
+
+    check_env
+
+    EMAIL=$2
+    AMOUNT=$3
+
+    # 读取管理员密钥
+    ADMIN_KEY=$(grep "ADMIN_SECRET_KEY" .env | cut -d '=' -f2)
+
+    echo -e "${YELLOW}减少指定邮箱配额...${NC}"
+    echo "  Email: $EMAIL"
+    echo "  Amount: $AMOUNT"
+
+    # 通过 docker exec 调用管理服务
+    docker-compose exec -T admin curl -s -X POST "http://localhost:8009/api/v1/admin/email-quota/reduce" \
+        -H "admin-secret: $ADMIN_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\": \"$EMAIL\", \"amount\": $AMOUNT}"
+
+    echo ""
+}
+
 # 启动管理服务
 start_admin() {
     check_env
@@ -369,6 +429,73 @@ restart_nginx() {
     fi
 }
 
+# 同步到远程服务器并重新部署
+sync() {
+    echo -e "${YELLOW}正在同步到远程服务器...${NC}"
+
+    # 检查是否配置了远程服务器
+    if [ -z "$REMOTE_SERVER" ] && [ -z "$REMOTE_USER" ] && [ -z "$REMOTE_PATH" ]; then
+        echo -e "${RED}错误: 未配置远程服务器信息${NC}"
+        echo "请在脚本中设置以下环境变量："
+        echo "  - REMOTE_SERVER: 远程服务器地址"
+        echo "  - REMOTE_USER: 远程服务器用户名"
+        echo "  - REMOTE_PATH: 远程服务器部署路径"
+        exit 1
+    fi
+
+    # 从环境变量读取远程服务器信息
+    REMOTE_SERVER=${REMOTE_SERVER:-"mindcanvas.escapemobius.cc"}
+    REMOTE_USER=${REMOTE_USER:-"root"}
+    REMOTE_PATH=${REMOTE_PATH:-"/root/mindcanvas/backend"}
+
+    echo "  远程服务器: $REMOTE_USER@$REMOTE_SERVER"
+    echo "  部署路径: $REMOTE_PATH"
+
+    # 检查 SSH 连接
+    echo -e "${YELLOW}检查 SSH 连接...${NC}"
+    if ! ssh -o ConnectTimeout=5 "$REMOTE_USER@$REMOTE_SERVER" "echo 'SSH connection successful'" 2>/dev/null; then
+        echo -e "${RED}错误: 无法连接到远程服务器${NC}"
+        exit 1
+    fi
+
+    # 同步代码
+    echo -e "${YELLOW}同步代码到远程服务器...${NC}"
+    rsync -avz --exclude '.git' \
+        --exclude '__pycache__' \
+        --exclude '*.pyc' \
+        --exclude '.pytest_cache' \
+        --exclude 'venv' \
+        --exclude 'logs' \
+        --exclude 'storage/images/generated' \
+        --exclude 'storage/images/uploaded' \
+        --exclude '.env' \
+        --exclude 'node_modules' \
+        ./ "$REMOTE_USER@$REMOTE_SERVER:$REMOTE_PATH/"
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 代码同步成功${NC}"
+    else
+        echo -e "${RED}✗ 代码同步失败${NC}"
+        exit 1
+    fi
+
+    # 在远程服务器上重新部署
+    echo -e "${YELLOW}在远程服务器上重新部署...${NC}"
+    ssh "$REMOTE_USER@$REMOTE_SERVER" "cd $REMOTE_PATH && ./deploy.sh restart"
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 远程服务器部署成功${NC}"
+    else
+        echo -e "${RED}✗ 远程服务器部署失败${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo -e "${GREEN}✓ 同步完成！${NC}"
+    echo "=========================================="
+}
+
 # 显示成功信息
 show_success() {
     echo ""
@@ -449,6 +576,15 @@ main() {
             ;;
         list-quota)
             list_quota
+            ;;
+        get-quota)
+            get_quota "$@"
+            ;;
+        reduce-quota)
+            reduce_quota "$@"
+            ;;
+        sync)
+            sync
             ;;
         help|--help|-h)
             show_help
