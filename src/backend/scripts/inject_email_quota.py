@@ -14,7 +14,7 @@ import asyncio
 import httpx
 
 
-async def inject_email_quota(email: str, quota: int, admin_secret: str, base_url: str = "http://localhost:8008"):
+async def inject_email_quota(email: str, quota: int, admin_secret: str, base_url: str = "http://127.0.0.1:8009"):
     """注入邮箱配额"""
     url = f"{base_url}/api/v1/admin/email-quota"
 

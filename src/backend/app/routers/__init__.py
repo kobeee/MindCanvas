@@ -4,6 +4,7 @@
 导出所有 API 路由
 """
 
-from app.routers import auth, assets, feed, tasks
+# 注意：为了避免循环导入和依赖问题，这里不再自动导入所有路由
+# 各路由模块应该按需导入
 
-__all__ = ["auth", "assets", "feed", "tasks"]
+__all__ = ["auth", "assets", "feed", "tasks", "admin"]

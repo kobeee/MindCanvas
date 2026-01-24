@@ -47,12 +47,15 @@ show_help() {
     echo "  rebuild      重新构建并启动服务"
     echo "  clean        清理服务（保留数据）"
     echo "  reset        重置服务（删除所有数据）"
+    echo "  start-admin  启动管理服务（仅本地）"
+    echo "  stop-admin   停止管理服务"
     echo "  quota        注入邮箱配额"
     echo "  list-quota   查看邮箱配额"
     echo "  help         显示帮助信息"
     echo ""
     echo "示例:"
     echo "  ./deploy.sh deploy          # 部署并启动服务"
+    echo "  ./deploy.sh start-admin     # 启动管理服务"
     echo "  ./deploy.sh quota test@example.com 10  # 注入邮箱配额"
     echo "  ./deploy.sh list-quota      # 查看邮箱配额"
 }
@@ -225,7 +228,8 @@ inject_quota() {
     echo "  Email: $EMAIL"
     echo "  Quota: $QUOTA"
 
-    curl -X POST "http://localhost:8008/api/v1/admin/email-quota" \
+    # 通过 docker exec 调用管理服务
+    docker-compose exec -T admin curl -s -X POST "http://localhost:8009/api/v1/admin/email-quota" \
         -H "admin-secret: $ADMIN_KEY" \
         -H "Content-Type: application/json" \
         -d "{\"email\": \"$EMAIL\", \"quota\": $QUOTA}"
@@ -241,10 +245,51 @@ list_quota() {
     ADMIN_KEY=$(grep "ADMIN_SECRET_KEY" .env | cut -d '=' -f2)
 
     echo -e "${YELLOW}查询邮箱配额...${NC}"
-    curl -X GET "http://localhost:8008/api/v1/admin/email-quota" \
+
+    # 通过 docker exec 调用管理服务
+    docker-compose exec -T admin curl -s -X GET "http://localhost:8009/api/v1/admin/email-quota" \
         -H "admin-secret: $ADMIN_KEY"
 
     echo ""
+}
+
+# 启动管理服务
+start_admin() {
+    check_env
+
+    echo -e "${YELLOW}正在启动管理服务（Docker 容器）...${NC}"
+
+    # 检查是否已经在运行
+    if docker ps | grep -q mindcanvas_admin; then
+        echo -e "${YELLOW}管理服务已在运行${NC}"
+        return 0
+    fi
+
+    # 启动管理服务
+    docker-compose up -d admin
+
+    # 等待服务启动
+    echo -e "${YELLOW}等待管理服务启动...${NC}"
+    sleep 5
+
+    # 检查服务状态
+    if docker ps | grep -q mindcanvas_admin; then
+        echo -e "${GREEN}✓ 管理服务已启动${NC}"
+        echo -e "  容器名称: mindcanvas_admin"
+        echo -e "  内部端口: 8009"
+    else
+        echo -e "${RED}✗ 管理服务启动失败${NC}"
+        docker-compose logs admin
+        exit 1
+    fi
+}
+
+# 停止管理服务
+stop_admin() {
+    echo -e "${YELLOW}正在停止管理服务...${NC}"
+
+    docker-compose stop admin
+    echo -e "${GREEN}✓ 管理服务已停止${NC}"
 }
 
 # 显示成功信息
@@ -299,6 +344,12 @@ main() {
             ;;
         reset)
             reset
+            ;;
+        start-admin)
+            start_admin
+            ;;
+        stop-admin)
+            stop_admin
             ;;
         quota)
             inject_quota "$@"

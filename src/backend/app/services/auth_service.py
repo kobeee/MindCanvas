@@ -24,7 +24,7 @@ from uuid import UUID
 import bcrypt
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 import logging
 
 from app.config import settings
@@ -408,6 +408,23 @@ class AuthService:
 
             if user:
                 logger.debug(f"Found existing user by email: {user.id}")
+
+                # 如果是邮箱登录且用户没有免费额度，检查邮箱配额配置
+                if provider == "email" and user.free_quota == 0:
+                    quota_result = await self.db.execute(
+                        text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+                        {"email": user_info["email"]}
+                    )
+                    quota_row = quota_result.fetchone()
+
+                    if quota_row and quota_row[0] > 0:
+                        # 同步邮箱配额到用户
+                        user.api_provider = "laozhang"
+                        user.free_quota = quota_row[0]
+                        await self.db.commit()
+                        await self.db.refresh(user)
+                        logger.info(f"Synced email quota for existing user {user.id}: {quota_row[0]}")
+
                 return user
 
             # 创建新用户
@@ -423,6 +440,22 @@ class AuthService:
             self.db.add(new_user)
             await self.db.commit()
             await self.db.refresh(new_user)
+
+            # 检查是否有邮箱配额配置，如果有则同步到用户
+            if provider == "email":
+                quota_result = await self.db.execute(
+                    text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+                    {"email": user_info["email"]}
+                )
+                quota_row = quota_result.fetchone()
+
+                if quota_row and quota_row[0] > 0:
+                    # 同步邮箱配额到用户
+                    new_user.api_provider = "laozhang"
+                    new_user.free_quota = quota_row[0]
+                    await self.db.commit()
+                    await self.db.refresh(new_user)
+                    logger.info(f"Synced email quota for user {new_user.id}: {quota_row[0]}")
 
             logger.info(f"Created new user: {new_user.id}")
             return new_user

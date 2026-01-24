@@ -15,7 +15,7 @@ import httpx
 from datetime import datetime
 
 
-async def list_email_quotas(admin_secret: str, base_url: str = "http://localhost:8008"):
+async def list_email_quotas(admin_secret: str, base_url: str = "http://127.0.0.1:8009"):
     """查询所有邮箱配额"""
     url = f"{base_url}/api/v1/admin/email-quota"
 

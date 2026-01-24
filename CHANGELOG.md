@@ -1,5 +1,272 @@
 # 开发记录
 
+## 2026-01-24 - 管理员接口安全隔离与 Docker 化（完成）✅
+
+### 概述
+
+将管理员接口从主服务中拆分出来，创建独立的管理服务，并 Docker 化部署，确保管理员接口不对外暴露，提高系统安全性。同时修复配额自动同步功能，实现用户登录时自动同步邮箱配额。
+
+### 核心改动
+
+#### 1. 管理服务 Docker 化
+
+**修改文件**：`src/backend/docker-compose.yml`
+
+**改动**：
+- 新增 `admin` 服务，在 Docker 容器内运行管理服务
+- 使用 `docker-compose exec` 调用管理服务
+- 只监听容器内部的 `127.0.0.1:8009`，不对外暴露
+
+**安全性提升**：
+- 管理服务完全隔离在 Docker 网络内
+- 无法从外部直接访问
+- 只能通过 `docker-compose exec` 调用
+
+#### 2. 部署脚本更新
+
+**修改文件**：`src/backend/deploy.sh`
+
+**改动**：
+- `start-admin`：通过 `docker-compose up -d admin` 启动管理服务
+- `stop-admin`：通过 `docker-compose stop admin` 停止管理服务
+- `quota`：通过 `docker-compose exec -T admin curl` 注入配额
+- `list-quota`：通过 `docker-compose exec -T admin curl` 查询配额
+
+#### 3. 配额自动同步
+
+**修改文件**：`src/backend/app/services/auth_service.py`
+
+**改动**：
+- 用户登录时自动检查邮箱配额配置
+- 如果有邮箱配额，自动同步到用户表
+- 设置 `api_provider` 为 `laozhang`，`free_quota` 为配额值
+
+**功能**：
+- 新用户注册时自动同步配额
+- 老用户登录时自动同步配额（如果之前没有配额）
+
+#### 4. 路由模块优化
+
+**修改文件**：`src/backend/app/routers/__init__.py`
+
+**改动**：
+- 移除自动导入所有路由
+- 避免循环依赖问题
+- 各路由按需导入
+
+### 架构对比
+
+**修改前**：
+```
+主服务（8008 端口，对外暴露）
+├── /api/v1/auth      ← iOS 认证
+├── /api/v1/tasks     ← iOS 生图
+├── /api/v1/assets    ← iOS 资源
+├── /api/v1/users     ← iOS 用户
+└── /api/v1/admin     ← 管理员接口 ← 安全隐患！
+```
+
+**修改后**：
+```
+主服务（8008 端口，对外暴露）
+├── /api/v1/auth      ← iOS 认证
+├── /api/v1/tasks     ← iOS 生图
+├── /api/v1/assets    ← iOS 资源
+└── /api/v1/users     ← iOS 用户
+
+管理服务（Docker 容器内，127.0.0.1:8009）
+└── /api/v1/admin     ← 管理员接口 ← 绝对安全！
+```
+
+### 测试验证
+
+**主服务测试**：
+- 健康检查 ✅
+- 发送验证码 ✅
+- 邮箱登录 ✅
+- 获取用户信息 ✅
+- 查询用户配额 ✅
+- 创建生图任务 ✅
+- 生图任务完成 ✅
+- 配额扣减 ✅
+
+**管理服务测试**：
+- 健康检查 ✅
+- 注入邮箱配额 ✅
+- 查询邮箱配额 ✅
+- 配额自动同步 ✅
+
+**部署脚本测试**：
+- `./deploy.sh start-admin` ✅
+- `./deploy.sh stop-admin` ✅
+- `./deploy.sh quota <email> <quota>` ✅
+- `./deploy.sh list-quota` ✅
+
+### 修改文件清单
+
+**新增文件**（1个）：
+- `src/backend/app/admin_service.py` - 独立管理服务
+
+**修改文件**（5个）：
+- `src/backend/app/main.py` - 移除管理员路由
+- `src/backend/app/routers/__init__.py` - 优化路由导入
+- `src/backend/app/services/auth_service.py` - 配额自动同步
+- `src/backend/deploy.sh` - 更新管理服务管理命令
+- `src/backend/docker-compose.yml` - 添加管理服务
+
+### 下一步
+
+1. 生产环境部署
+2. 监控和日志优化
+3. 性能优化
+
+---
+
+## 2026-01-24 - 管理员接口安全隔离（完成）✅
+
+### 概述
+
+将管理员接口从主服务中拆分出来，创建独立的管理服务，确保管理员接口不对外暴露，提高系统安全性。
+
+### 核心改动
+
+#### 1. 创建独立管理服务
+
+**新增文件**：`src/backend/app/admin_service.py`
+
+**功能**：
+- 独立的 FastAPI 应用，只包含管理员路由
+- 只监听本地回环地址 `127.0.0.1:8009`
+- 不对外暴露端口，确保绝对安全
+- 支持邮箱配额注入、查询、删除等管理功能
+
+**启动方式**：
+```bash
+# 方式1：直接启动
+python -m app.admin_service
+
+# 方式2：使用部署脚本
+./deploy.sh start-admin
+```
+
+#### 2. 主服务移除管理员路由
+
+**修改文件**：`src/backend/app/main.py`
+
+**改动**：
+- 移除 `admin.router` 的注册
+- 主服务只对 iOS 端开放（端口 8008）
+- 主服务不再包含任何管理员接口
+
+**安全性提升**：
+- 主服务可以安全地对外暴露
+- 即使主服务被攻击，管理员接口也不会暴露
+
+#### 3. 更新注入和查询脚本
+
+**修改文件**：
+- `src/backend/scripts/inject_email_quota.py`
+- `src/backend/scripts/list_email_quotas.py`
+
+**改动**：
+- 默认 URL 从 `http://localhost:8008` 改为 `http://127.0.0.1:8009`
+- 只能从本地调用，无法从外部访问
+
+#### 4. 增强部署脚本
+
+**修改文件**：`src/backend/deploy.sh`
+
+**新增命令**：
+- `./deploy.sh start-admin` - 启动管理服务
+- `./deploy.sh stop-admin` - 停止管理服务
+
+**功能**：
+- 使用 nohup 后台运行管理服务
+- 自动保存 PID 到 `logs/admin_service.pid`
+- 日志输出到 `logs/admin_service.log`
+- 启动前检查是否已运行，避免重复启动
+
+**修改命令**：
+- `./deploy.sh quota` - 修改为调用管理服务（端口 8009）
+- `./deploy.sh list-quota` - 修改为调用管理服务（端口 8009）
+
+### 架构对比
+
+**修改前**：
+```
+主服务（8008 端口，对外暴露）
+├── /api/v1/auth      ← iOS 认证
+├── /api/v1/tasks     ← iOS 生图
+├── /api/v1/assets    ← iOS 资源
+├── /api/v1/users     ← iOS 用户
+└── /api/v1/admin     ← 管理员接口 ← 安全隐患！
+```
+
+**修改后**：
+```
+主服务（8008 端口，对外暴露）
+├── /api/v1/auth      ← iOS 认证
+├── /api/v1/tasks     ← iOS 生图
+├── /api/v1/assets    ← iOS 资源
+└── /api/v1/users     ← iOS 用户
+
+管理服务（127.0.0.1:8009，仅本地）
+└── /api/v1/admin     ← 管理员接口 ← 绝对安全！
+```
+
+### 安全性提升
+
+1. **网络隔离**：管理服务只监听本地回环地址，外部无法访问
+2. **端口隔离**：使用独立端口 8009，与主服务分离
+3. **进程隔离**：管理服务独立运行，不依赖主服务
+4. **认证隔离**：管理服务有自己的认证机制（ADMIN_SECRET_KEY）
+
+### 使用方式
+
+**启动服务**：
+```bash
+# 1. 启动主服务（对外）
+./deploy.sh start
+
+# 2. 启动管理服务（仅本地）
+./deploy.sh start-admin
+```
+
+**注入邮箱配额**：
+```bash
+./deploy.sh quota test@example.com 10
+```
+
+**查询邮箱配额**：
+```bash
+./deploy.sh list-quota
+```
+
+**停止管理服务**：
+```bash
+./deploy.sh stop-admin
+```
+
+### 修改文件清单
+
+**新增文件**（1个）：
+- `src/backend/app/admin_service.py` - 独立管理服务
+
+**修改文件**（4个）：
+- `src/backend/app/main.py` - 移除管理员路由
+- `src/backend/scripts/inject_email_quota.py` - 修改默认 URL
+- `src/backend/scripts/list_email_quotas.py` - 修改默认 URL
+- `src/backend/deploy.sh` - 添加管理服务管理命令
+
+### 下一步
+
+1. 测试管理服务启动和停止
+2. 测试邮箱配额注入和查询功能
+3. 验证主服务不包含管理员接口
+4. 生产环境部署
+
+---
+
 ## 2026-01-23 - 资源栏层级与交互优化（完成）✅
 
 ### 概述
