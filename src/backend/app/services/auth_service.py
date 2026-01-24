@@ -383,9 +383,25 @@ class AuthService:
         注意：
             - 如果 provider_id 存在，根据 provider_id 查找用户
             - 如果用户不存在，创建新用户
-            - 返回用户对象
+            - 无论哪种登录方式都检查邮箱配额配置
+            - OAuth登录如果没有邮箱，生成占位邮箱
+            - 首次OAuth登录自动给予试用配额
         """
         try:
+            # 确保有邮箱，如果没有则生成占位邮箱
+            email = user_info.get("email")
+            if not email:
+                if provider == "github" and user_info.get("username"):
+                    email = f"github_{user_info['username']}@temp.local"
+                elif provider == "apple" and user_info.get("provider_id"):
+                    email = f"apple_{user_info['provider_id'][:16]}@temp.local"
+                elif provider == "google" and user_info.get("provider_id"):
+                    email = f"google_{user_info['provider_id'][:16]}@temp.local"
+                else:
+                    email = f"{provider}_{user_info.get('provider_id', 'unknown')}@temp.local"
+                user_info["email"] = email
+                logger.info(f"Generated placeholder email for {provider} user: {email}")
+
             # 尝试根据 provider_id 查找用户
             if user_info.get("provider_id"):
                 result = await self.db.execute(
@@ -397,39 +413,30 @@ class AuthService:
                 user = result.scalar_one_or_none()
 
                 if user:
-                    logger.debug(f"Found existing user: {user.id}")
+                    logger.debug(f"Found existing user by provider_id: {user.id}")
+
+                    # 检查邮箱配额配置（无论哪种登录方式）
+                    await self._sync_email_quota_if_exists(user, email)
+
                     return user
 
             # 尝试根据 email 查找用户
             result = await self.db.execute(
-                select(User).where(User.email == user_info["email"])
+                select(User).where(User.email == email)
             )
             user = result.scalar_one_or_none()
 
             if user:
                 logger.debug(f"Found existing user by email: {user.id}")
 
-                # 如果是邮箱登录且用户没有免费额度，检查邮箱配额配置
-                if provider == "email" and user.free_quota == 0:
-                    quota_result = await self.db.execute(
-                        text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
-                        {"email": user_info["email"]}
-                    )
-                    quota_row = quota_result.fetchone()
-
-                    if quota_row and quota_row[0] > 0:
-                        # 同步邮箱配额到用户
-                        user.api_provider = "laozhang"
-                        user.free_quota = quota_row[0]
-                        await self.db.commit()
-                        await self.db.refresh(user)
-                        logger.info(f"Synced email quota for existing user {user.id}: {quota_row[0]}")
+                # 检查邮箱配额配置（无论哪种登录方式）
+                await self._sync_email_quota_if_exists(user, email)
 
                 return user
 
             # 创建新用户
             user_data = UserCreate(
-                email=user_info["email"],
+                email=email,
                 username=user_info.get("username"),
                 auth_provider=provider,
                 provider_id=user_info.get("provider_id"),
@@ -441,21 +448,16 @@ class AuthService:
             await self.db.commit()
             await self.db.refresh(new_user)
 
-            # 检查是否有邮箱配额配置，如果有则同步到用户
-            if provider == "email":
-                quota_result = await self.db.execute(
-                    text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
-                    {"email": user_info["email"]}
-                )
-                quota_row = quota_result.fetchone()
+            # 检查邮箱配额配置（无论哪种登录方式）
+            email_quota_synced = await self._sync_email_quota_if_exists(new_user, email)
 
-                if quota_row and quota_row[0] > 0:
-                    # 同步邮箱配额到用户
-                    new_user.api_provider = "laozhang"
-                    new_user.free_quota = quota_row[0]
-                    await self.db.commit()
-                    await self.db.refresh(new_user)
-                    logger.info(f"Synced email quota for user {new_user.id}: {quota_row[0]}")
+            # 如果没有邮箱配额且是OAuth登录，给予试用配额
+            if not email_quota_synced and provider in ["google", "github", "apple"]:
+                new_user.api_provider = "laozhang"
+                new_user.free_quota = 1
+                await self.db.commit()
+                await self.db.refresh(new_user)
+                logger.info(f"Granted trial quota for new {provider} user {new_user.id}: 1")
 
             logger.info(f"Created new user: {new_user.id}")
             return new_user
@@ -464,6 +466,33 @@ class AuthService:
             logger.error(f"Failed to find or create user: {str(e)}")
             await self.db.rollback()
             raise AuthError(f"Failed to find or create user: {str(e)}")
+
+    async def _sync_email_quota_if_exists(self, user: User, email: str) -> bool:
+        """
+        检查并同步邮箱配额配置
+
+        Args:
+            user: 用户对象
+            email: 邮箱地址
+
+        Returns:
+            True 如果同步了邮箱配额，False 如果没有邮箱配额
+        """
+        quota_result = await self.db.execute(
+            text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+            {"email": email}
+        )
+        quota_row = quota_result.fetchone()
+
+        if quota_row and quota_row[0] > 0:
+            user.api_provider = "laozhang"
+            user.free_quota = quota_row[0]
+            await self.db.commit()
+            await self.db.refresh(user)
+            logger.info(f"Synced email quota for user {user.id}: {quota_row[0]}")
+            return True
+
+        return False
 
     @staticmethod
     def hash_password(password: str) -> str:
@@ -630,8 +659,38 @@ class AuthService:
             await self.db.commit()
             await self.db.refresh(new_user)
 
+            # 检查是否有邮箱配额配置，如果有则同步到用户
+            quota_result = await self.db.execute(
+                text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+                {"email": email}
+            )
+            quota_row = quota_result.fetchone()
+
+            if quota_row and quota_row[0] > 0:
+                # 同步邮箱配额到用户
+                new_user.api_provider = "laozhang"
+                new_user.free_quota = quota_row[0]
+                await self.db.commit()
+                await self.db.refresh(new_user)
+                logger.info(f"Synced email quota for new user {new_user.id}: {quota_row[0]}")
+
             logger.info(f"Created new user: {new_user.id}")
             user = new_user
+        else:
+            # 老用户登录，检查并同步邮箱配额
+            quota_result = await self.db.execute(
+                text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+                {"email": email}
+            )
+            quota_row = quota_result.fetchone()
+
+            if quota_row and quota_row[0] > 0:
+                # 同步邮箱配额到用户（覆盖现有配置）
+                user.api_provider = "laozhang"
+                user.free_quota = quota_row[0]
+                await self.db.commit()
+                await self.db.refresh(user)
+                logger.info(f"Synced email quota for existing user {user.id}: {quota_row[0]}")
 
         # 创建 Refresh Token
         refresh_token, expires_at = await self.create_refresh_token(str(user.id))

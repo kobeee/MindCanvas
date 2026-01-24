@@ -14,7 +14,7 @@ final class EditorViewModel {
     var canvasSnapshot: String?
     var hasSelection = false
     
-    private let generationService = MockGenerationService.shared
+    private let generationService = RealGenerationService.shared
     private var modelContext: ModelContext?
     
     init(project: Project) {
@@ -121,9 +121,9 @@ final class EditorViewModel {
     
     func publishAsset(_ asset: Asset, title: String) async {
         guard asset.type == .generated else { return }
-        
+
         do {
-            try await MockFeedService.shared.publishImage(
+            try await FeedService.shared.publishImage(
                 imageUrl: asset.url,
                 title: title,
                 prompt: asset.prompt,

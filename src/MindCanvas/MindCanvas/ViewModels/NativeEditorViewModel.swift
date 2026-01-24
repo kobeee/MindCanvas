@@ -786,9 +786,9 @@ final class NativeEditorViewModel {
     
     func publishAsset(_ asset: Asset, title: String) async {
         guard asset.type == .generated else { return }
-        
+
         do {
-            try await MockFeedService.shared.publishImage(
+            try await FeedService.shared.publishImage(
                 imageUrl: asset.url,
                 title: title,
                 prompt: asset.prompt,

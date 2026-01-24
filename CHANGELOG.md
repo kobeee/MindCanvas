@@ -1,5 +1,420 @@
 # 开发记录
 
+## 2026-01-24 - 后端图片URL配置修复（待优化）⚠️
+
+### 概述
+
+修复后端图片URL配置问题，解决iOS端切换到正式后端服务后图片资源加载失败的问题。
+
+### 问题描述
+
+iOS端切换到正式后端服务（https://mindcanvas.escapemobius.cc）后，原本的图片资源无法加载。
+
+### 根因分析
+
+远程服务器的 `.env` 配置中：
+```bash
+IMAGE_BASE_URL=http://localhost:8008/images
+```
+
+这个URL在iOS设备上无法访问，因为 `localhost` 指向的是iOS设备本身，而不是远程服务器。
+
+### 修复方案
+
+1. **修改远程服务器配置**：
+   - 将 `IMAGE_BASE_URL` 改为 `https://mindcanvas.escapemobius.cc/images`
+   - 重新创建后端容器使配置生效
+
+2. **更新本地配置文件**：
+   - 修改 `.env.example` 文件，添加注释说明生产环境应该使用什么值
+
+### 验证结果
+
+- ✅ 环境变量已更新：`IMAGE_BASE_URL=https://mindcanvas.escapemobius.cc/images`
+- ✅ 后端服务正常运行
+- ✅ 新生成的图片URL将使用正确的域名
+
+### 待优化问题
+
+**问题**：生成的图片应该自动下载到iOS端的APP里，而不是使用URL。
+
+**当前实现**：
+- 后端生成图片后返回URL
+- iOS端通过URL加载图片
+- 依赖网络，每次打开都要重新下载
+- 如果URL失效（服务器重启、图片被清理），就无法显示
+
+**建议优化**：
+- 后端生成图片后，iOS端自动下载图片到本地
+- 使用本地路径存储和加载
+- 支持离线查看
+- 减少网络依赖
+
+### 修改文件清单
+
+**修改文件**（2个）：
+- `src/backend/.env.example` - 添加环境变量注释说明
+- 远程服务器 `.env` - 修改 IMAGE_BASE_URL 配置
+
+### 下一步
+
+1. 实现图片自动下载到本地的功能
+2. 优化本地图片存储和管理
+3. 支持离线查看
+
+---
+
+## 2026-01-24 - 登录配额同步与OAuth支持优化（完成）✅
+
+### 概述
+
+修复iOS端登录后配额未刷新问题，优化后端登录逻辑，支持所有登录方式（邮箱、Google、GitHub、Apple）统一检查邮箱配额配置。OAuth登录无邮箱时自动生成占位邮箱，首次OAuth登录自动给予试用配额。
+
+### 核心修复
+
+#### 1. iOS端登录后配额刷新
+
+**问题描述**：
+用户首次登录后，NativeEditorViewModel不会重新加载配额信息，导致用户看不到免费额度。
+
+**根因分析**：
+- NativeEditorView没有监听AuthManager的登录状态变化
+- NativeEditorViewModel只在init时加载配额信息
+- 用户登录后，NativeEditorViewModel不会重新加载配额
+
+**修复方案**：
+在NativeEditorView中添加对AuthManager的监听，当登录状态变为true时重新加载配额信息。
+
+**修改文件**：`src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+**修改内容**：
+- 添加 `@Environment(AuthManager.self) private var authManager`
+- 添加 `.onChange(of: authManager.isAuthenticated)` 监听器
+- 登录状态变为true时调用 `viewModel.loadQuota()`
+
+---
+
+#### 2. 后端登录逻辑优化
+
+**修改文件**：`src/backend/app/services/auth_service.py`
+
+**核心改进**：
+
+**2.1 所有登录方式统一检查邮箱配额**
+
+```python
+async def _sync_email_quota_if_exists(self, user: User, email: str) -> bool:
+    """检查并同步邮箱配额配置"""
+    quota_result = await self.db.execute(
+        text("SELECT initial_quota FROM email_quota_configs WHERE email = :email"),
+        {"email": email}
+    )
+    quota_row = quota_result.fetchone()
+
+    if quota_row and quota_row[0] > 0:
+        user.api_provider = "laozhang"
+        user.free_quota = quota_row[0]
+        await self.db.commit()
+        await self.db.refresh(user)
+        logger.info(f"Synced email quota for user {user.id}: {quota_row[0]}")
+        return True
+    return False
+```
+
+**2.2 OAuth登录无邮箱处理**
+
+```python
+# 确保有邮箱，如果没有则生成占位邮箱
+email = user_info.get("email")
+if not email:
+    if provider == "github" and user_info.get("username"):
+        email = f"github_{user_info['username']}@temp.local"
+    elif provider == "apple" and user_info.get("provider_id"):
+        email = f"apple_{user_info['provider_id'][:16]}@temp.local"
+    elif provider == "google" and user_info.get("provider_id"):
+        email = f"google_{user_info['provider_id'][:16]}@temp.local"
+    else:
+        email = f"{provider}_{user_info.get('provider_id', 'unknown')}@temp.local"
+    user_info["email"] = email
+```
+
+**2.3 首次OAuth登录试用配额**
+
+```python
+# 如果没有邮箱配额且是OAuth登录，给予试用配额
+if not email_quota_synced and provider in ["google", "github", "apple"]:
+    new_user.api_provider = "laozhang"
+    new_user.free_quota = 1
+    await self.db.commit()
+    await self.db.refresh(new_user)
+    logger.info(f"Granted trial quota for new {provider} user {new_user.id}: 1")
+```
+
+### 配额管理方案
+
+**统一使用邮箱注入**：
+```bash
+./deploy.sh quota chenhangkobe@gmail.com 5
+```
+
+**配额同步机制**：
+- 注入配额只更新 `email_quota_configs` 表
+- 用户登录时自动同步到 `users.free_quota`
+- 支持所有登录方式（邮箱、Google、GitHub、Apple）
+
+**占位邮箱规则**：
+- GitHub: `github_{username}@temp.local`
+- Apple: `apple_{provider_id}@temp.local`
+- Google: `google_{provider_id}@temp.local`
+
+### 测试验证
+
+**测试1：邮箱登录 + 邮箱配额注入**
+```
+用户：testuser2025@gmail.com
+注入配额：3次
+登录方式：邮箱验证码
+结果：
+  - api_provider: laozhang ✓
+  - has_free_quota: true ✓
+  - remaining_quota: 3 ✓
+```
+
+**测试2：OAuth登录 + 邮箱配额注入**
+```
+用户：chenhangkobe@gmail.com
+登录方式：Google OAuth
+注入配额：7次（分两次注入）
+结果：
+  - api_provider: laozhang ✓
+  - has_free_quota: true ✓
+  - remaining_quota: 2 ✓
+```
+
+**测试3：OAuth登录无邮箱 + 试用配额**
+```
+用户：GitHub用户（无公开邮箱）
+登录方式：GitHub OAuth
+结果：
+  - 生成占位邮箱：github_{username}@temp.local ✓
+  - api_provider: laozhang ✓
+  - free_quota: 1（试用配额）✓
+```
+
+### 修改文件清单
+
+**修改文件**（2个）：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift` - iOS端配额刷新
+- `src/backend/app/services/auth_service.py` - 后端登录逻辑优化
+
+### 技术亮点
+
+1. **统一配额管理**：所有登录方式都检查邮箱配额配置
+2. **占位邮箱生成**：OAuth登录无邮箱时自动生成占位邮箱
+3. **试用配额机制**：首次OAuth登录自动给予1次试用配额
+4. **登录状态监听**：iOS端监听登录状态变化，自动刷新配额
+5. **配额自动同步**：用户登录时自动同步邮箱配额到用户表
+
+### 下一步
+
+1. iOS端端到端测试验证
+2. 完善管理后台用户列表功能
+3. 订阅功能开发准备
+
+---
+
+## 2026-01-24 - verify_email_code 方法配额同步修复（完成）✅
+
+### 概述
+
+修复 `verify_email_code` 方法中老用户登录时无法同步邮箱配额的问题。问题根源是该方法只对新用户进行配额同步，对已存在的老用户没有检查和同步配额配置。
+
+### 核心修复
+
+**修改文件**：`src/backend/app/services/auth_service.py`
+
+**问题**：
+- `verify_email_code` 方法中，如果用户已存在（老用户），直接使用该用户
+- 没有检查邮箱配额配置并同步到用户表
+- 导致即使邮箱有配额，老用户也无法使用免费额度
+
+**修复**：
+- 在老用户登录时，添加配额检查和同步逻辑
+- 检查 `email_quota_configs` 表，如果有配额则同步到用户表
+- 支持覆盖现有 `api_provider` 和 `free_quota` 配置
+
+### 测试验证
+
+**测试场景**：
+1. 用户之前用 Google 登录过（无配额）
+2. 管理员注入邮箱配额：`./deploy.sh quota 497189972@qq.com 2`
+3. 用户使用邮箱登录
+4. 系统自动同步配额到用户表
+
+**验证结果**：
+- ✅ 邮箱配额配置：497189972@qq.com → 2 次配额
+- ✅ 用户表更新：api_provider = laozhang, free_quota = 2
+- ✅ 配额查询接口返回：has_free_quota = true, remaining_quota = 2
+
+### 修改文件清单
+
+**修改文件**（1个）：
+- `src/backend/app/services/auth_service.py` - 修复 verify_email_code 方法的配额同步逻辑
+
+### 下一步
+
+1. iOS 端测试和验证
+2. 完善配额管理功能
+
+---
+
+## 2026-01-24 - 邮箱配额同步逻辑修复（完成）✅
+
+### 概述
+
+修复邮箱配额同步逻辑，解决用户登录时无法同步邮箱配额的问题。问题根源是 `verify_email_code` 方法在创建用户后没有调用配额同步逻辑，且老用户登录时的配额同步有限制条件。
+
+### 核心修复
+
+#### 1. 修复 verify_email_code 方法的配额同步
+
+**修改文件**：`src/backend/app/services/auth_service.py`
+
+**问题**：
+- 创建新用户后没有检查邮箱配额配置
+- 导致新用户即使有邮箱配额也无法使用免费额度
+
+**修复**：
+- 在创建新用户后，添加配额同步逻辑
+- 检查 `email_quota_configs` 表，如果有配额则同步到用户表
+
+#### 2. 修复老用户登录时的配额同步限制
+
+**修改文件**：`src/backend/app/services/auth_service.py`
+
+**问题**：
+- 老用户登录时，只有在 `user.free_quota == 0` 时才检查配额
+- 如果用户之前已经登录过但配额为 0，无法同步新注入的配额
+
+**修复**：
+- 移除 `user.free_quota == 0` 的限制条件
+- 所有邮箱登录用户都会检查并同步配额配置
+- 支持覆盖现有配额配置
+
+### 使用场景
+
+**场景 1：先注入配额，后登录**
+1. 管理员注入邮箱配额：`./deploy.sh quota 497189972@qq.com 2`
+2. 用户使用邮箱登录
+3. 系统自动同步配额到用户表
+4. 用户可以使用免费额度生图
+
+**场景 2：先登录，后注入配额**
+1. 用户使用邮箱登录（此时无配额）
+2. 管理员注入邮箱配额：`./deploy.sh quota 497189972@qq.com 2`
+3. 用户重新登录
+4. 系统自动同步配额到用户表
+5. 用户可以使用免费额度生图
+
+### 注意事项
+
+1. **邮箱地址格式**：注入配额时不要在邮箱地址中添加空格，例如：
+   - 正确：`497189972@qq.com`
+   - 错误：`497189972 @qq.com`
+
+2. **重新登录**：如果用户已经登录但配额为 0，需要重新登录才能同步配额
+
+### 修改文件清单
+
+**修改文件**（1个）：
+- `src/backend/app/services/auth_service.py` - 修复配额同步逻辑
+
+### 下一步
+
+1. 重新部署后端服务
+2. 测试先注入配额后登录的场景
+3. 测试先登录后注入配额的场景
+
+---
+
+## 2026-01-24 - iOS 端接口切换到正式后端服务（完成）✅
+
+### 概述
+
+将 iOS 端的所有接口从 Mock 服务切换到正式的后端服务（https://mindcanvas.escapemobius.cc），实现完整的后端集成。
+
+### 核心改动
+
+#### 1. 更新 API 配置
+
+**修改文件**：`src/MindCanvas/MindCanvas/Services/APIClient.swift`
+
+**改动**：
+- 将 baseURL 从 `http://localhost:8008` 更新为 `https://mindcanvas.escapemobius.cc`
+
+**修改文件**：`src/MindCanvas/MindCanvas/Services/TokenManager.swift`
+
+**改动**：
+- 将 baseURL 从 `http://localhost:8008` 更新为 `https://mindcanvas.escapemobius.cc`
+
+#### 2. 创建真实的 Feed 服务
+
+**新增文件**：`src/MindCanvas/MindCanvas/Services/FeedService.swift`
+
+**功能**：
+- 获取社区动态列表（支持分页和排序）
+- 点赞/取消点赞动态
+- 发布图片到社区
+
+**接口对接**：
+- `GET /api/v1/feed` - 获取社区动态列表
+- `POST /api/v1/feed/{feed_id}/like` - 点赞动态
+
+#### 3. 更新 ViewModel 使用真实服务
+
+**修改文件**：`src/MindCanvas/MindCanvas/ViewModels/FeedViewModel.swift`
+
+**改动**：
+- 将 `MockFeedService.shared` 替换为 `FeedService.shared`
+
+**修改文件**：`src/MindCanvas/MindCanvas/ViewModels/EditorViewModel.swift`
+
+**改动**：
+- 将 `MockGenerationService.shared` 替换为 `RealGenerationService.shared`
+- 将 `MockFeedService.shared.publishImage` 替换为 `FeedService.shared.publishImage`
+
+**修改文件**：`src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+
+**改动**：
+- 将 `MockFeedService.shared.publishImage` 替换为 `FeedService.shared.publishImage`
+
+### 修改文件清单
+
+**新增文件**（1个）：
+- `src/MindCanvas/MindCanvas/Services/FeedService.swift` - 真实 Feed 服务
+
+**修改文件**（5个）：
+- `src/MindCanvas/MindCanvas/Services/APIClient.swift` - 更新 baseURL
+- `src/MindCanvas/MindCanvas/Services/TokenManager.swift` - 更新 baseURL
+- `src/MindCanvas/MindCanvas/ViewModels/FeedViewModel.swift` - 使用真实服务
+- `src/MindCanvas/MindCanvas/ViewModels/EditorViewModel.swift` - 使用真实服务
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift` - 使用真实服务
+
+### 技术亮点
+
+1. **无缝切换**：所有接口切换不影响现有功能，保持 UI 风格一致
+2. **错误处理**：完善的错误处理机制，提供友好的错误提示
+3. **数据映射**：后端响应模型到 iOS 端模型的自动映射
+4. **分页支持**：Feed 列表支持分页加载
+
+### 下一步
+
+1. iOS 端测试和验证
+2. 实现完整的图片上传和发布流程
+3. 性能优化
+
+---
+
 ## 2026-01-24 - 邮箱配额管理增强（完成）✅
 
 ### 概述

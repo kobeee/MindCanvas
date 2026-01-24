@@ -18,7 +18,7 @@ final class APIClient {
     private let decoder: JSONDecoder
 
     private init() {
-        self.baseURL = "http://localhost:8008"
+        self.baseURL = "https://mindcanvas.escapemobius.cc"
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30

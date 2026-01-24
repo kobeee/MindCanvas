@@ -8,7 +8,7 @@ final class FeedViewModel {
     var isLoading = false
     private var currentPage = 0
     
-    private let feedService = MockFeedService.shared
+    private let feedService = FeedService.shared
     
     func loadFeed() async {
         guard !isLoading else { return }
@@ -19,6 +19,7 @@ final class FeedViewModel {
             items.append(contentsOf: newItems)
             currentPage += 1
         } catch {
+            print("加载动态失败: \(error)")
         }
 
         isLoading = false

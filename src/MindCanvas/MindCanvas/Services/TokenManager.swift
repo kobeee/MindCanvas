@@ -5,7 +5,7 @@ final class TokenManager {
     static let shared = TokenManager()
 
     private let keychainManager = KeychainManager.shared
-    private let baseURL = "http://localhost:8008"
+    private let baseURL = "https://mindcanvas.escapemobius.cc"
     private let session: URLSession
 
     private init() {

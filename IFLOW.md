@@ -550,6 +550,25 @@ nginx -t  # 测试配置
 ./deploy.sh sync
 ```
 
+**开发工作流**:
+每次修改 `src/backend/` 目录下的代码后，必须执行以下步骤同步到远程服务器：
+
+1. **同步代码并重新部署**:
+```bash
+cd src/backend
+REMOTE_SERVER="65.75.220.11" REMOTE_USER="root" REMOTE_PATH="/root/mind-canvas" ./deploy.sh sync
+```
+
+2. **验证服务状态**:
+```bash
+ssh root@65.75.220.11 "cd /root/mind-canvas && docker-compose ps"
+```
+
+3. **查看服务日志**（如果需要）:
+```bash
+ssh root@65.75.220.11 "cd /root/mind-canvas && docker-compose logs -f backend"
+```
+
 **注意**: 本地开发和远程部署使用相同的代码库，修改代码后需要重新构建镜像并部署到服务器。
 
 **iOS 端配置**:

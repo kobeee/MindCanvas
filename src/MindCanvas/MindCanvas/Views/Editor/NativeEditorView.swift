@@ -9,6 +9,7 @@ struct NativeEditorView: View {
     @State private var viewModel: NativeEditorViewModel
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
     
     @State private var activeSheet: ActiveSheet?
     @State private var lastPresentedSheet: ActiveSheet?
@@ -268,6 +269,13 @@ struct NativeEditorView: View {
             
             // 保存画布文档
             viewModel.saveCanvasDocument()
+        }
+        .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
+            if isAuthenticated {
+                Task {
+                    await viewModel.loadQuota()
+                }
+            }
         }
         .onChange(of: activeSheet) { _, newValue in
             if let sheet = newValue {
