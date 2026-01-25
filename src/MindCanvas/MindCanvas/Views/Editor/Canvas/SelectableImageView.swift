@@ -154,27 +154,35 @@ class SelectableImageView: UIView {
     
     /// 标记是否已经完成首次图片加载（防止重复调整尺寸）
     private var hasCompletedInitialLoad = false
-    
+
     private func loadImage() {
         guard let urlString = layerNode.url else { return }
-        
-        // 本地图片
-        if let url = URL(string: urlString), url.isFileURL {
-            if let data = try? Data(contentsOf: url),
-               let image = UIImage(data: data) {
+
+        // 使用 ImageStorageService 统一处理路径
+        // 支持：相对路径、绝对路径、file:// URL、远程 URL
+
+        // 判断是否为本地路径（相对路径或 file:// URL）
+        let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
+                          (URL(string: urlString)?.isFileURL == true)
+
+        if isLocalPath {
+            // 本地图片：使用 ImageStorageService 加载（支持相对路径和路径恢复）
+            if let image = ImageStorageService.shared.loadImage(from: urlString) {
                 imageView.image = image
                 handleImageLoaded(image)
+            } else {
+                print("[SelectableImageView] 无法加载本地图片: \(urlString)")
             }
-        }
-        // 远程图片 (简单实现，生产环境应使用 Kingfisher 等库)
-        else if let url = URL(string: urlString) {
-            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-                guard let data = data, let image = UIImage(data: data) else { return }
-                DispatchQueue.main.async {
-                    self?.imageView.image = image
-                    self?.handleImageLoaded(image)
+        } else if let url = URL(string: urlString) {
+            // 远程 URL：异步加载
+            Task { @MainActor in
+                if let image = await ImageStorageService.shared.getImage(from: url) {
+                    self.imageView.image = image
+                    self.handleImageLoaded(image)
+                } else {
+                    print("[SelectableImageView] 无法加载远程图片: \(urlString)")
                 }
-            }.resume()
+            }
         }
     }
     

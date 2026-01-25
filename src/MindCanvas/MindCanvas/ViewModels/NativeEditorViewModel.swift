@@ -201,27 +201,30 @@ final class NativeEditorViewModel {
         }
     }
     
-    /// 加载图片获取尺寸（支持本地和远程URL）
+    /// 加载图片获取尺寸（支持相对路径、本地和远程URL）
     private func loadImageSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
         let defaultSize = CGSize(width: 300, height: 300)
-        
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async { completion(defaultSize) }
-            return
-        }
-        
-        // 本地文件
-        if url.isFileURL {
-            if let data = try? Data(contentsOf: url),
-               let image = UIImage(data: data) {
+
+        // 判断是否为本地路径（相对路径或 file:// URL）
+        let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
+                          (URL(string: urlString)?.isFileURL == true)
+
+        if isLocalPath {
+            // 本地图片：使用 ImageStorageService 加载
+            if let image = ImageStorageService.shared.loadImage(from: urlString) {
                 DispatchQueue.main.async { completion(image.size) }
             } else {
                 DispatchQueue.main.async { completion(defaultSize) }
             }
             return
         }
-        
+
         // 远程图片
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { completion(defaultSize) }
+            return
+        }
+
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data = data, let image = UIImage(data: data) {
                 DispatchQueue.main.async { completion(image.size) }
@@ -319,35 +322,19 @@ final class NativeEditorViewModel {
     
     
     
-                    Task { @MainActor in
+                                    Task { @MainActor in
     
     
     
-                        await self?.loadQuota()
+                                        await self?.loadQuota()
     
     
     
-                    }
+                                    }
     
     
     
-                }
-    
-    
-    
-                
-    
-    
-    
-                #if DEBUG
-    
-    
-    
-                print("配额定时刷新已启动（每5分钟刷新一次）")
-    
-    
-    
-                #endif
+                                }
     
     
     
@@ -379,15 +366,7 @@ final class NativeEditorViewModel {
     
     
     
-                #if DEBUG
-    
-    
-    
-                print("配额定时刷新已停止")
-    
-    
-    
-                #endif
+                
     
     
     
@@ -594,9 +573,18 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
+            // 自动下载图片到本地存储（使用相对路径）
+            var localImageURL: String? = nil
+            if let imageURL = URL(string: response.imageUrl),
+               let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
+                localImageURL = relativePath
+            } else {
+                print("[ImageToImage] 警告：图片下载失败，将使用远程URL")
+            }
 
-            loadingAsset.url = response.imageUrl
-            loadingAsset.thumbnailUrl = response.thumbnailUrl
+            // 使用本地URL（如果下载成功），否则使用远程URL
+            loadingAsset.url = localImageURL ?? response.imageUrl
+            loadingAsset.thumbnailUrl = localImageURL ?? response.thumbnailUrl
             loadingAsset.isLoading = false
 
             do {
@@ -611,7 +599,7 @@ final class NativeEditorViewModel {
             let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
 
             let generatedLayer = LayerNode.aiGenerated(
-                url: response.imageUrl,
+                url: localImageURL ?? response.imageUrl,
                 frame: contentRect,
                 zIndex: maxZ + 1
             )
@@ -704,8 +692,18 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
-            loadingAsset.url = response.imageUrl
-            loadingAsset.thumbnailUrl = response.thumbnailUrl
+            // 自动下载图片到本地存储（使用相对路径）
+            var localImageURL: String? = nil
+            if let imageURL = URL(string: response.imageUrl),
+               let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
+                localImageURL = relativePath
+            } else {
+                print("[TextToImage] 警告：图片下载失败，将使用远程URL")
+            }
+
+            // 使用本地URL（如果下载成功），否则使用远程URL
+            loadingAsset.url = localImageURL ?? response.imageUrl
+            loadingAsset.thumbnailUrl = localImageURL ?? response.thumbnailUrl
             loadingAsset.isLoading = false
 
             do {
@@ -747,27 +745,35 @@ final class NativeEditorViewModel {
             print("无效的资源URL: \(asset.url)")
             return
         }
-        
+
         Task {
-            do {
-                // 下载图片数据
-                let (data, _) = try await URLSession.shared.data(from: url)
-                
-                guard let image = UIImage(data: data) else {
-                    print("无法解析图片数据")
-                    return
+            var image: UIImage?
+
+            // 本地文件
+            if url.isFileURL {
+                image = ImageStorageService.shared.loadImage(from: url)
+            }
+            // 远程URL
+            else {
+                if let data = try? Data(contentsOf: url) {
+                    image = UIImage(data: data)
                 }
-                
-                // 保存到相册
-                try await saveImageToPhotoLibrary(image)
-                
+            }
+
+            guard let validImage = image else {
+                print("无法加载图片: \(asset.url)")
+                return
+            }
+
+            // 保存到相册
+            do {
+                try await saveImageToPhotoLibrary(validImage)
                 // 显示成功提示
                 await MainActor.run {
                     showDownloadSuccessToast = true
                 }
-                
             } catch {
-                print("下载图片失败: \(error)")
+                print("保存到相册失败: \(error)")
             }
         }
     }
@@ -906,22 +912,20 @@ final class NativeEditorViewModel {
         do {
             let backupData = try Data(contentsOf: backupURL)
             let backupDocument = try JSONDecoder().decode(CanvasDocument.self, from: backupData)
-            
+
             // 验证备份数据
             let validationErrors = backupDocument.validate()
             if !validationErrors.isEmpty {
-                print("⚠️ 备份数据存在问题，将尝试修复")
                 var repairedDocument = backupDocument
                 repairedDocument.repair()
                 canvasDocument = repairedDocument
             } else {
                 canvasDocument = backupDocument
             }
-            
-            print("✅ 已从备份恢复文档")
+
             return true
         } catch {
-            print("❌ 从备份恢复失败: \(error)")
+            print("从备份恢复失败: \(error)")
             return false
         }
     }

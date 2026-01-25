@@ -126,20 +126,23 @@ struct NativeEditorView: View {
         .onAppear {
             // 设置 modelContext
             viewModel.setModelContext(modelContext)
-            
+
+            // 调试：列出所有图片文件
+            ImageStorageService.shared.listAllFiles()
+
             // 修复：绑定状态同步，确保NativeCanvasView的选中状态同步到CanvasStateManager
             // 注意：canvasView 可能在 onAppear 时还没准备好，加载文档移到 onViewCreated 中
             if let canvasView = viewModel.canvasView {
                 canvasView.onSelectionIdChanged = { [weak viewModel] selectedID in
                     viewModel?.stateManager.selectedNodeID = selectedID
                 }
-                
+
                 // 绑定图片选择器请求回调
                 canvasView.onShowImagePickerRequested = { [self] location in
                     pendingCanvasImageLocation = location
                     showImageSourcePicker = true
                 }
-                
+
                 // canvasView 已准备好，加载文档
                 viewModel.loadCanvasDocument()
             }
@@ -1322,24 +1325,19 @@ private struct NativeAssetCardView: View {
     var body: some View {
         VStack(spacing: 8) {
             // 图片预览
-            AsyncImage(url: URL(string: asset.url)) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                if asset.isLoading {
-                    AssetLoadingView()
-                } else {
-                    Color.gray.opacity(0.2)
+            CachedAsyncImage(urlString: asset.url, contentMode: .fill)
+                .frame(height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                )
+                .overlay {
+                    if asset.isLoading {
+                        AssetLoadingView()
+                    }
                 }
-            }
-            .frame(height: 150)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
-            )
-            .onTapGesture(perform: onTap)
+                .onTapGesture(perform: onTap)
             
             // 操作按钮
             if isSelected && !asset.isLoading {
@@ -1407,15 +1405,9 @@ private struct NativePublishSheetView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                AsyncImage(url: URL(string: asset.url)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                } placeholder: {
-                    Color.gray.opacity(0.2)
-                }
-                .frame(height: 200)
-                .cornerRadius(12)
+                CachedAsyncImage(urlString: asset.url, contentMode: .fit)
+                    .frame(height: 200)
+                    .cornerRadius(12)
 
                 TextField("添加标题", text: $title)
                     .focused($isTitleFocused)

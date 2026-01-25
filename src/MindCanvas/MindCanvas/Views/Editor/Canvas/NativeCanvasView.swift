@@ -880,28 +880,31 @@ class NativeCanvasView: UIView {
         }
     }
     
-    /// 加载图片获取尺寸（支持本地和远程URL）
+    /// 加载图片获取尺寸（支持相对路径、本地和远程URL）
     private func loadImageForSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
         // 默认尺寸（加载失败时使用）
         let defaultSize = CGSize(width: 300, height: 300)
-        
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async { completion(defaultSize) }
-            return
-        }
-        
-        // 本地文件
-        if url.isFileURL {
-            if let data = try? Data(contentsOf: url),
-               let image = UIImage(data: data) {
+
+        // 判断是否为本地路径（相对路径或 file:// URL）
+        let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
+                          (URL(string: urlString)?.isFileURL == true)
+
+        if isLocalPath {
+            // 本地图片：使用 ImageStorageService 加载
+            if let image = ImageStorageService.shared.loadImage(from: urlString) {
                 DispatchQueue.main.async { completion(image.size) }
             } else {
                 DispatchQueue.main.async { completion(defaultSize) }
             }
             return
         }
-        
+
         // 远程图片
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { completion(defaultSize) }
+            return
+        }
+
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data = data, let image = UIImage(data: data) {
                 DispatchQueue.main.async { completion(image.size) }
@@ -913,16 +916,21 @@ class NativeCanvasView: UIView {
     
     /// 处理图片数据选择（来自相机/相册）
     private func handleImageDataSelected(_ imageData: Data, at location: CGPoint) {
+        print("[NativeCanvasView] 开始处理图片数据，大小: \(imageData.count) 字节")
+
         // 先加载图片获取实际尺寸
         guard let image = UIImage(data: imageData) else {
+            print("[NativeCanvasView] 无法从数据创建UIImage")
             return
         }
 
         let originalSize = image.size
+        print("[NativeCanvasView] 图片原始尺寸: \(originalSize)")
 
         // 限制最大尺寸，避免图片过大
         let maxSize: CGFloat = 600
         let scaledSize = scaleImageSizeToFit(originalSize, maxSize: maxSize)
+        print("[NativeCanvasView] 缩放后尺寸: \(scaledSize)")
 
         let contentLocation = location
         let imageFrame = CGRect(
@@ -932,14 +940,22 @@ class NativeCanvasView: UIView {
             height: scaledSize.height
         )
 
-        // 保存图片到临时文件
-        let tempURL = saveImageToTempFile(imageData)
+        // 保存图片到本地存储（使用相对路径）
+        print("[NativeCanvasView] 开始保存图片到本地存储...")
+        let relativePath = saveImageToLocalStorage(imageData)
+
+        guard let path = relativePath else {
+            print("[NativeCanvasView] 错误：图片保存失败，无法创建图层")
+            return
+        }
+
+        print("[NativeCanvasView] 图片保存成功: \(path)")
 
         // 使用全局 zIndex 确保正确的层级顺序
         let imageLayer = LayerNode(
             id: UUID(),
             type: .userImage,
-            url: tempURL?.absoluteString ?? "",
+            url: path,  // 使用相对路径
             frame: imageFrame,
             originalSize: originalSize,
             rotation: 0,
@@ -951,6 +967,7 @@ class NativeCanvasView: UIView {
 
         // 添加图片到画布
         addLayer(imageLayer)
+        print("[NativeCanvasView] 图层已添加到画布，URL: \(path)")
 
         // 不自动选中图片，避免显示选中状态（角点等）
         // 用户需要手动切换到选择工具才能操作图片
@@ -982,18 +999,9 @@ class NativeCanvasView: UIView {
         )
     }
     
-    /// 保存图片数据到临时文件
-    private func saveImageToTempFile(_ imageData: Data) -> URL? {
-        let tempDir = NSTemporaryDirectory()
-        let fileName = "temp_image_\(UUID().uuidString).jpg"
-        let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(fileName)
-
-        do {
-            try imageData.write(to: fileURL)
-            return fileURL
-        } catch {
-            return nil
-        }
+    /// 保存图片数据到本地存储，返回相对路径
+    private func saveImageToLocalStorage(_ imageData: Data) -> String? {
+        return ImageStorageService.shared.saveImageWithRelativePath(imageData)
     }
     
     /// 获取下一个图片的Z-Index

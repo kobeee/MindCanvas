@@ -97,15 +97,9 @@ struct AssetLibraryView: View {
         NavigationStack {
             VStack(spacing: Theme.Spacing.xl) {
                 if let asset = assetToPublish {
-                    AsyncImage(url: URL(string: asset.url)) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    } placeholder: {
-                        ProgressView()
-                    }
-                    .frame(height: 200)
-                    .cornerRadius(Theme.Shapes.cardCornerRadius)
+                    CachedAsyncImage(urlString: asset.url, contentMode: .fit)
+                        .frame(height: 200)
+                        .cornerRadius(Theme.Shapes.cardCornerRadius)
                 }
                 
                 TextField("添加标题", text: $publishTitle)
@@ -188,32 +182,9 @@ struct AssetCard: View {
                         ProgressView()
                     }
             } else {
-                AsyncImage(url: URL(string: asset.url)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure:
-                        Rectangle()
-                            .fill(Theme.Colors.secondaryText.opacity(0.1))
-                            .overlay {
-                                Image(systemName: Theme.Icons.photo)
-                                    .font(.largeTitle)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                    case .empty:
-                        Rectangle()
-                            .fill(Theme.Colors.secondaryText.opacity(0.1))
-                            .overlay {
-                                ProgressView()
-                            }
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-                .aspectRatio(4/3, contentMode: .fit)
-                .clipped()
+                CachedAsyncImage(urlString: asset.url, contentMode: .fill)
+                    .aspectRatio(4/3, contentMode: .fit)
+                    .clipped()
             }
             
             if asset.type == .generated {

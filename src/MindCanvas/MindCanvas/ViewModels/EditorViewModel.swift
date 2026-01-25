@@ -112,13 +112,11 @@ final class EditorViewModel {
     }
     
     func addAssetToCanvas(_ asset: Asset) {
-        print("添加资源到画布: \(asset.url)")
     }
     
     func downloadAsset(_ asset: Asset) {
-        print("下载资源: \(asset.url)")
     }
-    
+
     func publishAsset(_ asset: Asset, title: String) async {
         guard asset.type == .generated else { return }
 
@@ -129,7 +127,6 @@ final class EditorViewModel {
                 prompt: asset.prompt,
                 showPrompt: true
             )
-            print("发布成功")
         } catch {
             print("发布失败: \(error)")
         }
