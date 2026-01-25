@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AuthManager.self) private var authManager
-    
+
     var body: some View {
         Group {
             if authManager.isAuthenticated {
@@ -11,6 +11,7 @@ struct RootView: View {
                 LoginView()
             }
         }
+        .id(authManager.isAuthenticated)
     }
 }
 

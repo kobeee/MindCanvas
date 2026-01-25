@@ -2,14 +2,18 @@ import Foundation
 
 struct User: Codable, Identifiable {
     let id: String
-    let username: String
+    var username: String
     let email: String?
     let avatarUrl: String?
     let authProvider: String
     let createdAt: Date
     let updatedAt: Date
-
+    
     var isPro: Bool = false
+    var freeQuota: Int = 0
+    var apiProvider: String = "google"
+    var totalQuotaUsed: Int = 0
+    var subscriptionTier: String = "free"
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -19,9 +23,13 @@ struct User: Codable, Identifiable {
         case authProvider = "auth_provider"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case freeQuota = "free_quota"
+        case apiProvider = "api_provider"
+        case totalQuotaUsed = "total_quota_used"
+        case subscriptionTier = "subscription_tier"
     }
 
-    init(id: String, username: String, email: String? = nil, avatarUrl: String? = nil, isPro: Bool = false, authProvider: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
+    init(id: String, username: String, email: String? = nil, avatarUrl: String? = nil, isPro: Bool = false, authProvider: String = "", createdAt: Date = Date(), updatedAt: Date = Date(), freeQuota: Int = 0, apiProvider: String = "google", totalQuotaUsed: Int = 0, subscriptionTier: String = "free") {
         self.id = id
         self.username = username
         self.email = email
@@ -30,6 +38,10 @@ struct User: Codable, Identifiable {
         self.authProvider = authProvider
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.freeQuota = freeQuota
+        self.apiProvider = apiProvider
+        self.totalQuotaUsed = totalQuotaUsed
+        self.subscriptionTier = subscriptionTier
     }
 }
 

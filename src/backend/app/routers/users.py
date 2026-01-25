@@ -160,6 +160,55 @@ async def get_current_user_info(
     }
 
 
+class UpdateUsernameRequest(BaseModel):
+    """更新用户名请求"""
+    username: str = Field(..., min_length=1, max_length=100, description="用户名")
+
+
+class UpdateUsernameResponse(BaseModel):
+    """更新用户名响应"""
+    username: str
+
+
+@router.put("/me/username", response_model=UpdateUsernameResponse)
+async def update_username(
+    request: UpdateUsernameRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    """
+    更新当前用户名
+
+    Args:
+        request: 包含新用户名的请求
+        current_user: 当前用户
+        db: 数据库会话
+
+    Returns:
+        更新后的用户名
+
+    Raises:
+        HTTPException: 如果用户名无效或更新失败
+    """
+    try:
+        # 更新用户名
+        current_user.username = request.username
+        await db.commit()
+        await db.refresh(current_user)
+        
+        logger.info(f"User {current_user.id} updated username to {request.username}")
+        
+        return UpdateUsernameResponse(username=request.username)
+        
+    except Exception as e:
+        logger.error(f"Failed to update username for user {current_user.id}: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update username"
+        )
+
+
 class QuotaResponse(BaseModel):
     """配额响应"""
     api_provider: str

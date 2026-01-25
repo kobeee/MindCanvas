@@ -5,12 +5,14 @@ struct APIConfigView: View {
     @State private var apiKey: String = ""
     @State private var isSaved: Bool = false
     @State private var showingAlert: Bool = false
+    @State private var showingDeleteAlert: Bool = false
     @State private var alertMessage: String = ""
 
     var body: some View {
         NavigationStack {
             Form {
                 apiKeySection
+                deleteButtonSection
                 descriptionSection
                 validationSection
             }
@@ -28,15 +30,22 @@ struct APIConfigView: View {
                     Button("保存") {
                         saveAPIKey()
                     }
-                    .disabled(apiKey.isEmpty)
-                    .foregroundStyle(apiKey.isEmpty ? Theme.Colors.secondaryText : Theme.Colors.brandBlue)
-                    .fontWeight(apiKey.isEmpty ? .regular : .semibold)
+                    .foregroundStyle(Theme.Colors.brandBlue)
+                    .fontWeight(.semibold)
                 }
             }
             .alert("提示", isPresented: $showingAlert) {
                 Button("确定", role: .cancel) { }
             } message: {
                 Text(alertMessage)
+            }
+            .alert("删除 API Key", isPresented: $showingDeleteAlert) {
+                Button("取消", role: .cancel) { }
+                Button("删除", role: .destructive) {
+                    deleteAPIKey()
+                }
+            } message: {
+                Text("确定要删除 API Key 吗？删除后将无法使用 AI 图像生成功能。")
             }
             .onAppear {
                 loadExistingAPIKey()
@@ -61,6 +70,24 @@ struct APIConfigView: View {
                     Text("已保存")
                         .font(Theme.Fonts.callout)
                         .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+        }
+    }
+    
+    private var deleteButtonSection: some View {
+        Section {
+            if isSaved && !apiKey.isEmpty {
+                Button {
+                    showingDeleteAlert = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("删除 API Key", systemImage: "trash")
+                            .font(Theme.Fonts.bodyBold)
+                            .foregroundStyle(Theme.Colors.destructive)
+                        Spacer()
+                    }
                 }
             }
         }
@@ -148,8 +175,8 @@ struct APIConfigView: View {
     }
 
     private func saveAPIKey() {
-        guard !apiKey.isEmpty else {
-            alertMessage = "请输入 API Key"
+        if apiKey.isEmpty {
+            alertMessage = "请输入 API Key 或点击删除按钮"
             showingAlert = true
             return
         }
@@ -166,6 +193,17 @@ struct APIConfigView: View {
             dismiss()
         } else {
             alertMessage = "保存失败，请重试"
+            showingAlert = true
+        }
+    }
+    
+    private func deleteAPIKey() {
+        let success = KeychainManager.shared.deleteAPIKey()
+        if success {
+            apiKey = ""
+            isSaved = false
+        } else {
+            alertMessage = "删除失败，请重试"
             showingAlert = true
         }
     }

@@ -151,7 +151,10 @@ class GoogleAPIClient:
 
         try:
             # 发送异步 HTTP 请求
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                verify=True  # 启用TLS验证
+            ) as client:
                 response = await client.post(
                     url,
                     json=payload,

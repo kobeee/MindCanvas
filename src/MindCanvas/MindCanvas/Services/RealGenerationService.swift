@@ -35,11 +35,12 @@ final class RealGenerationService {
         )
         
         // 调用后端 API
+        // 如果使用免费额度，需要认证（用户已登录）；如果不使用免费额度，不需要认证（使用自己的API Key）
         let response: TaskResponse = try await apiClient.request(
             endpoint: "/api/v1/generate/tasks",
             method: .POST,
             body: generationRequest,
-            requiresAuth: true,
+            requiresAuth: useFreeQuota,
             responseType: TaskResponse.self
         )
         

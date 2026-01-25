@@ -13,6 +13,8 @@ struct ContactUsView: View {
                 
                 Spacer()
                 
+                benefitPromptSection
+                
                 actionButtons
             }
             .background(Theme.Colors.appBackground)
@@ -45,6 +47,38 @@ struct ContactUsView: View {
             }
         }
         .padding(Theme.Spacing.xl)
+    }
+    
+    private var benefitPromptSection: some View {
+        VStack(spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "gift.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Theme.Colors.goldGradient)
+
+                Text("有福利")
+                    .font(Theme.Fonts.bodyBold)
+                    .foregroundStyle(Theme.Colors.goldGradient)
+            }
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                    .fill(Theme.Colors.goldGradient.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Shapes.buttonCornerRadius)
+                    .stroke(Theme.Colors.goldGradient.opacity(0.3), lineWidth: 1)
+            )
+            .padding(.horizontal, Theme.Spacing.xl)
+
+            Text("关注后私信可领取免费使用额度")
+                .font(Theme.Fonts.callout)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Theme.Spacing.xl)
+        }
+        .padding(.bottom, Theme.Spacing.lg)
     }
     
     private var qrCodeImage: some View {

@@ -977,9 +977,15 @@ private struct NativeControlPanel: View {
                 .background(Theme.Colors.brandBlue.opacity(0.1))
                 .cornerRadius(8)
             }
-            
+
             Button {
-                onImageToImageTapped()
+                // 先收起键盘
+                isPromptFocused = false
+
+                // 延迟执行，等待键盘动画完成
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    onImageToImageTapped()
+                }
             } label: {
                 if viewModel.isGenerating {
                     HStack {

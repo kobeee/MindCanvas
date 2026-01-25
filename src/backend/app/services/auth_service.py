@@ -385,7 +385,9 @@ class AuthService:
             - 如果用户不存在，创建新用户
             - 无论哪种登录方式都检查邮箱配额配置
             - OAuth登录如果没有邮箱，生成占位邮箱
-            - 首次OAuth登录自动给予试用配额
+            - 首次OAuth登录自动给予3次免费额度
+            - 首次邮箱登录也自动给予3次免费额度
+            - 邮箱配额注入优先级高于首次登录额度
         """
         try:
             # 确保有邮箱，如果没有则生成占位邮箱
@@ -451,13 +453,13 @@ class AuthService:
             # 检查邮箱配额配置（无论哪种登录方式）
             email_quota_synced = await self._sync_email_quota_if_exists(new_user, email)
 
-            # 如果没有邮箱配额且是OAuth登录，给予试用配额
-            if not email_quota_synced and provider in ["google", "github", "apple"]:
+            # 如果没有邮箱配额，给予首次登录免费额度（3次）
+            if not email_quota_synced:
                 new_user.api_provider = "laozhang"
-                new_user.free_quota = 1
+                new_user.free_quota = 3
                 await self.db.commit()
                 await self.db.refresh(new_user)
-                logger.info(f"Granted trial quota for new {provider} user {new_user.id}: 1")
+                logger.info(f"Granted first login quota for new {provider} user {new_user.id}: 3")
 
             logger.info(f"Created new user: {new_user.id}")
             return new_user

@@ -14,9 +14,13 @@ enum DocumentError: Error {
 @MainActor
 final class NativeEditorViewModel {
     // MARK: - 项目信息
-    
+
     let project: Project
     var projectName: String
+
+    // MARK: - 认证管理
+
+    private let authManager = AuthManager.shared
     
     // MARK: - 画布文档
     
@@ -378,7 +382,15 @@ final class NativeEditorViewModel {
     
         func loadQuota() async {
         isLoadingQuota = true
-        
+
+        // 游客模式下不加载配额信息
+        if authManager.isGuest {
+            quotaInfo = nil
+            quotaHintMessage = nil
+            isLoadingQuota = false
+            return
+        }
+
         do {
             let info = try await QuotaService.shared.fetchQuota()
             quotaInfo = info
@@ -386,7 +398,7 @@ final class NativeEditorViewModel {
         } catch {
             print("加载配额信息失败: \(error)")
         }
-        
+
         isLoadingQuota = false
     }
 
@@ -412,11 +424,16 @@ final class NativeEditorViewModel {
 
     /// 检查是否可以生图
     func checkCanGenerate() -> Bool {
+        // 游客模式下只检查是否有 API Key
+        if authManager.isGuest {
+            return KeychainManager.shared.hasAPIKey()
+        }
+
         // 如果正在加载配额信息，暂时允许生图（避免用户体验问题）
         if isLoadingQuota {
             return true
         }
-        
+
         let hasAPIKey = KeychainManager.shared.hasAPIKey()
         let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
         return hasAPIKey || hasFreeQuota
@@ -424,20 +441,29 @@ final class NativeEditorViewModel {
 
     /// 获取生图提示信息
     func getGenerationHint() -> String? {
+        // 游客模式下不显示配额提示
+        if authManager.isGuest {
+            let hasAPIKey = KeychainManager.shared.hasAPIKey()
+            if !hasAPIKey {
+                return "请先在设置中配置 API Key"
+            }
+            return nil
+        }
+
         // 如果正在加载配额信息，显示加载提示
         if isLoadingQuota {
             return "正在检查配额信息..."
         }
-        
+
         let hasAPIKey = KeychainManager.shared.hasAPIKey()
         let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
-        
+
         if hasFreeQuota {
             return quotaHintMessage
         } else if !hasAPIKey {
             return "请先在设置中配置 API Key"
         }
-        
+
         return nil
     }
 
@@ -562,9 +588,9 @@ final class NativeEditorViewModel {
         loadAssets()
 
         do {
-            // 检查是否有免费额度
-            let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
-            
+            // 检查是否有免费额度（游客模式下不使用免费额度）
+            let hasFreeQuota = !authManager.isGuest && (quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0)
+
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: base64String,
@@ -681,9 +707,9 @@ final class NativeEditorViewModel {
         loadAssets()
 
         do {
-            // 检查是否有免费额度
-            let hasFreeQuota = quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0
-            
+            // 检查是否有免费额度（游客模式下不使用免费额度）
+            let hasFreeQuota = !authManager.isGuest && (quotaInfo?.hasFreeQuota == true && (quotaInfo?.remainingQuota ?? 0) > 0)
+
             let request = GenerationRequest(
                 prompt: trimmed,
                 imageBase64: nil,

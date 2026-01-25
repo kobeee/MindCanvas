@@ -10,6 +10,11 @@ final class AuthManager {
     private(set) var currentUser: User?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    private(set) var isGuestMode = false
+
+    var isGuest: Bool {
+        isGuestMode
+    }
 
     private let keychainManager = KeychainManager.shared
     private let authService = AuthService.shared
@@ -24,9 +29,11 @@ final class AuthManager {
     func checkAuthentication() async {
         if authService.isLoggedIn() {
             isAuthenticated = true
+            isGuestMode = false
             await loadCurrentUser()
         } else {
             isAuthenticated = false
+            isGuestMode = false
             currentUser = nil
         }
     }
@@ -59,7 +66,7 @@ final class AuthManager {
     }
 
     func sendVerificationCode(email: String) async -> Bool {
-        isLoading = false  // 不显示加载状态
+        isLoading = false
         errorMessage = nil
 
         do {
@@ -88,6 +95,7 @@ final class AuthManager {
         do {
             let token = try await loginAction()
             currentUser = token.user
+            isGuestMode = false
             isAuthenticated = true
         } catch {
             errorMessage = formatErrorMessage(error)
@@ -107,7 +115,24 @@ final class AuthManager {
         }
 
         currentUser = nil
+        isGuestMode = false
         isAuthenticated = false
+        isLoading = false
+    }
+    
+    func switchToGuestMode() async {
+        isLoading = true
+        errorMessage = nil
+
+        keychainManager.deleteToken()
+        currentUser = nil
+
+        // 先设置认证状态，确保 RootView 能正确响应
+        isAuthenticated = true
+
+        // 然后设置游客模式标志
+        isGuestMode = true
+
         isLoading = false
     }
 
@@ -117,6 +142,37 @@ final class AuthManager {
 
     func ensureValidToken() async throws -> String {
         return try await authService.ensureValidToken()
+    }
+    
+    func updateUsername(_ newUsername: String) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        
+        defer {
+            isLoading = false
+        }
+
+        do {
+            let token = try await ensureValidToken()
+            
+            let response: [String: String] = try await APIClient.shared.request(
+                endpoint: "/api/v1/users/me/username",
+                method: .PUT,
+                body: ["username": newUsername],
+                requiresAuth: true,
+                responseType: [String: String].self
+            )
+            
+            if let updatedUsername = response["username"] {
+                currentUser?.username = updatedUsername
+                return true
+            }
+            
+            return false
+        } catch {
+            errorMessage = formatErrorMessage(error)
+            return false
+        }
     }
 
     private func formatErrorMessage(_ error: Error) -> String {

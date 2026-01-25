@@ -3,11 +3,12 @@ import AuthenticationServices
 
 struct LoginView: View {
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var verificationCode = ""
     @State private var isCodeSent = false
     @State private var countdown = 0
-    
+
     // Toast 状态
     @State private var toastMessage = ""
     @State private var toastType: ToastType = .info
@@ -38,30 +39,40 @@ struct LoginView: View {
             // 主内容
             VStack(spacing: Theme.Spacing.xxxl) {
                 Spacer()
-                
+
                 logoSection
-                
+
                 if authManager.isLoading {
                     loadingSection
                 } else {
                     loginOptionsSection
                 }
-                
+
                 if let errorMessage = authManager.errorMessage {
                     errorSection(errorMessage)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 60)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.Colors.appBackground)
-            
+
             // Toast 弹窗
             if showToast {
                 toastView
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
+            }
+        }
+        .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
+            if isAuthenticated && !authManager.isGuest {
+                dismiss()
+            }
+        }
+        .onChange(of: authManager.isGuest) { _, isGuest in
+            if !isGuest && authManager.isAuthenticated {
+                dismiss()
             }
         }
     }
@@ -160,8 +171,27 @@ struct LoginView: View {
             orDivider
             
             emailLoginSection
+
+            Spacer()
+                .frame(height: Theme.Spacing.xl)
+
+            if !authManager.isGuest {
+                guestLoginButton
+            }
         }
         .frame(maxWidth: Theme.Sizes.maxContentWidth)
+    }
+    
+    private var guestLoginButton: some View {
+        Button {
+            Task {
+                await authManager.switchToGuestMode()
+            }
+        } label: {
+            Text("游客模式")
+                .font(Theme.Fonts.bodyBold)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
     }
     
     private var orDivider: some View {

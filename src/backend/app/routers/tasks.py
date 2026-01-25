@@ -135,10 +135,44 @@ async def get_current_user(
         )
 
 
+async def get_optional_current_user(
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(HTTPBearer(auto_error=False))],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)]
+) -> Optional[User]:
+    """
+    依赖注入：从 JWT Token 获取当前用户（可选）
+
+    如果没有提供 Token 或 Token 无效，返回 None（游客模式）
+
+    Args:
+        credentials: HTTP Bearer 认证凭证（可选）
+        auth_service: 认证服务实例
+
+    Returns:
+        当前用户对象，或 None（游客模式）
+    """
+    if credentials is None:
+        return None
+
+    try:
+        token = credentials.credentials
+        user = await auth_service.get_current_user(token)
+        return user
+    except InvalidTokenError:
+        logger.warning(f"Invalid token in optional auth, treating as guest")
+        return None
+    except UserNotFoundError:
+        logger.warning(f"User not found in optional auth, treating as guest")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get current user in optional auth: {str(e)}, treating as guest")
+        return None
+
+
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
     request: TaskCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[Optional[User], Depends(get_optional_current_user)],
     task_service: Annotated[TaskService, Depends(get_task_service)]
 ):
     """
@@ -203,9 +237,18 @@ async def create_task(
                 detail="prompt must be less than 2000 characters"
             )
 
+        # 判断是否为游客模式
+        if current_user is None:
+            # 游客模式：使用固定的 UUID 表示游客
+            from uuid import UUID
+            user_id = UUID("00000000-0000-0000-0000-000000000000")
+            logger.info("Creating task in guest mode")
+        else:
+            user_id = current_user.id
+
         # 调用服务创建任务
         task_id = await task_service.create_task(
-            user_id=str(current_user.id),
+            user_id=str(user_id),
             encrypted_api_key=request.encrypted_api_key,
             prompt=request.prompt,
             base_image=request.base_image
@@ -214,7 +257,7 @@ async def create_task(
         # 构建响应
         response = TaskResponse(
             id=task_id,
-            user_id=current_user.id,
+            user_id=user_id,
             prompt=request.prompt,
             base_image=request.base_image,
             status="pending",
@@ -222,7 +265,7 @@ async def create_task(
             updated_at=None
         )
 
-        logger.info(f"Task created: {task_id}, user_id={current_user.id}")
+        logger.info(f"Task created: {task_id}, user_id={user_id}")
 
         # 返回响应
         return response

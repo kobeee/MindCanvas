@@ -131,20 +131,32 @@ class TaskService:
             raise TaskServiceError("prompt is required")
 
         try:
-            # 获取用户使用的 API 提供商
-            api_provider = await self.quota_service.get_user_api_provider(user_id)
-            logger.info(f"User {user_id} uses API provider: {api_provider}")
+            # 判断是否为游客模式
+            guest_user_id = "00000000-0000-0000-0000-000000000000"
+            if user_id == guest_user_id:
+                # 游客模式：直接使用 Google API
+                api_provider = "google"
+                image_size = "1K"
+                logger.info(f"Guest mode: using Google API")
 
-            # 确定图片尺寸
-            image_size = "2K" if api_provider == "laozhang" else "1K"
-
-            # 检查 API Key
-            if api_provider == "google":
+                # 检查 API Key
                 if not encrypted_api_key:
-                    raise TaskServiceError("encrypted_api_key is required for Google API")
-            elif api_provider == "laozhang":
-                # Laozhang API 不需要用户提供 API Key
-                encrypted_api_key = None
+                    raise TaskServiceError("encrypted_api_key is required for guest mode")
+            else:
+                # 正常用户：获取用户使用的 API 提供商
+                api_provider = await self.quota_service.get_user_api_provider(user_id)
+                logger.info(f"User {user_id} uses API provider: {api_provider}")
+
+                # 确定图片尺寸
+                image_size = "2K" if api_provider == "laozhang" else "1K"
+
+                # 检查 API Key
+                if api_provider == "google":
+                    if not encrypted_api_key:
+                        raise TaskServiceError("encrypted_api_key is required for Google API")
+                elif api_provider == "laozhang":
+                    # Laozhang API 不需要用户提供 API Key
+                    encrypted_api_key = None
 
             # 创建任务记录
             task = Task(
@@ -317,8 +329,7 @@ class TaskService:
                 image_data = await provider.generate_image(
                     api_key=api_key,
                     prompt=task.prompt,
-                    base_image=task.base_image,
-                    image_size=task.image_size
+                    base_image=task.base_image
                 )
                 logger.info(f"Image generated successfully for task {task_id}, size={len(image_data)} bytes")
             except Exception as e:
