@@ -48,6 +48,20 @@ class SelectableTextView: UIView {
     // 选中边框
     private let selectionBorder = CAShapeLayer()
 
+    // 置顶胶囊按钮
+    private let bringToFrontButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("置顶", for: .normal)
+        button.backgroundColor = .white
+        button.setTitleColor(.systemBlue, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.systemBlue.cgColor
+        button.isHidden = true
+        return button
+    }()
+
     // 控制点图层
     private var cornerHandleLayers: [CAShapeLayer] = []
     private let rotationHandleLayer = CAShapeLayer()
@@ -102,6 +116,7 @@ class SelectableTextView: UIView {
     var onOperationEnd: ((SelectableTextView?, TextLayerNode) -> Void)?
     var onEditingStarted: ((TextLayerNode) -> Void)?
     var onEditingFinished: ((TextLayerNode, String) -> Void)?
+    var onBringToFront: ((UUID) -> Void)?
 
     // MARK: - Initialization
 
@@ -138,6 +153,10 @@ class SelectableTextView: UIView {
         textLabel.backgroundColor = .clear
         textLabel.isUserInteractionEnabled = false
         addSubview(textLabel)
+
+        // 添加置顶按钮
+        addSubview(bringToFrontButton)
+        bringToFrontButton.addTarget(self, action: #selector(handleBringToFront), for: .touchUpInside)
 
         // 添加选中边框
         selectionBorder.fillColor = UIColor.clear.cgColor
@@ -245,6 +264,9 @@ class SelectableTextView: UIView {
         rotationHandleLayer.isHidden = !showHandles
         cornerHandleLayers.forEach { $0.isHidden = !showHandles }
 
+        // 更新置顶按钮显示状态
+        bringToFrontButton.isHidden = !isSelected
+
         guard showHandles else { return }
 
         // 更新选中边框
@@ -278,6 +300,9 @@ class SelectableTextView: UIView {
             height: handleSize
         )
         rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
+
+        // 更新置顶按钮位置
+        updateBringToFrontButtonPosition()
     }
 
     // MARK: - Hit Testing
@@ -813,6 +838,29 @@ class SelectableTextView: UIView {
             // 启用拖拽手势
             panGesture.isEnabled = true
         }
+    }
+
+    // MARK: - Bring to Front Button
+
+    /// 更新置顶按钮位置
+    private func updateBringToFrontButtonPosition() {
+        guard isSelected else { return }
+
+        let buttonWidth: CGFloat = 60
+        let buttonHeight: CGFloat = 24
+        let buttonYOffset: CGFloat = 8
+
+        bringToFrontButton.frame = CGRect(
+            x: bounds.midX - buttonWidth / 2,
+            y: bounds.maxY + buttonYOffset,
+            width: buttonWidth,
+            height: buttonHeight
+        )
+    }
+
+    /// 处理置顶按钮点击
+    @objc private func handleBringToFront() {
+        onBringToFront?(textNode.id)
     }
 
     // MARK: - Helper Methods

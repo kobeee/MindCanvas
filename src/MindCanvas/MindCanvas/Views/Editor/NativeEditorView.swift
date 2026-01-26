@@ -312,11 +312,11 @@ struct NativeEditorView: View {
                     }
                     .padding()
                     .background(.regularMaterial)
-                    
+
                     // 内容区域
                     VStack(spacing: 20) {
                         Spacer()
-                        
+
                         // 选项按钮
                         HStack(spacing: 20) {
                             // 相册按钮
@@ -331,11 +331,11 @@ struct NativeEditorView: View {
                                         .frame(width: 80, height: 80)
                                         .background(.blue.opacity(0.1))
                                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    
+
                                     Text("从相册选择")
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    
+
                                     Text("选择已有照片")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
@@ -343,7 +343,7 @@ struct NativeEditorView: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.plain)
-                            
+
                             // 拍照按钮（开发阶段强制显示，实际设备会检查相机可用性）
                             #if DEBUG
                             Button {
@@ -357,11 +357,11 @@ struct NativeEditorView: View {
                                         .frame(width: 80, height: 80)
                                         .background(.green.opacity(0.1))
                                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    
+
                                     Text("拍照")
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    
+
                                     Text("使用相机拍摄")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
@@ -382,11 +382,11 @@ struct NativeEditorView: View {
                                             .frame(width: 80, height: 80)
                                             .background(.green.opacity(0.1))
                                             .clipShape(RoundedRectangle(cornerRadius: 16))
-                                        
+
                                         Text("拍照")
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-                                        
+
                                         Text("使用相机拍摄")
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
@@ -398,9 +398,9 @@ struct NativeEditorView: View {
                             #endif
                         }
                         .padding(.horizontal, 40)
-                        
+
                         Spacer()
-                        
+
                         // 提示信息
                         Text("仅支持图片格式，视频文件将被自动过滤")
                             .font(.caption)
@@ -412,6 +412,12 @@ struct NativeEditorView: View {
             }
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+        .onChange(of: showImageSourcePicker) { _, newValue in
+            if !newValue {
+                // 图片选择器关闭时,重置状态
+                viewModel.canvasView?.resetImagePickerState()
+            }
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let item = newItem else { return }
@@ -431,8 +437,9 @@ struct NativeEditorView: View {
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraImagePicker { imageData in
-                Task {
-                    await viewModel.importImage(imageData)
+                // 拍照成功后,将图片直接添加到画布,而不是导入到资源栏
+                if let location = pendingCanvasImageLocation, let canvasView = viewModel.canvasView {
+                    canvasView.importImage(imageData, at: location)
                 }
             }
         }

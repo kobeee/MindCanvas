@@ -510,6 +510,10 @@ class NativeCanvasView: UIView {
             operationStartNode = nil
         }
 
+        imageView.onBringToFront = { [weak self] nodeID in
+            self?.bringLayerToFront(id: nodeID)
+        }
+
         // 添加到对象图层
         objectLayerView.addSubview(imageView)
 
@@ -545,7 +549,7 @@ class NativeCanvasView: UIView {
         
         arrowView.onOperationEnd = { [weak self] _, endArrow in
             guard let self = self, let startArrow = operationStartArrow else { return }
-            
+
             // 检查是否移动
             if startArrow.startPoint != endArrow.startPoint || startArrow.endPoint != endArrow.endPoint {
                 let action = MoveArrowAction(
@@ -576,8 +580,12 @@ class NativeCanvasView: UIView {
                 )
                 NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             }
-            
+
             operationStartArrow = nil
+        }
+
+        arrowView.onBringToFront = { [weak self] arrowID in
+            self?.bringArrowToFront(id: arrowID)
         }
         
         arrowViews[arrow.id] = arrowView
@@ -672,6 +680,75 @@ class NativeCanvasView: UIView {
         layers[index].zIndex = maxZ + 1
         sortLayers()
         onLayersUpdated?(layers)
+    }
+
+    /// 箭头操作：置顶
+    func bringArrowToFront(id: UUID) {
+        guard let index = arrowLayerManager.arrows.firstIndex(where: { $0.id == id }) else { return }
+        let maxZ = arrowLayerManager.arrows.map(\.zIndex).max() ?? 0
+        let updatedArrow = arrowLayerManager.arrows[index].updated(zIndex: maxZ + 1)
+        arrowLayerManager.arrows[index] = updatedArrow
+
+        // 重新排序所有视图的层级
+        sortAllSubviewsByZIndex()
+
+        // 额外确保该视图在最上层
+        if let view = arrowViews[id] {
+            objectLayerView.bringSubviewToFront(view)
+        }
+
+        // 强制布局更新
+        objectLayerView.setNeedsLayout()
+        objectLayerView.layoutIfNeeded()
+
+        // 触发数据保存
+        onCanvasUpdated?()
+    }
+
+    /// 形状操作：置顶
+    func bringShapeToFront(id: UUID) {
+        guard let index = shapeLayerManager.shapes.firstIndex(where: { $0.id == id }) else { return }
+        let maxZ = shapeLayerManager.shapes.map(\.zIndex).max() ?? 0
+        let updatedShape = shapeLayerManager.shapes[index].updated(zIndex: maxZ + 1)
+        shapeLayerManager.shapes[index] = updatedShape
+
+        // 重新排序所有视图的层级
+        sortAllSubviewsByZIndex()
+
+        // 额外确保该视图在最上层
+        if let view = shapeViews[id] {
+            objectLayerView.bringSubviewToFront(view)
+        }
+
+        // 强制布局更新
+        objectLayerView.setNeedsLayout()
+        objectLayerView.layoutIfNeeded()
+
+        // 触发数据保存
+        onCanvasUpdated?()
+    }
+
+    /// 文字操作：置顶
+    func bringTextToFront(id: UUID) {
+        guard let text = textLayerManager.texts.first(where: { $0.id == id }) else { return }
+        let maxZ = textLayerManager.texts.map(\.zIndex).max() ?? 0
+        let updatedText = text.updated(zIndex: maxZ + 1)
+        textLayerManager.updateText(updatedText)
+
+        // 重新排序所有视图的层级
+        sortAllSubviewsByZIndex()
+
+        // 额外确保该视图在最上层
+        if let view = textViews[id] {
+            objectLayerView.bringSubviewToFront(view)
+        }
+
+        // 强制布局更新
+        objectLayerView.setNeedsLayout()
+        objectLayerView.layoutIfNeeded()
+
+        // 触发数据保存
+        onCanvasUpdated?()
     }
 
     /// 图层操作：置底
@@ -833,6 +910,12 @@ class NativeCanvasView: UIView {
 
         // 通知上层显示图片源选择弹窗
         onShowImagePickerRequested?(location)
+    }
+
+    /// 重置图片选择器状态（当选择器关闭时调用）
+    func resetImagePickerState() {
+        isShowingImagePicker = false
+        pendingImageLocation = nil
     }
 
     
@@ -1035,39 +1118,41 @@ class NativeCanvasView: UIView {
     private func sortAllSubviewsByZIndex() {
         // 收集所有对象及其 zIndex
         var allObjects: [(view: UIView, zIndex: Int)] = []
-        
+
         // 图片视图
         for layer in layers {
             if let view = imageViews[layer.id] {
                 allObjects.append((view, layer.zIndex))
             }
         }
-        
+
         // 箭头视图
         for arrow in arrowLayerManager.arrows {
             if let view = arrowViews[arrow.id] {
                 allObjects.append((view, arrow.zIndex))
             }
         }
-        
+
         // 形状视图
         for shape in shapeLayerManager.shapes {
             if let view = shapeViews[shape.id] {
                 allObjects.append((view, shape.zIndex))
             }
         }
-        
+
         // 文字视图
         for text in textLayerManager.texts {
             if let view = textViews[text.id] {
                 allObjects.append((view, text.zIndex))
             }
         }
-        
-        // 按 zIndex 排序
+
+        // 按 zIndex 排序（从小到大，zIndex 越大越在上层）
         allObjects.sort { $0.zIndex < $1.zIndex }
-        
+
         // 重新排列视图层级
+        // insertSubview(_:at:) 的索引 0 是最底层，索引越大越在上层
+        // 所以我们需要按从小到大的顺序插入，这样 zIndex 最小的在最底层，zIndex 最大的在最上层
         for (index, item) in allObjects.enumerated() {
             objectLayerView.insertSubview(item.view, at: index)
         }
@@ -1772,7 +1857,7 @@ class NativeCanvasView: UIView {
         
         shapeView.onOperationEnd = { [weak self] _, endShape in
             guard let self = self, let startShape = operationStartShape else { return }
-            
+
             // 检查是否移动
             if startShape.frame != endShape.frame {
                 let action = MoveShapeAction(
@@ -1784,7 +1869,7 @@ class NativeCanvasView: UIView {
                 NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             }
             // 检查是否缩放
-            else if abs(startShape.frame.width - endShape.frame.width) > 1 || 
+            else if abs(startShape.frame.width - endShape.frame.width) > 1 ||
                     abs(startShape.frame.height - endShape.frame.height) > 1 {
                 let action = ScaleShapeAction(
                     shapeID: startShape.id,
@@ -1804,8 +1889,12 @@ class NativeCanvasView: UIView {
                 )
                 NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             }
-            
+
             operationStartShape = nil
+        }
+
+        shapeView.onBringToFront = { [weak self] shapeID in
+            self?.bringShapeToFront(id: shapeID)
         }
         
         shapeViews[shape.id] = shapeView
@@ -2030,6 +2119,10 @@ class NativeCanvasView: UIView {
             
             operationStartText = nil
             self.onCanvasUpdated?()
+        }
+
+        textView.onBringToFront = { [weak self] textID in
+            self?.bringTextToFront(id: textID)
         }
         
         textViews[text.id] = textView

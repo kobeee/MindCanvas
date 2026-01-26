@@ -1,5 +1,356 @@
 # 开发记录
 
+## 2026-01-25 - 图片工具、置顶胶囊按钮与问题修复（部分完成）🚧
+
+### 概述
+
+修复图片工具选择框问题、拍照后图片添加到画布、为所有可被选择对象添加置顶胶囊按钮。置顶功能仍需调试，资源栏图片下载功能待修复。
+
+### 核心功能
+
+#### 1. 图片工具选择框问题修复
+
+**问题描述**：
+- 第一次点击画布，正常弹出"相册或拍照"选项框
+- 点击屏幕其他地方，选框浮窗消失（正常）
+- 第二次或第三次点击画布后，不再弹出选框浮窗
+
+**根本原因**：
+- `isShowingImagePicker` 标志位在第一次点击后设置为 `true`
+- 选择器关闭时标志位从未被重置为 `false`
+- 导致后续点击被 `guard !isShowingImagePicker else { return }` 拦截
+
+**解决方案**：
+- 在 `NativeCanvasView.swift` 中添加 `resetImagePickerState()` 方法：
+  ```swift
+  func resetImagePickerState() {
+      isShowingImagePicker = false
+      pendingImageLocation = nil
+  }
+  ```
+- 在 `NativeEditorView.swift` 中添加 `showImageSourcePicker` 的 `onChange` 监听器：
+  ```swift
+  .onChange(of: showImageSourcePicker) { _, newValue in
+      if !newValue {
+          viewModel.canvasView?.resetImagePickerState()
+      }
+  }
+  ```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+#### 2. 拍照后图片添加到画布修复
+
+**问题描述**：
+- 拍照成功后，图片直接跑到了资源栏那边去了
+- 预期行为：拍照后图片应该和相册选中的图片一样，添加到画布上
+
+**根本原因**：
+- `CameraImagePicker` 回调中调用 `viewModel.importImage(imageData)`
+- `importImage` 方法会将图片上传到后端并保存到资源库
+
+**解决方案**：
+- 修改 `NativeEditorView.swift` 中的 `CameraImagePicker` 回调：
+  ```swift
+  .fullScreenCover(isPresented: $showCamera) {
+      CameraImagePicker { imageData in
+          if let location = pendingCanvasImageLocation, let canvasView = viewModel.canvasView {
+              canvasView.importImage(imageData, at: location)
+          }
+      }
+  }
+  ```
+- 直接调用 `canvasView.importImage(at: location)` 将图片添加到画布
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+#### 3. 为所有可被选择对象添加"置顶"胶囊按钮
+
+**需求描述**：
+- 为所有可被选择的对象（图片、箭头、形状、文字）增加一个小胶囊
+- 白底蓝色字，显示"置顶"
+- 点击后，将该对象置于画布的最顶层（z-index最大）
+- 可以遮挡一切其他对象
+- 保持UI一致性：高端大气上档次，清新脱俗有品味
+
+**设计方案**：
+- 按钮样式：白底、蓝色边框、蓝色文字"置顶"、圆角12pt
+- 按钮位置：在对象下方8pt处居中显示
+- 只在选中状态下显示
+
+**实现方案**：
+
+**1. 为 SelectableImageView 添加置顶按钮**：
+```swift
+private let bringToFrontButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setTitle("置顶", for: .normal)
+    button.backgroundColor = .white
+    button.setTitleColor(.systemBlue, for: .normal)
+    button.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+    button.layer.cornerRadius = 12
+    button.layer.borderWidth = 1
+    button.layer.borderColor = UIColor.systemBlue.cgColor
+    button.isHidden = true
+    return button
+}()
+```
+
+**2. 置顶按钮位置更新**：
+```swift
+private func updateBringToFrontButtonPosition() {
+    guard isSelected else { return }
+
+    let buttonWidth: CGFloat = 60
+    let buttonHeight: CGFloat = 24
+    let buttonYOffset: CGFloat = 8
+
+    bringToFrontButton.frame = CGRect(
+        x: bounds.midX - buttonWidth / 2,
+        y: bounds.maxY + buttonYOffset,
+        width: buttonWidth,
+        height: buttonHeight
+    )
+}
+```
+
+**3. 置顶回调绑定**：
+```swift
+var onBringToFront: ((UUID) -> Void)?
+
+@objc private func handleBringToFront() {
+    onBringToFront?(layerNode.id)
+}
+```
+
+**4. NativeCanvasView 中的置顶方法**：
+```swift
+/// 箭头操作：置顶
+func bringArrowToFront(id: UUID) {
+    guard let index = arrowLayerManager.arrows.firstIndex(where: { $0.id == id }) else { return }
+    let maxZ = arrowLayerManager.arrows.map(\.zIndex).max() ?? 0
+    let updatedArrow = arrowLayerManager.arrows[index].updated(zIndex: maxZ + 1)
+    arrowLayerManager.arrows[index] = updatedArrow
+
+    // 重新排序所有视图的层级
+    sortAllSubviewsByZIndex()
+
+    // 额外确保该视图在最上层
+    if let view = arrowViews[id] {
+        objectLayerView.bringSubviewToFront(view)
+    }
+
+    // 强制布局更新
+    objectLayerView.setNeedsLayout()
+    objectLayerView.layoutIfNeeded()
+
+    // 触发数据保存
+    onCanvasUpdated?()
+}
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableImageView.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableArrowView.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableShapeView.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableTextView.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
+
+**视图层级排序逻辑**：
+```swift
+private func sortAllSubviewsByZIndex() {
+    // 收集所有对象及其 zIndex
+    var allObjects: [(view: UIView, zIndex: Int)] = []
+
+    // 图片视图、箭头视图、形状视图、文字视图...
+
+    // 按 zIndex 排序（从小到大，zIndex 越大越在上层）
+    allObjects.sort { $0.zIndex < $1.zIndex }
+
+    // 重新排列视图层级
+    // insertSubview(_:at:) 的索引 0 是最底层，索引越大越在上层
+    for (index, item) in allObjects.enumerated() {
+        objectLayerView.insertSubview(item.view, at: index)
+    }
+}
+```
+
+#### 4. zIndex 修改问题修复
+
+**问题描述**：
+- 编译错误：`Cannot assign to property: 'zIndex' is a 'let' constant`
+- ArrowLayerNode、ShapeLayerNode、TextLayerNode 的 `zIndex` 被定义为 `let` 常量
+
+**解决方案**：
+- 使用 `updated()` 方法创建新的实例，而不是直接修改属性
+- ArrowLayerNode 和 ShapeLayerNode 的 `updated()` 方法已有 `zIndex` 参数
+- TextLayerNode 添加了 `updated(zIndex:)` 扩展方法
+
+**修改示例**：
+```swift
+// 修改前（错误）
+arrowLayerManager.arrows[index].zIndex = maxZ + 1
+
+// 修改后（正确）
+let updatedArrow = arrowLayerManager.arrows[index].updated(zIndex: maxZ + 1)
+arrowLayerManager.arrows[index] = updatedArrow
+```
+
+#### 5. TextLayerManager 访问权限问题修复
+
+**问题描述**：
+- 编译错误：`Cannot assign through subscript: 'texts' setter is inaccessible`
+- `TextLayerManager` 的 `texts` 属性被定义为 `private(set)`
+
+**解决方案**：
+- 使用 `textLayerManager.updateText(updatedText)` 方法更新文字
+- 先通过 `first(where:)` 找到要更新的文字对象
+- 创建新的文字实例（使用 `updated(zIndex:)`）
+- 调用 `updateText` 方法更新
+
+**修改示例**：
+```swift
+// 修改前（错误）
+textLayerManager.texts[index] = updatedText
+
+// 修改后（正确）
+guard let text = textLayerManager.texts.first(where: { $0.id == id }) else { return }
+let maxZ = textLayerManager.texts.map(\.zIndex).max() ?? 0
+let updatedText = text.updated(zIndex: maxZ + 1)
+textLayerManager.updateText(updatedText)
+```
+
+### 待解决问题
+
+#### 1. '置顶'功能仍未生效
+
+**问题描述**：
+- 点击"置顶"胶囊按钮后，对象仍然没有置于最顶层
+- zIndex 已经被正确更新，但视图层级没有正确反映
+
+**可能原因**：
+1. `insertSubview(_:at:)` 的索引逻辑可能有问题
+2. `bringSubviewToFront` 可能没有立即生效
+3. 视图层级更新可能被其他逻辑覆盖
+4. `objectLayerView` 和 `textOverlayView` 的层级关系可能影响结果
+
+**调试建议**：
+1. 添加日志输出，查看 zIndex 更新是否正确
+2. 添加日志输出，查看视图层级排序是否正确
+3. 检查 `objectLayerView` 和 `textOverlayView` 的层级关系
+4. 尝试使用 `bringSubviewToFront` 单独测试
+
+#### 2. 资源栏图片下载功能无响应
+
+**问题描述**：
+- 资源栏图片点击中间的"下载"图标按钮没有反应
+- 预期行为：保存到相册，然后提示"已保存至相册"
+
+**可能原因**：
+1. 下载按钮的点击事件没有正确绑定
+2. `downloadAsset` 方法可能有错误
+3. 图片加载可能失败
+4. 相册权限可能未授予
+
+**调试建议**：
+1. 检查 NativeAssetLibraryView 中的下载按钮绑定
+2. 检查 `viewModel.downloadAsset()` 方法实现
+3. 检查图片加载逻辑
+4. 检查相册权限配置
+
+### 代码审查结果
+
+**审查状态**：✅ 通过（语法和编译错误已修复）
+
+**审查文件**：
+- 6 个修改的 iOS 文件
+
+**发现的问题**：
+- zIndex 常量修改问题（已修复）
+- TextLayerManager 访问权限问题（已修复）
+
+**修复结果**：
+- 所有语法错误已修复
+- 所有编译错误已修复
+- 置顶逻辑已实现（但功能仍未生效，待调试）
+
+### 测试用例
+
+#### 图片工具选择框测试
+
+1. **多次点击测试**
+   - 选中图片工具
+   - 第一次点击画布，验证弹出选择框
+   - 点击屏幕其他地方关闭选择框
+   - 第二次点击画布，验证再次弹出选择框
+   - 第三次点击画布，验证再次弹出选择框
+
+#### 拍照功能测试
+
+1. **拍照添加到画布**
+   - 选中图片工具
+   - 点击画布弹出选择框
+   - 选择"拍照"
+   - 拍照成功后
+   - 验证：图片直接添加到画布（不是资源栏）
+   - 验证：图片位置正确（在点击位置）
+
+#### 置顶功能测试
+
+1. **置顶图片**
+   - 创建多个重叠的图片对象
+   - 选中一个图片（不在最顶层）
+   - 点击"置顶"胶囊按钮
+   - 验证：该图片现在在最顶层
+   - 验证：可以遮挡所有其他对象
+
+2. **置顶箭头**
+   - 创建多个重叠的箭头对象
+   - 选中一个箭头（不在最顶层）
+   - 点击"置顶"胶囊按钮
+   - 验证：该箭头现在在最顶层
+
+3. **置顶形状**
+   - 创建多个重叠的形状对象
+   - 选中一个形状（不在最顶层）
+   - 点击"置顶"胶囊按钮
+   - 验证：该形状现在在最顶层
+
+4. **置顶文字**
+   - 创建多个重叠的文字对象
+   - 选中一个文字（不在最顶层）
+   - 点击"置顶"胶囊按钮
+   - 验证：该文字现在在最顶层
+
+#### 资源栏下载测试
+
+1. **下载图片到相册**
+   - 进入编辑器
+   - 查看资源栏
+   - 点击某个图片的"下载"图标
+   - 验证：图片保存到相册
+   - 验证：显示"已保存至相册"提示
+
+### 注意事项
+
+1. **UI 一致性**：所有置顶按钮样式保持一致
+2. **数据持久化**：置顶操作需要保存到文档
+3. **撤销支持**：置顶操作应该支持撤销
+4. **权限管理**：图片下载需要相册权限
+5. **错误处理**：所有操作需要有错误处理
+
+### 下一步计划
+
+1. 调试置顶功能，找出为什么 zIndex 更新后视图层级没有正确反映
+2. 修复资源栏图片下载功能
+3. 添加置顶操作的撤销支持
+4. 测试所有新功能
+
+---
+
 ## 2026-01-25 - Google API调用参数错误修复（完成）✅
 
 ### 概述

@@ -27,6 +27,20 @@ class SelectableImageView: UIView {
         view.clipsToBounds = true
         return view
     }()
+
+    // 置顶胶囊按钮
+    private let bringToFrontButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("置顶", for: .normal)
+        button.backgroundColor = .white
+        button.setTitleColor(.systemBlue, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.systemBlue.cgColor
+        button.isHidden = true
+        return button
+    }()
     
     private let selectionBorder = CAShapeLayer()
     private var cornerHandleLayers: [CAShapeLayer] = []
@@ -67,6 +81,7 @@ class SelectableImageView: UIView {
     var onSelected: ((UUID) -> Void)?
     var onOperationStart: ((LayerNode) -> Void)?
     var onOperationEnd: ((LayerNode, LayerNode) -> Void)?
+    var onBringToFront: ((UUID) -> Void)?
 
     // MARK: - Initialization
 
@@ -93,23 +108,27 @@ class SelectableImageView: UIView {
 
         // 添加图片视图
         addSubview(imageView)
-        
+
+        // 添加置顶按钮
+        addSubview(bringToFrontButton)
+        bringToFrontButton.addTarget(self, action: #selector(handleBringToFront), for: .touchUpInside)
+
         // 添加选中边框
         layer.addSublayer(selectionBorder)
-        
+
         // 添加控制点
         for _ in 0..<4 {
             let handleLayer = CAShapeLayer()
             layer.addSublayer(handleLayer)
             cornerHandleLayers.append(handleLayer)
         }
-        
+
         // 添加旋转连接线
         layer.addSublayer(rotationLineLayer)
-        
+
         // 添加旋转手柄
         layer.addSublayer(rotationHandleLayer)
-        
+
         // 设置默认样式
         updateSelectionStyle()
     }
@@ -284,6 +303,9 @@ class SelectableImageView: UIView {
         rotationHandleLayer.isHidden = !showHandles
         cornerHandleLayers.forEach { $0.isHidden = !showHandles }
 
+        // 更新置顶按钮显示状态
+        bringToFrontButton.isHidden = !isSelected
+
         guard showHandles else {
             return
         }
@@ -319,12 +341,15 @@ class SelectableImageView: UIView {
             height: handleSize
         )
         rotationHandleLayer.path = UIBezierPath(ovalIn: rotationRect).cgPath
-        
+
         // 更新锁定标识
         viewWithTag(999)?.removeFromSuperview()
         if layerNode.isLocked {
             addLockIndicator()
         }
+
+        // 更新置顶按钮位置
+        updateBringToFrontButtonPosition()
     }
 
     // MARK: - Hit Testing
@@ -678,11 +703,37 @@ class SelectableImageView: UIView {
 
         // 更新图片视图 frame - 即使在手势中也要更新，确保图像跟着缩放
         imageView.frame = bounds
-        
+
         // 更新选中外观
         if isSelected {
             updateSelectionAppearance()
         }
+
+        // 更新置顶按钮位置
+        updateBringToFrontButtonPosition()
+    }
+
+    // MARK: - Bring to Front Button
+
+    /// 更新置顶按钮位置
+    private func updateBringToFrontButtonPosition() {
+        guard isSelected else { return }
+
+        let buttonWidth: CGFloat = 60
+        let buttonHeight: CGFloat = 24
+        let buttonYOffset: CGFloat = 8
+
+        bringToFrontButton.frame = CGRect(
+            x: bounds.midX - buttonWidth / 2,
+            y: bounds.maxY + buttonYOffset,
+            width: buttonWidth,
+            height: buttonHeight
+        )
+    }
+
+    /// 处理置顶按钮点击
+    @objc private func handleBringToFront() {
+        onBringToFront?(layerNode.id)
     }
     
     // MARK: - UIGestureRecognizerDelegate

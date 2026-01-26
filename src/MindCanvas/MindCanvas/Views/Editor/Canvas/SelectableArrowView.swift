@@ -48,6 +48,20 @@ class SelectableArrowView: UIView {
     private let arrowLayer = CAShapeLayer()
     private let selectionBorder = CAShapeLayer()
     private var endpointHandleLayers: [CAShapeLayer] = []
+
+    // 置顶胶囊按钮
+    private let bringToFrontButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("置顶", for: .normal)
+        button.backgroundColor = .white
+        button.setTitleColor(.systemBlue, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.systemBlue.cgColor
+        button.isHidden = true
+        return button
+    }()
     
     // 控制点配置
     private let handleSize: CGFloat = 12
@@ -73,6 +87,7 @@ class SelectableArrowView: UIView {
     var onSelected: ((UUID) -> Void)?
     var onOperationStart: ((ArrowLayerNode) -> Void)?
     var onOperationEnd: ((ArrowLayerNode, ArrowLayerNode) -> Void)?
+    var onBringToFront: ((UUID) -> Void)?
     
     // MARK: - Initialization
     
@@ -94,7 +109,7 @@ class SelectableArrowView: UIView {
         backgroundColor = .clear
         isOpaque = false
         clipsToBounds = false
-        
+
         // 箭头图层
         arrowLayer.strokeColor = UIColor(Color.fromHex(arrowNode.color) ?? .black).cgColor
         arrowLayer.lineWidth = arrowNode.lineWidth
@@ -102,7 +117,11 @@ class SelectableArrowView: UIView {
         arrowLayer.lineJoin = .round
         arrowLayer.fillColor = UIColor.clear.cgColor
         layer.addSublayer(arrowLayer)
-        
+
+        // 添加置顶按钮
+        addSubview(bringToFrontButton)
+        bringToFrontButton.addTarget(self, action: #selector(handleBringToFront), for: .touchUpInside)
+
         // 选中边框
         selectionBorder.strokeColor = UIColor.systemBlue.cgColor
         selectionBorder.fillColor = UIColor.clear.cgColor
@@ -110,7 +129,7 @@ class SelectableArrowView: UIView {
         selectionBorder.lineDashPattern = [4, 4]
         selectionBorder.isHidden = true
         layer.addSublayer(selectionBorder)
-        
+
         // 2个端点控制点
         for _ in 0..<2 {
             let handleLayer = CAShapeLayer()
@@ -203,16 +222,19 @@ class SelectableArrowView: UIView {
     private func updateSelectionAppearance() {
         // 角点在选中状态或操作过程中显示，提升交互体验
         let showHandles = isSelected || activeHandle != nil
-        
+
         selectionBorder.isHidden = !showHandles
         endpointHandleLayers.forEach { $0.isHidden = !showHandles }
-        
+
+        // 更新置顶按钮显示状态
+        bringToFrontButton.isHidden = !isSelected
+
         guard showHandles else { return }
-        
+
         // 更新选中边框
         let borderRect = bounds.insetBy(dx: -10, dy: -10)
         selectionBorder.path = UIBezierPath(rect: borderRect).cgPath
-        
+
         // 更新端点控制点
         let endpoints: [ArrowHandle] = [.startPoint, .endPoint]
         for (index, endpoint) in endpoints.enumerated() {
@@ -225,6 +247,9 @@ class SelectableArrowView: UIView {
             )
             endpointHandleLayers[index].path = UIBezierPath(ovalIn: handleRect).cgPath
         }
+
+        // 更新置顶按钮位置
+        updateBringToFrontButtonPosition()
     }
     
     // MARK: - Hit Testing
@@ -375,5 +400,28 @@ class SelectableArrowView: UIView {
         if isSelected {
             updateSelectionAppearance()
         }
+    }
+
+    // MARK: - Bring to Front Button
+
+    /// 更新置顶按钮位置
+    private func updateBringToFrontButtonPosition() {
+        guard isSelected else { return }
+
+        let buttonWidth: CGFloat = 60
+        let buttonHeight: CGFloat = 24
+        let buttonYOffset: CGFloat = 8
+
+        bringToFrontButton.frame = CGRect(
+            x: bounds.midX - buttonWidth / 2,
+            y: bounds.maxY + buttonYOffset,
+            width: buttonWidth,
+            height: buttonHeight
+        )
+    }
+
+    /// 处理置顶按钮点击
+    @objc private func handleBringToFront() {
+        onBringToFront?(arrowNode.id)
     }
 }
