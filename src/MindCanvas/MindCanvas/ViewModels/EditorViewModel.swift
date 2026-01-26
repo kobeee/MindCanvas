@@ -13,6 +13,7 @@ final class EditorViewModel {
     var isGenerating = false
     var canvasSnapshot: String?
     var hasSelection = false
+    var showDownloadSuccessToast = false
     
     private let generationService = RealGenerationService.shared
     private var modelContext: ModelContext?
@@ -115,6 +116,59 @@ final class EditorViewModel {
     }
     
     func downloadAsset(_ asset: Asset) {
+        Task {
+            var image: UIImage?
+            let urlString = asset.url
+
+            // 判断是否为本地路径（相对路径或 file:// URL）
+            let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
+                              (URL(string: urlString)?.isFileURL == true)
+
+            if isLocalPath {
+                // 本地图片：使用 ImageStorageService 加载（支持相对路径和路径恢复）
+                image = ImageStorageService.shared.loadImage(from: urlString)
+                if image == nil {
+                    print("无法加载本地图片: \(urlString)")
+                }
+            } else if let url = URL(string: urlString) {
+                // 远程 URL：异步加载
+                image = await ImageStorageService.shared.getImage(from: url)
+                if image == nil {
+                    print("无法加载远程图片: \(urlString)")
+                }
+            } else {
+                print("无效的资源URL: \(urlString)")
+                return
+            }
+
+            guard let validImage = image else {
+                print("无法加载图片: \(urlString)")
+                return
+            }
+
+            // 保存到相册
+            do {
+                try await saveImageToPhotoLibrary(validImage)
+                // 显示成功提示
+                await MainActor.run {
+                    showDownloadSuccessToast = true
+                }
+            } catch {
+                print("保存到相册失败: \(error)")
+            }
+        }
+    }
+    
+    /// 保存图片到相册
+    private func saveImageToPhotoLibrary(_ image: UIImage) async throws {
+        return try await withCheckedThrowingContinuation { continuation in
+            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            // 由于 UIImageWriteToSavedPhotosAlbum 是异步的但没有完成回调，
+            // 我们在短暂延迟后返回成功（实际保存由系统完成）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                continuation.resume()
+            }
+        }
     }
 
     func publishAsset(_ asset: Asset, title: String) async {

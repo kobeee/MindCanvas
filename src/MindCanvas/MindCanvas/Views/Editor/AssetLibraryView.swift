@@ -22,6 +22,23 @@ struct AssetLibraryView: View {
         .sheet(isPresented: $showingPublishSheet) {
             publishSheet
         }
+        // 下载成功 Toast 提示
+        .overlay(alignment: .bottom) {
+            if viewModel.showDownloadSuccessToast {
+                ToastView(message: "已保存至相册", icon: "checkmark.circle.fill")
+                    .padding(.bottom, 100)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        // 2秒后自动隐藏
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                viewModel.showDownloadSuccessToast = false
+                            }
+                        }
+                    }
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.showDownloadSuccessToast)
     }
     
     private var headerSection: some View {
@@ -262,5 +279,31 @@ struct AssetCard: View {
     AssetLibraryView(viewModel: EditorViewModel(project: Project(name: "示例")))
         .modelContainer(for: Asset.self, inMemory: true)
         .frame(width: 300, height: 600)
+}
+
+// MARK: - Toast 提示组件
+
+private struct ToastView: View {
+    let message: String
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+            
+            Text(message)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.85))
+                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+        )
+    }
 }
 

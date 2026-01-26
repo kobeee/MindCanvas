@@ -413,9 +413,15 @@ class NativeCanvasView: UIView {
     /// 更新图层（移动、缩放、旋转等操作后调用）
     func updateLayer(_ layer: LayerNode) {
         if let index = layers.firstIndex(where: { $0.id == layer.id }) {
+            let oldLayer = layers[index]
             layers[index] = layer
             imageViews[layer.id]?.layerNode = layer
-            sortLayers()
+            
+            // 只有在 zIndex 改变时才重新排序
+            if oldLayer.zIndex != layer.zIndex {
+                sortLayers()
+            }
+            
             onLayersUpdated?(layers)
             // 触发保存（用户操作后必须保存）
             onCanvasUpdated?()
@@ -678,8 +684,15 @@ class NativeCanvasView: UIView {
         guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
         let maxZ = layers.map(\.zIndex).max() ?? 0
         layers[index].zIndex = maxZ + 1
+        
+        // ✅ 关键：同步更新 imageView 的 layerNode，确保 zIndex 一致
+        imageViews[id]?.layerNode = layers[index]
+        
         sortLayers()
         onLayersUpdated?(layers)
+        
+        // 触发数据保存
+        onCanvasUpdated?()
     }
 
     /// 箭头操作：置顶

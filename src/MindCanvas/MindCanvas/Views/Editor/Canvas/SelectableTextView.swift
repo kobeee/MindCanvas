@@ -364,6 +364,11 @@ class SelectableTextView: UIView {
             return false
         }
 
+        // 4. 检查置顶按钮区域（在选中状态下）
+        if !bringToFrontButton.isHidden && bringToFrontButton.frame.contains(point) {
+            return true
+        }
+
         let controlPointHitRadius: CGFloat = 22
 
         // 检查旋转手柄

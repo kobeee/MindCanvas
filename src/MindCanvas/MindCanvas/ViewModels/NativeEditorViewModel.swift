@@ -767,27 +767,33 @@ final class NativeEditorViewModel {
     }
     
     func downloadAsset(_ asset: Asset) {
-        guard let url = URL(string: asset.url) else {
-            print("无效的资源URL: \(asset.url)")
-            return
-        }
-
         Task {
             var image: UIImage?
+            let urlString = asset.url
 
-            // 本地文件
-            if url.isFileURL {
-                image = ImageStorageService.shared.loadImage(from: url)
-            }
-            // 远程URL
-            else {
-                if let data = try? Data(contentsOf: url) {
-                    image = UIImage(data: data)
+            // 判断是否为本地路径（相对路径或 file:// URL）
+            let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
+                              (URL(string: urlString)?.isFileURL == true)
+
+            if isLocalPath {
+                // 本地图片：使用 ImageStorageService 加载（支持相对路径和路径恢复）
+                image = ImageStorageService.shared.loadImage(from: urlString)
+                if image == nil {
+                    print("无法加载本地图片: \(urlString)")
                 }
+            } else if let url = URL(string: urlString) {
+                // 远程 URL：异步加载
+                image = await ImageStorageService.shared.getImage(from: url)
+                if image == nil {
+                    print("无法加载远程图片: \(urlString)")
+                }
+            } else {
+                print("无效的资源URL: \(urlString)")
+                return
             }
 
             guard let validImage = image else {
-                print("无法加载图片: \(asset.url)")
+                print("无法加载图片: \(urlString)")
                 return
             }
 

@@ -402,7 +402,12 @@ class SelectableShapeView: UIView {
             return false
         }
         
-        // 3. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
+        // 3. 检查置顶按钮区域（在选中状态下）
+        if !bringToFrontButton.isHidden && bringToFrontButton.frame.contains(point) {
+            return true
+        }
+        
+        // 4. 仅对控制点周围22pt半径区域进行扩展（精确控制点扩展）
         let controlPointHitRadius: CGFloat = 22
         
         // 检查旋转手柄区域
@@ -420,7 +425,7 @@ class SelectableShapeView: UIView {
             }
         }
         
-        // 4. 不在控制点区域，返回false（消除隐形外圈区域）
+        // 5. 不在控制点区域，返回false（消除隐形外圈区域）
         return false
     }
 
