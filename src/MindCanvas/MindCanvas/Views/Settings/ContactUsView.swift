@@ -1,5 +1,52 @@
 import SwiftUI
 
+struct InteractiveQRCodeImageView: UIViewRepresentable {
+    let image: UIImage
+    
+    func makeUIView(context: Context) -> UIImageView {
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        
+        let interaction = UIContextMenuInteraction(delegate: context.coordinator)
+        imageView.addInteraction(interaction)
+        
+        return imageView
+    }
+    
+    func updateUIView(_ uiView: UIImageView, context: Context) {
+        uiView.image = image
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(image: image)
+    }
+    
+    class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+        let image: UIImage
+        
+        init(image: UIImage) {
+            self.image = image
+        }
+        
+        func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+                let saveAction = UIAction(title: "保存图片", image: UIImage(systemName: "square.and.arrow.down")) { _ in
+                    UIImageWriteToSavedPhotosAlbum(self.image, nil, nil, nil)
+                }
+                return UIMenu(title: "", children: [saveAction])
+            }
+        }
+        
+        func contextMenuInteraction(_ interaction: UIContextMenuInteraction, previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+            guard let imageView = interaction.view as? UIImageView else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            return UITargetedPreview(view: imageView, parameters: parameters)
+        }
+    }
+}
+
 struct ContactUsView: View {
     @State private var showingSaveAlert = false
     @State private var saveAlertMessage = ""
@@ -37,7 +84,7 @@ struct ContactUsView: View {
                     .font(Theme.Fonts.title2)
                     .foregroundStyle(Theme.Colors.primaryText)
                 
-                Text("长按识别二维码关注公众号")
+                Text("保存扫描二维码关注公众号")
                     .font(Theme.Fonts.callout)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 
@@ -88,9 +135,7 @@ struct ContactUsView: View {
                 .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
             
             if let image = UIImage(named: "wechat_qrcode") {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                InteractiveQRCodeImageView(image: image)
                     .frame(width: 200, height: 200)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {

@@ -8,23 +8,27 @@ struct SettingsView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                profileHeader
+            List {
+                Section {
+                    profileHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
                 
-                Form {
-                    if !authManager.isGuest {
-                        accountSection
-                    }
+                if !authManager.isGuest {
+                    accountSection
+                }
 
-                    appSection
-                    helpSection
-                    aboutSection
+                appSection
+                helpSection
+                aboutSection
 
-                    if !authManager.isGuest {
-                        logoutSection
-                    }
+                if !authManager.isGuest {
+                    logoutSection
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Theme.Colors.appBackground)
             .navigationTitle("设置")
             .alert("退出登录", isPresented: $showingLogoutAlert) {

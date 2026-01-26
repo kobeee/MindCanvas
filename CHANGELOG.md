@@ -1,5 +1,75 @@
 # 开发记录
 
+## 2026-01-26 - UI 交互优化（完成）✅
+
+### 概述
+
+修复设置页、登录页的UI显示和交互问题，优化用户体验。
+
+### 核心功能
+
+#### 1. 设置页标题滚动优化
+
+**问题描述**：
+- 设置页向上滑动时，标题没有自动居中
+
+**解决方案**：
+- 将 VStack + Form 改为 List 布局
+- 使用 `.insetGrouped` 样式保持分组外观
+- 添加 `.scrollContentBackground(.hidden)` 隐藏默认背景
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Settings/SettingsView.swift`
+
+#### 2. 登录页键盘遮挡修复
+
+**问题描述**：
+- 点击输入邮箱时，键盘遮挡输入框
+- 键盘弹出后上拉距离不够，看不到输入内容
+
+**解决方案**：
+- VStack 改为 ScrollView + VStack
+- 使用 GeometryReader 确保内容至少占满屏幕高度
+- 添加 `.scrollDismissesKeyboard(.interactively)` 支持滑动关闭键盘
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Auth/LoginView.swift`
+
+#### 3. 联系我们二维码识别功能
+
+**问题描述**：
+- 长按二维码无法识别，iOS 系统的二维码识别功能没有生效
+
+**解决方案**：
+- 创建 `InteractiveQRCodeImageView` UIViewRepresentable
+- 使用 `UIContextMenuInteraction` 支持原生二维码识别
+- iOS 系统会自动识别二维码并显示相关操作
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Settings/ContactUsView.swift`
+
+### 技术细节
+
+**设置页优化**：
+- List 替代 Form 提供更好的导航标题联动
+- profileHeader 作为第一个 Section 无缝集成
+
+**登录页优化**：
+- 内容自适应屏幕高度，初始居中显示
+- 键盘弹出时自动滚动，确保输入框可见
+
+**二维码识别**：
+- UIKit 原生交互支持系统级二维码识别
+- 长按显示识别结果和"保存图片"选项
+
+### 测试用例
+
+1. **设置页滚动**：标题随滚动自动居中 ✅
+2. **登录页键盘**：输入时内容不被遮挡 ✅
+3. **二维码识别**：长按触发系统识别 ✅
+
+---
+
 ## 2026-01-26 - 置顶按钮与资源栏下载功能修复（完成）✅
 
 ### 概述

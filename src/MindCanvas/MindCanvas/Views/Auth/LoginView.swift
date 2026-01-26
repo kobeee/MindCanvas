@@ -35,34 +35,37 @@ struct LoginView: View {
     }
     
     var body: some View {
-        ZStack {
-            // 主内容
-            VStack(spacing: Theme.Spacing.xxxl) {
-                Spacer()
+        GeometryReader { geometry in
+            ZStack {
+                // 主内容
+                ScrollView {
+                    VStack(spacing: Theme.Spacing.xxxl) {
+                        logoSection
 
-                logoSection
+                        if authManager.isLoading {
+                            loadingSection
+                        } else {
+                            loginOptionsSection
+                        }
 
-                if authManager.isLoading {
-                    loadingSection
-                } else {
-                    loginOptionsSection
+                        if let errorMessage = authManager.errorMessage {
+                            errorSection(errorMessage)
+                        }
+                    }
+                    .padding(.horizontal, 60)
+                    .padding(.vertical, 40)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: geometry.size.height)
                 }
+                .scrollDismissesKeyboard(.interactively)
+                .background(Theme.Colors.appBackground)
 
-                if let errorMessage = authManager.errorMessage {
-                    errorSection(errorMessage)
+                // Toast 弹窗
+                if showToast {
+                    toastView
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
                 }
-
-                Spacer()
-            }
-            .padding(.horizontal, 60)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.Colors.appBackground)
-
-            // Toast 弹窗
-            if showToast {
-                toastView
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
