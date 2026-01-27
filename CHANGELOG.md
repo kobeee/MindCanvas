@@ -1,5 +1,461 @@
 # 开发记录
 
+## 2026-01-27 - 登录键盘问题简化处理（完成）✅
+
+### 概述
+
+登录页验证码输入框键盘问题，尝试使用 UIKit UITextField 包装器解决数字键盘切换问题，但遇到 crash 问题。最终采用简化方案：直接使用普通 TextField，不再使用数字键盘。
+
+### 问题背景
+
+**原始问题**：
+- 验证码输入框使用 `.keyboardType(.numberPad)` 配置
+- 输入完验证码后点击登录，会再弹出一个大键盘
+- 需要收起键盘后再次点击登录才能成功
+
+### 尝试的解决方案
+
+#### 1. UIKit UITextField 包装器方案（失败）
+
+**实现思路**：
+- 创建 `FocusableNumericTextField` UIViewRepresentable 组件
+- 使用 UIKit 的 UITextField 强制只显示数字键盘
+- 通过 `shouldChangeCharactersIn` 代理方法过滤非数字输入
+
+**遇到的问题**：
+- `EXC_BAD_ACCESS` crash：在 `updateUIView` 中调用 `becomeFirstResponder()` 时崩溃
+- `unrecognized selector sent to instance` 异常：视图还未完全加入视图层级时操作焦点
+
+**尝试的修复**：
+1. 移除 `DispatchQueue.main.async` 异步调用
+2. 添加 `textField.window != nil` 检查
+3. 使用 `[weak self, weak textField]` 捕获避免野指针
+4. 将焦点管理移到 Coordinator 中
+
+**结论**：UIViewRepresentable 与 SwiftUI 的焦点管理存在兼容性问题，在 Sheet 环境下尤其不稳定。
+
+#### 2. 简化方案（采用）
+
+**最终决定**：
+- 放弃数字键盘，使用普通 TextField
+- 移除所有焦点管理相关代码
+- 删除 `NumericTextField.swift` 文件
+
+**修改内容**：
+```swift
+// 修改前
+TextField("验证码", text: $verificationCode)
+    .keyboardType(.numberPad)
+    .focused($isCodeFieldFocused)
+
+// 修改后
+TextField("验证码", text: $verificationCode)
+    .textInputAutocapitalization(.never)
+    .disableAutocorrection(true)
+```
+
+### 修改文件
+
+- `src/MindCanvas/MindCanvas/Views/Auth/LoginView.swift` - 简化验证码输入框
+- `src/MindCanvas/MindCanvas/Infrastructure/NumericTextField.swift` - 已删除
+
+### 技术总结
+
+**SwiftUI 键盘问题的教训**：
+1. SwiftUI 的 `@FocusState` 在 Sheet 环境下行为不稳定
+2. UIViewRepresentable 包装 UITextField 时，焦点管理容易出问题
+3. `becomeFirstResponder()` 必须在视图完全加入窗口层级后才能调用
+4. 有时候简单方案比复杂方案更可靠
+
+**参考资料**：
+- [Hacking with Swift - How to dismiss the keyboard](https://www.hackingwithswift.com/quick-start/swiftui/how-to-dismiss-the-keyboard-for-a-textfield)
+- [Stack Overflow - UIViewRepresentable UITextField issues](https://stackoverflow.com/questions/56507839/swiftui-how-to-make-textfield-become-first-responder)
+
+---
+
+## 2026-01-27 - 登录键盘问题与启动跳转问题修复（部分完成）🚧
+
+### 概述
+
+成功修复 APP 启动时跳转问题，但登录键盘问题仍未解决，需要另请高明。
+
+### 核心功能
+
+#### 1. 设置页登录时验证码输入框键盘问题（未解决）❌
+
+**问题描述**：
+- 设置页点击登录，弹出的登录页面
+- 输入邮箱，点击发送验证码后，验证码输入框弹出数字键盘
+- 敲完数字，点击登录，会再弹出一个大键盘
+- 把键盘收起，再次点击登录才可以成功登录
+- 首次登录页面也存在类似问题
+
+**尝试的解决方案**：
+- 保持验证码输入框的 `.keyboardType(.numberPad)` 配置
+- 登录按钮点击时设置 `isCodeFieldFocused = false` 关闭键盘
+- 添加键盘工具栏支持手动关闭键盘
+- 支持 `.scrollDismissesKeyboard(.interactively)` 滑动关闭
+
+**问题状态**：❌ 仍未解决
+
+**可能原因**：
+- SwiftUI 的键盘行为在 Sheet 环境下可能存在特殊逻辑
+- 首次登录和设置页登录的视图层级可能不同
+- 可能需要使用 UIKit 的原生键盘管理方式
+- 或者使用 `UITextField` 替代 `TextField`
+
+**建议**：
+需要深入调试 SwiftUI 的键盘行为，或者考虑使用 UIKit 重写登录页面。
+
+#### 2. APP启动时跳转问题修复（已解决）✅
+
+**问题描述**：
+- 每次启动，无登录状态缓存下的登录
+- 为什么是进入的首页，然后等了一会，才跳转到首次登录页面
+
+**根本原因分析**：
+AuthManager 的 `init()` 方法中启动了一个异步任务 `Task { await checkAuthentication() }`。在异步任务完成之前：
+1. `authManager.isAuthenticated` 的默认值是 `false`
+2. `authManager.isInitialized` 的默认值也是 `false`
+3. RootView 可能在 AuthManager 初始化完成之前就渲染了
+4. 由于视图更新的时序问题，可能先显示了 MainView，然后再跳转到 LoginView
+
+**解决方案**：
+在 AuthManager 中添加 `isInitialized` 状态，用于标记初始化是否完成：
+```swift
+@Observable
+@MainActor
+final class AuthManager {
+    static let shared = AuthManager()
+
+    private(set) var isAuthenticated = false
+    private(set) var currentUser: User?
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
+    private(set) var isGuestMode = false
+    private(set) var isInitialized = false  // ✅ 新增初始化状态
+
+    func checkAuthentication() async {
+        if authService.isLoggedIn() {
+            isAuthenticated = true
+            isGuestMode = false
+            await loadCurrentUser()
+        } else {
+            isAuthenticated = false
+            isGuestMode = false
+            currentUser = nil
+        }
+        isInitialized = true  // ✅ 标记初始化完成
+    }
+}
+```
+
+在 RootView 中根据初始化状态显示不同视图：
+```swift
+struct RootView: View {
+    @Environment(AuthManager.self) private var authManager
+
+    var body: some View {
+        Group {
+            if !authManager.isInitialized {
+                LoadingView()  // ✅ 初始化中显示加载界面
+            } else if authManager.isAuthenticated {
+                MainView()
+            } else {
+                LoginView()
+            }
+        }
+        .id(authManager.isAuthenticated)
+    }
+}
+```
+
+创建 LoadingView 组件：
+```swift
+struct LoadingView: View {
+    var body: some View {
+        ZStack {
+            Theme.Colors.appBackground
+                .ignoresSafeArea()
+
+            VStack(spacing: Theme.Spacing.lg) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(Theme.Colors.brandBlue)
+
+                Text("正在加载...")
+                    .font(Theme.Fonts.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+    }
+}
+```
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Managers/AuthManager.swift` - 添加 isInitialized 状态
+- `src/MindCanvas/MindCanvas/Views/RootView.swift` - 添加初始化检查
+- `src/MindCanvas/MindCanvas/Views/LoadingView.swift` - 新建加载界面组件
+
+**技术细节**：
+- 使用 `isInitialized` 状态确保 AuthManager 初始化完成后再决定显示哪个视图
+- 初始化期间显示 LoadingView，提供流畅的用户体验
+- 避免 RootView 在状态不确定时显示错误的视图
+
+**测试结果**：
+- APP启动时显示加载界面 ✅
+- 初始化完成后直接显示正确的视图（LoginView 或 MainView）✅
+- 不再出现先显示首页再跳转的问题 ✅
+
+### 代码审查结果
+
+**审查状态**：✅ 通过
+
+**审查文件**：
+- 3 个修改的 iOS 文件（AuthManager.swift + RootView.swift + LoadingView.swift）
+
+**编译结果**：
+- 所有文件语法检查通过 ✅
+- 无编译错误 ✅
+- 无编译警告 ✅
+
+### 测试用例
+
+#### APP启动跳转测试
+
+1. **无登录状态启动**
+   - 清除所有登录缓存
+   - 启动 APP
+   - 验证：先显示"正在加载..."界面 ✅
+   - 验证：短暂延迟后直接显示 LoginView ✅
+   - 验证：不经过 MainView ✅
+
+2. **有登录状态启动**
+   - 确保已登录
+   - 启动 APP
+   - 验证：先显示"正在加载..."界面 ✅
+   - 验证：短暂延迟后直接显示 MainView ✅
+   - 验证：不经过 LoginView ✅
+
+3. **游客模式启动**
+   - 切换到游客模式
+   - 启动 APP
+   - 验证：先显示"正在加载..."界面 ✅
+   - 验证：短暂延迟后直接显示 MainView ✅
+   - 验证：显示游客模式标识 ✅
+
+### 注意事项
+
+1. **初始化流程**：
+   - AuthManager 初始化时启动异步任务检查认证状态
+   - 在 `checkAuthentication()` 完成后设置 `isInitialized = true`
+   - RootView 根据 `isInitialized` 状态决定显示哪个视图
+   - 初始化期间显示 LoadingView 提供良好的用户体验
+
+2. **性能优化**：
+   - 认证检查使用异步任务，不阻塞主线程
+   - LoadingView 使用简单的 ProgressView，渲染性能好
+   - 使用 `.id(authManager.isAuthenticated)` 确保视图正确刷新
+
+3. **待解决问题**：
+   - 设置页登录时验证码输入框键盘问题 ❌
+   - 首次登录页面的键盘问题 ❌
+   - 需要另请高明解决键盘问题
+
+### 下一步计划
+
+1. 另请高明解决登录键盘问题
+2. 可能需要使用 UIKit 重写登录页面
+3. 或者深入研究 SwiftUI 的键盘行为机制
+
+---
+
+## 2026-01-26 - 设置页图标改造与登录键盘问题（部分完成）🚧
+
+### 概述
+
+完成设置页图标 iOS 原生风格改造，尝试修复登录页验证码输入框键盘问题。键盘问题仍未完全解决，待后续调试。
+
+### 核心功能
+
+#### 1. 设置页图标 iOS 原生风格改造
+
+**需求描述**：
+- 将设置页列表图标改造为 iOS 系统设置风格
+- 彩色圆角矩形背景 + 白色填充图标
+- 按功能分组使用不同颜色，视觉层次清晰
+
+**设计方案**：
+- 背景尺寸：27 x 27 pt
+- 圆角半径：8 pt
+- 图标尺寸：11 pt
+- 图标权重：.black（最粗）
+- 图标颜色：白色
+
+**图标配色方案**：
+| 分组 | 项目 | 图标 | 背景色 |
+|------|------|------|--------|
+| 账号 | 账号设置 | `person.fill` | 蓝色 |
+| 应用设置 | API 配置 | `key.fill` | 紫色 |
+| 帮助与反馈 | 常见问题 | `questionmark` | 绿色 |
+| 帮助与反馈 | 联系我们 | `bubble.left.fill` | 橙色 |
+| 帮助与反馈 | 给个好评 | `star.fill` | 黄色 |
+| 关于 | 版本 | `info` | 灰色 |
+| 关于 | 隐私政策 | `lock.fill` | 灰色 |
+| 关于 | 使用条款 | `doc.text.fill` | 灰色 |
+| 危险操作 | 退出登录 | `rectangle.portrait.and.arrow.right` | 红色 |
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Infrastructure/SettingsIcon.swift` - 新建
+- `src/MindCanvas/MindCanvas/Views/Settings/SettingsView.swift` - 修改
+
+**技术实现**：
+
+**SettingsIcon.swift**：
+```swift
+struct SettingsIcon: View {
+    let systemName: String
+    let backgroundColor: Color
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 11, weight: .black))
+            .foregroundStyle(.white)
+            .frame(width: 27, height: 27)
+            .background(backgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+extension SettingsIcon {
+    static func account(_ systemName: String) -> SettingsIcon
+    static func app(_ systemName: String) -> SettingsIcon
+    static func help(_ systemName: String) -> SettingsIcon
+    static func contact(_ systemName: String) -> SettingsIcon
+    static func rating(_ systemName: String) -> SettingsIcon
+    static func about(_ systemName: String) -> SettingsIcon
+    static func danger(_ systemName: String) -> SettingsIcon
+}
+```
+
+**SettingsView.swift**：
+- 替换了所有 8 个列表项的图标为 SettingsIcon 风格
+- 使用 Label 的 icon 参数替代 systemImage 参数
+
+#### 2. 登录页验证码输入框键盘问题修复（未完全解决）❌
+
+**问题描述**：
+- 设置页点击登录，弹出的登录页面
+- 输入邮箱，点击发送验证码后，验证码输入框弹出数字键盘
+- 敲完数字，点击登录，会再弹出一个大键盘
+- 把键盘收起，再次点击登录才可以成功登录
+
+**尝试的解决方案**：
+
+1. **移除 .textContentType(.oneTimeCode)**：
+   - 这个设置可能与数字键盘产生冲突
+
+2. **添加焦点管理**：
+   ```swift
+   @FocusState private var isCodeFieldFocused: Bool
+
+   TextField("验证码", text: $verificationCode)
+       .keyboardType(.numberPad)
+       .textInputAutocapitalization(.never)
+       .disableAutocorrection(true)
+       .focused($isCodeFieldFocused)
+   ```
+
+3. **点击登录时主动关闭键盘**：
+   ```swift
+   Button {
+       isCodeFieldFocused = false
+       Task {
+           await authManager.loginWithEmail(email, code: verificationCode)
+       }
+   }
+   ```
+
+4. **统一键盘设置**：
+   - 将邮箱输入框的 `.autocapitalization(.none)` 改为 `.textInputAutocapitalization(.never)`
+   - 添加 `.disableAutocorrection(true)`
+
+5. **添加键盘工具栏**：
+   ```swift
+   .toolbar {
+       ToolbarItemGroup(placement: .keyboard) {
+           Spacer()
+           Button("完成") {
+               isCodeFieldFocused = false
+           }
+       }
+   }
+   ```
+
+**问题状态**：❌ 仍未解决
+
+**可能原因**：
+- SwiftUI 的键盘行为可能受到父视图层级的影响
+- 从设置页进入登录页时，视图层级可能与首次启动不同
+- 可能需要检查 RootView 或 NavigationStack 的配置
+
+#### 3. 首次启动登录页面跳转问题（待解决）📋
+
+**问题描述**：
+- 每次启动，无登录状态缓存下的登录
+- 为什么是进入的首页，然后等了一会，才跳转到首次登录页面
+
+**问题状态**：❌ 待调试
+
+**可能原因**：
+- AuthManager 的初始状态可能有问题
+- RootView 的判断逻辑可能有时序问题
+- 可能需要在 App 启动时强制检查登录状态
+
+### 代码审查结果
+
+**审查状态**：✅ 通过
+
+**审查文件**：
+- 2 个修改的 iOS 文件（SettingsIcon.swift + SettingsView.swift）
+
+**编译结果**：
+- 所有文件语法检查通过 ✅
+- 无编译错误 ✅
+- 无编译警告 ✅
+
+### 测试用例
+
+#### 设置页图标改造测试
+
+1. **视觉一致性**
+   - 所有图标背景为圆角矩形 ✅
+   - 图标颜色为白色 ✅
+   - 背景颜色按分组区分 ✅
+
+2. **交互正常**
+   - 点击各项可正常跳转 ✅
+   - 退出登录弹窗正常 ✅
+
+#### 登录页键盘测试（失败）
+
+1. **首次启动登录**：验证码输入框只显示数字键盘 ✅
+2. **设置页登录**：验证码输入框点击登录后仍弹大键盘 ❌
+
+### 注意事项
+
+1. **图标尺寸比例**：背景 27pt，图标 11pt，圆角 8pt，视觉更精致
+2. **图标权重**：使用 `.black` 让图标更醒目
+3. **键盘问题复杂**：可能需要深入调试 SwiftUI 的键盘行为
+
+### 下一步计划
+
+1. 深入调试设置页登录时的键盘问题
+2. 检查首次启动时的登录页面跳转问题
+3. 可能需要重写登录页的键盘管理逻辑
+
+---
+
 ## 2026-01-26 - UI 交互优化（完成）✅
 
 ### 概述

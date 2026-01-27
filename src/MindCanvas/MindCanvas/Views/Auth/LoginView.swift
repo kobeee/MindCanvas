@@ -230,7 +230,8 @@ struct LoginView: View {
         TextField("邮箱地址", text: $email)
             .textContentType(.emailAddress)
             .keyboardType(.emailAddress)
-            .autocapitalization(.none)
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
             .padding()
             .frame(height: Theme.Sizes.buttonHeight)
             .background(Theme.Colors.cardBackground)
@@ -245,7 +246,8 @@ struct LoginView: View {
         VStack(spacing: Theme.Spacing.md) {
             HStack(spacing: Theme.Spacing.md) {
                 TextField("验证码", text: $verificationCode)
-                    .keyboardType(.numberPad)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
                     .padding()
                     .frame(height: Theme.Sizes.buttonHeight)
                     .background(Theme.Colors.cardBackground)
@@ -339,10 +341,10 @@ struct LoginView: View {
     private func sendCode() {
         isCodeSent = true
         countdown = 60
-        
+
         // 显示发送中提示
         showToast(message: "验证码发送中...", type: .info)
-        
+
         Task {
             let success = await authManager.sendVerificationCode(email: email)
             if success {

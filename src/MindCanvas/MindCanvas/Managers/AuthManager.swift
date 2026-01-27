@@ -11,6 +11,7 @@ final class AuthManager {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var isGuestMode = false
+    private(set) var isInitialized = false
 
     var isGuest: Bool {
         isGuestMode
@@ -36,6 +37,7 @@ final class AuthManager {
             isGuestMode = false
             currentUser = nil
         }
+        isInitialized = true
     }
 
     private func loadCurrentUser() async {

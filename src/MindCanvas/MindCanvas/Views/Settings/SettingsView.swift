@@ -139,8 +139,12 @@ struct SettingsView: View {
             NavigationLink {
                 AccountSettingsView()
             } label: {
-                Label("账号设置", systemImage: "person.circle")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("账号设置")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.account("person.fill")
+                }
             }
         } header: {
             Text("账号")
@@ -155,8 +159,12 @@ struct SettingsView: View {
             NavigationLink {
                 APIConfigView()
             } label: {
-                Label("API 配置", systemImage: "key.fill")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("API 配置")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.app("key.fill")
+                }
             }
         } header: {
             Text("应用设置")
@@ -169,8 +177,12 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             HStack {
-                Label("版本", systemImage: "info.circle")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("版本")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.about("info")
+                }
                 Spacer()
                 Text(appVersion)
                     .font(Theme.Fonts.body)
@@ -180,15 +192,23 @@ struct SettingsView: View {
             NavigationLink {
                 PrivacyPolicyView()
             } label: {
-                Label("隐私政策", systemImage: "hand.raised.fill")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("隐私政策")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.about("lock.fill")
+                }
             }
 
             NavigationLink {
                 TermsOfServiceView()
             } label: {
-                Label("使用条款", systemImage: "doc.text.fill")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("使用条款")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.about("doc.text.fill")
+                }
             }
         } header: {
             Text("关于")
@@ -205,9 +225,13 @@ struct SettingsView: View {
             } label: {
                 HStack {
                     Spacer()
-                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                        .font(Theme.Fonts.bodyBold)
-                        .foregroundStyle(Theme.Colors.destructive)
+                    Label {
+                        Text("退出登录")
+                            .font(Theme.Fonts.bodyBold)
+                            .foregroundStyle(Theme.Colors.destructive)
+                    } icon: {
+                        SettingsIcon.danger("rectangle.portrait.and.arrow.right")
+                    }
                     Spacer()
                 }
             }
@@ -219,19 +243,27 @@ struct SettingsView: View {
             NavigationLink {
                 FAQView()
             } label: {
-                Label("常见问题", systemImage: "questionmark.circle")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("常见问题")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.help("questionmark")
+                }
             }
 
             NavigationLink {
                 ContactUsView()
             } label: {
                 HStack {
-                    Label("联系我们", systemImage: "message")
-                        .foregroundStyle(Theme.Colors.primaryText)
-                    
+                    Label {
+                        Text("联系我们")
+                            .foregroundStyle(Theme.Colors.primaryText)
+                    } icon: {
+                        SettingsIcon.contact("bubble.left.fill")
+                    }
+
                     Spacer()
-                    
+
                     HStack(spacing: 4) {
                         Text("有福利")
                             .font(.system(size: 10, weight: .semibold))
@@ -253,8 +285,12 @@ struct SettingsView: View {
             Button {
                 requestAppStoreReview()
             } label: {
-                Label("给个好评", systemImage: "star")
-                    .foregroundStyle(Theme.Colors.primaryText)
+                Label {
+                    Text("给个好评")
+                        .foregroundStyle(Theme.Colors.primaryText)
+                } icon: {
+                    SettingsIcon.rating("star.fill")
+                }
             }
         } header: {
             Text("帮助与反馈")

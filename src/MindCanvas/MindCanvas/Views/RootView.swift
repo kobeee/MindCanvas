@@ -5,7 +5,9 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if authManager.isAuthenticated {
+            if !authManager.isInitialized {
+                LoadingView()
+            } else if authManager.isAuthenticated {
                 MainView()
             } else {
                 LoginView()
