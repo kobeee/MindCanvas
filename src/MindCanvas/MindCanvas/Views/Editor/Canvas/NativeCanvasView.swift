@@ -418,12 +418,6 @@ class NativeCanvasView: UIView {
 
     /// 添加图层
     func addLayer(_ layer: LayerNode, recordUndo: Bool = true) {
-        print("➕ [addLayer] 开始添加图层")
-        print("   图层ID: \(layer.id)")
-        print("   图层类型: \(layer.type)")
-        print("   图层frame: \(layer.frame)")
-        print("   图层zIndex: \(layer.zIndex)")
-        
         layers.append(layer)
         sortLayers()
         createImageView(for: layer)
@@ -434,8 +428,6 @@ class NativeCanvasView: UIView {
             NotificationCenter.default.post(name: .canvasActionRecorded, object: action)
             onCanvasUpdated?()
         }
-        
-        print("✅ [addLayer] 图层添加完成，当前图层数: \(layers.count)")
     }
 
     /// 移除图层
@@ -519,22 +511,7 @@ class NativeCanvasView: UIView {
 
     /// 创建图片视图
     private func createImageView(for layer: LayerNode) {
-        print("🖼️ [createImageView] 开始创建图片视图")
-        print("   图层ID: \(layer.id)")
-        print("   图层URL: \(layer.url)")
-        print("   图层frame: \(layer.frame)")
-        
-        // 检查 objectLayerView 的状态
-        print("   [前置检查] objectLayerView:")
-        print("      frame: \(objectLayerView.frame)")
-        print("      bounds: \(objectLayerView.bounds)")
-        print("      transform: \(objectLayerView.transform)")
-        print("      alpha: \(objectLayerView.alpha)")
-        print("      isHidden: \(objectLayerView.isHidden)")
-        
         let imageView = SelectableImageView(layerNode: layer)
-        
-        print("   SelectableImageView 创建成功")
 
         var operationStartNode: LayerNode?
 
@@ -590,37 +567,17 @@ class NativeCanvasView: UIView {
 
         // 添加到对象图层
         objectLayerView.addSubview(imageView)
-        print("   imageView 已添加到 objectLayerView")
-        print("   objectLayerView frame: \(objectLayerView.frame)")
-        print("   objectLayerView bounds: \(objectLayerView.bounds)")
-        print("   imageView.superview: \(imageView.superview == objectLayerView ? "✅ 正确" : "❌ 错误")")
-        print("   imageView.frame: \(imageView.frame)")
-        print("   imageView.alpha: \(imageView.alpha)")
-        print("   imageView.isHidden: \(imageView.isHidden)")
-        
-        print("   objectLayerView 子视图数: \(objectLayerView.subviews.count)")
-        
-        // 打印 objectLayerView 的前几个子视图
-        print("   objectLayerView 前3个子视图:")
-        for (index, subview) in objectLayerView.subviews.prefix(3).enumerated() {
-            print("      [\(index)] \(type(of: subview)) - frame: \(subview.frame)")
-        }
 
         // 存储到字典
         imageViews[layer.id] = imageView
-        print("   imageView 已存储到 imageViews 字典")
 
         // 根据当前工具状态设置手势
         if currentTool == .select || currentTool == .image {
             imageView.enableImageGestures()
-            print("   手势已启用")
         }
 
         // 重新排列所有子视图的层级（替代原来的 sortLayers）
         sortAllSubviewsByZIndex()
-        print("   子视图层级已排序")
-        
-        print("✅ [createImageView] 图片视图创建完成")
     }
     
     /// 创建箭头视图

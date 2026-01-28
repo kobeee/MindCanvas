@@ -164,27 +164,18 @@ final class NativeEditorViewModel {
     
     /// 添加图片到画布
     func addAssetToCanvas(_ asset: Asset) {
-        print("📸 [addAssetToCanvas] 开始添加图片: \(asset.url)")
-
         guard let canvasView = canvasView else {
-            print("❌ [addAssetToCanvas] canvasView 为 nil")
             return
         }
 
-        print("✅ [addAssetToCanvas] canvasView 存在")
-
         // 【关键修复】立即捕获当前视口中心点，避免异步加载期间画布移动导致位置计算错误
         let centerInContent = canvasView.getViewportCenterInContent()
-        print("📍 [addAssetToCanvas] 捕获视口中心点: \(centerInContent)")
 
         // 异步加载图片获取原始尺寸
         loadImageSize(from: asset.url) { [weak self] originalSize in
             guard let self = self else {
-                print("❌ [addAssetToCanvas] self 为 nil")
                 return
             }
-
-            print("✅ [addAssetToCanvas] 图片尺寸: \(originalSize)")
 
             // 限制最大尺寸，避免图片过大
             let maxSize: CGFloat = 600
@@ -203,12 +194,8 @@ final class NativeEditorViewModel {
                 y: safeCenter.y - scaledSize.height / 2
             )
 
-            print("📍 [addAssetToCanvas] 图片位置: \(position)")
-
             // 修复：使用全局 zIndex 确保图片显示在最顶层
             let globalZIndex = canvasView.getNextGlobalZIndex()
-
-            print("✅ [addAssetToCanvas] zIndex: \(globalZIndex)")
 
             // 创建图层节点
             let layer = LayerNode(
@@ -222,61 +209,41 @@ final class NativeEditorViewModel {
                 opacity: 1.0,
                 createdAt: Date()
             )
-            
-            print("✅ [addAssetToCanvas] 图层节点创建成功")
 
             // 添加到画布（这会触发 onCanvasUpdated -> saveCanvasDocument）
             canvasView.addLayer(layer)
             self.canvasDocument.addLayer(layer)
-            
-            print("✅ [addAssetToCanvas] 图层添加完成")
-            
-            // 调试：检查图层是否真的添加成功
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                print("🔍 [addAssetToCanvas] 延迟检查完成")
-            }
         }
     }
     
     /// 加载图片获取尺寸（支持相对路径、本地和远程URL）
     private func loadImageSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
-        print("📏 [loadImageSize] 开始加载图片: \(urlString)")
-        
         let defaultSize = CGSize(width: 300, height: 300)
 
         // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)
-        
-        print("📏 [loadImageSize] 是否本地路径: \(isLocalPath)")
 
         if isLocalPath {
             // 本地图片：使用 ImageStorageService 加载
-            print("📏 [loadImageSize] 加载本地图片")
             if let image = ImageStorageService.shared.loadImage(from: urlString) {
-                print("✅ [loadImageSize] 本地图片加载成功: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
-                print("❌ [loadImageSize] 本地图片加载失败，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
             return
         }
 
         // 远程图片
-        print("📏 [loadImageSize] 加载远程图片")
         guard let url = URL(string: urlString) else {
-            print("❌ [loadImageSize] URL 无效: \(urlString)")
             DispatchQueue.main.async { completion(defaultSize) }
             return
         }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data = data, let image = UIImage(data: data) {
-                print("✅ [loadImageSize] 远程图片加载成功: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
-                print("❌ [loadImageSize] 远程图片加载失败，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
         }.resume()
