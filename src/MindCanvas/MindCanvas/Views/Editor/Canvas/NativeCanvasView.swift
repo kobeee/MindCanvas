@@ -51,16 +51,38 @@ class TouchThroughView: UIView {
 class NativeCanvasView: UIView {
     // MARK: - Properties
 
-    /// Layer 1: 对象图层容器 (图片节点) - 放在 PKCanvasView 下面
+    /// 笔画下方的容器视图（包含背景和对象层）
+    private let belowStrokeContainerView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.clipsToBounds = true  // 关键：裁剪超出边界的内容
+        return view
+    }()
+
+    /// 笔画上方的容器视图（包含文字覆盖层）
+    /// 使用 TouchThroughView 让空白区域的触摸穿透到下方视图
+    private let aboveStrokeContainerView: TouchThroughView = {
+        let view = TouchThroughView()
+        view.backgroundColor = .clear
+        view.clipsToBounds = true  // 关键：裁剪超出边界的内容
+        view.isUserInteractionEnabled = true
+        return view
+    }()
+
+    /// 画布背景层（白色背景）
+    private let canvasBackgroundView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .white
+        return view
+    }()
+
+    /// 对象图层容器 (图片节点)
     private let objectLayerView = UIView()
 
-    /// Layer 1.5: 覆盖层容器视图（与 pencilCanvas 同级，用于承载箭头等对象）
-    internal let overlayContainerView = UIView()
+    /// 文字覆盖层
+    let textOverlayView = TouchThroughView()
 
-    /// Layer 3: 文字覆盖层 - 完全独立于 objectLayerView
-    private let textOverlayView = TouchThroughView()
-
-    /// Layer 2: PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
+    /// PencilKit 绘图层 - PKCanvasView 本身就是 UIScrollView 的子类
     var pencilCanvas = PKCanvasView()
 
     /// 画布尺寸 (超大虚拟画布)
@@ -227,8 +249,8 @@ class NativeCanvasView: UIView {
         backgroundColor = .systemGray6
 
         // 配置 PKCanvasView - 关键：直接使用其内置的缩放功能
-        pencilCanvas.backgroundColor = .white
-        pencilCanvas.isOpaque = true
+        pencilCanvas.backgroundColor = .clear
+        pencilCanvas.isOpaque = false
         pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
 
@@ -245,30 +267,35 @@ class NativeCanvasView: UIView {
         pencilCanvas.bounces = true
         pencilCanvas.bouncesZoom = true
 
-        // 配置覆盖层容器视图
-        overlayContainerView.backgroundColor = .clear
-        overlayContainerView.isUserInteractionEnabled = true
-        overlayContainerView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
+        // 配置背景层
+        canvasBackgroundView.frame = CGRect(origin: .zero, size: canvasSize)
 
-        // 配置对象图层 - 作为 overlayContainerView 的子视图
+        // 配置对象图层
         objectLayerView.backgroundColor = .clear
         objectLayerView.isUserInteractionEnabled = true
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
-        objectLayerView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
+        objectLayerView.clipsToBounds = true
         objectLayerView.isOpaque = false
 
-        // 新增：配置文字覆盖层
+        // 配置文字覆盖层
         textOverlayView.backgroundColor = .clear
         textOverlayView.isUserInteractionEnabled = true
-        textOverlayView.clipsToBounds = true  // 修复：设置为 true，确保对象被限制在画布边界内
+        textOverlayView.clipsToBounds = true
         textOverlayView.isOpaque = false
         textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)
 
-        // 添加视图层级
-        addSubview(pencilCanvas)
-        addSubview(overlayContainerView)  // 覆盖在 pencilCanvas 上方
-        overlayContainerView.addSubview(objectLayerView)
-        overlayContainerView.addSubview(textOverlayView)  // 修复：作为 overlayContainerView 的子视图，确保被正确裁剪
+        // 构建视图层级
+        // 1. 笔画下方的容器（包含背景和对象层）
+        belowStrokeContainerView.addSubview(canvasBackgroundView)
+        belowStrokeContainerView.addSubview(objectLayerView)
+
+        // 2. 笔画上方的容器（包含文字覆盖层）
+        aboveStrokeContainerView.addSubview(textOverlayView)
+
+        // 3. 添加到主视图
+        addSubview(belowStrokeContainerView)   // 最底层
+        addSubview(pencilCanvas)                // 中间层（透明绘图）
+        addSubview(aboveStrokeContainerView)   // 最顶层
 
         // 添加空白区域点击手势识别器
         addGestureRecognizer(canvasTapGesture)
@@ -289,29 +316,39 @@ class NativeCanvasView: UIView {
     }
 
     private func setupConstraints() {
+        belowStrokeContainerView.translatesAutoresizingMaskIntoConstraints = false
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
-        overlayContainerView.translatesAutoresizingMaskIntoConstraints = false
+        aboveStrokeContainerView.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
+            // belowStrokeContainerView 填满整个视图
+            belowStrokeContainerView.topAnchor.constraint(equalTo: topAnchor),
+            belowStrokeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            belowStrokeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            belowStrokeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
             // pencilCanvas 填满整个视图
             pencilCanvas.topAnchor.constraint(equalTo: topAnchor),
             pencilCanvas.leadingAnchor.constraint(equalTo: leadingAnchor),
             pencilCanvas.trailingAnchor.constraint(equalTo: trailingAnchor),
             pencilCanvas.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // overlayContainerView 与 pencilCanvas 完全重叠
-            overlayContainerView.topAnchor.constraint(equalTo: topAnchor),
-            overlayContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            overlayContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            overlayContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            // aboveStrokeContainerView 填满整个视图
+            aboveStrokeContainerView.topAnchor.constraint(equalTo: topAnchor),
+            aboveStrokeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            aboveStrokeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            aboveStrokeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // 背景层始终保持画布大小
+        canvasBackgroundView.frame = CGRect(origin: .zero, size: canvasSize)
         // 对象图层始终保持画布大小
         objectLayerView.frame = CGRect(origin: .zero, size: canvasSize)
-        textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)  // 新增
+        // 文字覆盖层始终保持画布大小
+        textOverlayView.frame = CGRect(origin: .zero, size: canvasSize)
         // 同步覆盖层变换
         syncOverlayTransform()
     }
@@ -321,14 +358,15 @@ class NativeCanvasView: UIView {
         let offset = pencilCanvas.contentOffset
         let scale = pencilCanvas.zoomScale
 
-        // objectLayerView 变换（保持不变）
-        objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
-        objectLayerView.frame.origin = CGPoint(
-            x: -offset.x,
-            y: -offset.y
-        )
+        // canvasBackgroundView 变换（与画布同步）
+        canvasBackgroundView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        canvasBackgroundView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
 
-        // 新增：textOverlayView 变换（与 objectLayerView 同步）
+        // objectLayerView 变换（与画布同步）
+        objectLayerView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        objectLayerView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
+
+        // textOverlayView 变换（与画布同步）
         textOverlayView.transform = CGAffineTransform(scaleX: scale, y: scale)
         textOverlayView.frame.origin = CGPoint(x: -offset.x, y: -offset.y)
     }
@@ -795,12 +833,12 @@ class NativeCanvasView: UIView {
 
         // 额外确保该视图在最上层
         if let view = textViews[id] {
-            objectLayerView.bringSubviewToFront(view)
+            textOverlayView.bringSubviewToFront(view)
         }
 
         // 强制布局更新
-        objectLayerView.setNeedsLayout()
-        objectLayerView.layoutIfNeeded()
+        textOverlayView.setNeedsLayout()
+        textOverlayView.layoutIfNeeded()
 
         // 触发数据保存
         onCanvasUpdated?()
@@ -835,17 +873,18 @@ class NativeCanvasView: UIView {
     @objc private func handleCanvasTap(_ gesture: UITapGestureRecognizer) {
         // 文字工具模式
         if currentTool == .text {
-            // 修复：在objectLayerView中检查文本点击（文字视图现在在objectLayerView中）
-            let location = gesture.location(in: objectLayerView)
-            let hitView = objectLayerView.hitTest(location, with: nil)
+            // 文字视图在 textOverlayView 中（v3.0 方案）
+            let location = gesture.location(in: textOverlayView)
+            let hitView = textOverlayView.hitTest(location, with: nil)
 
             // 如果点击在已有文字上，让其自己处理（进入编辑模式）
             if hitView is SelectableTextView {
                 return
             }
 
-            // 点击空白区域创建新文字
-            createTextAtLocationWithEditing(location)
+            // 点击空白区域创建新文字（使用 objectLayerView 坐标系，因为文字位置需要与其他对象一致）
+            let locationInObjectLayer = gesture.location(in: objectLayerView)
+            createTextAtLocationWithEditing(locationInObjectLayer)
             return
         }
 
@@ -1172,44 +1211,49 @@ class NativeCanvasView: UIView {
     /// 根据全局 zIndex 重新排列所有子视图的层级
     private func sortAllSubviewsByZIndex() {
         // 收集所有对象及其 zIndex
-        var allObjects: [(view: UIView, zIndex: Int)] = []
+        var objectLayerObjects: [(view: UIView, zIndex: Int)] = []
+        var textOverlayObjects: [(view: UIView, zIndex: Int)] = []
 
         // 图片视图
         for layer in layers {
             if let view = imageViews[layer.id] {
-                allObjects.append((view, layer.zIndex))
+                objectLayerObjects.append((view, layer.zIndex))
             }
         }
 
         // 箭头视图
         for arrow in arrowLayerManager.arrows {
             if let view = arrowViews[arrow.id] {
-                allObjects.append((view, arrow.zIndex))
+                objectLayerObjects.append((view, arrow.zIndex))
             }
         }
 
         // 形状视图
         for shape in shapeLayerManager.shapes {
             if let view = shapeViews[shape.id] {
-                allObjects.append((view, shape.zIndex))
+                objectLayerObjects.append((view, shape.zIndex))
             }
         }
 
         // 文字视图
         for text in textLayerManager.texts {
             if let view = textViews[text.id] {
-                allObjects.append((view, text.zIndex))
+                textOverlayObjects.append((view, text.zIndex))
             }
         }
 
         // 按 zIndex 排序（从小到大，zIndex 越大越在上层）
-        allObjects.sort { $0.zIndex < $1.zIndex }
+        objectLayerObjects.sort { $0.zIndex < $1.zIndex }
+        textOverlayObjects.sort { $0.zIndex < $1.zIndex }
 
-        // 重新排列视图层级
-        // insertSubview(_:at:) 的索引 0 是最底层，索引越大越在上层
-        // 所以我们需要按从小到大的顺序插入，这样 zIndex 最小的在最底层，zIndex 最大的在最上层
-        for (index, item) in allObjects.enumerated() {
+        // 重新排列 objectLayerView 的视图层级
+        for (index, item) in objectLayerObjects.enumerated() {
             objectLayerView.insertSubview(item.view, at: index)
+        }
+
+        // 重新排列 textOverlayView 的视图层级
+        for (index, item) in textOverlayObjects.enumerated() {
+            textOverlayView.insertSubview(item.view, at: index)
         }
     }
     
@@ -1304,17 +1348,20 @@ class NativeCanvasView: UIView {
     func updateForTool(_ tool: CanvasTool) {
         switch tool {
         case .select:
-            pencilCanvas.isUserInteractionEnabled = true
+            // 关键：禁用 pencilCanvas 的用户交互，让触摸穿透到下方的 objectLayerView
+            pencilCanvas.isUserInteractionEnabled = false
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
-            // 关键：启用覆盖层交互
-            overlayContainerView.isUserInteractionEnabled = true
+            // 启用容器交互
+            // aboveStrokeContainerView 使用 TouchThroughView，空白区域触摸会穿透
+            belowStrokeContainerView.isUserInteractionEnabled = true
+            aboveStrokeContainerView.isUserInteractionEnabled = true  // 启用，让文字视图能接收触摸
             objectLayerView.isUserInteractionEnabled = true
-            textOverlayView.isUserInteractionEnabled = true  // 恢复：使用TouchThroughView处理触摸穿透
+            textOverlayView.isUserInteractionEnabled = true
 
             // 启用空白区域点击手势识别器
             canvasTapGesture.isEnabled = true
@@ -1347,9 +1394,9 @@ class NativeCanvasView: UIView {
             pencilCanvas.panGestureRecognizer.isEnabled = true
             pencilCanvas.pinchGestureRecognizer?.isEnabled = true
 
-            // 关键：禁用覆盖层交互，让手势穿透到 pencilCanvas
-            overlayContainerView.isUserInteractionEnabled = false
-            textOverlayView.isUserInteractionEnabled = false  // 新增：平移时不可交互
+            // 禁用容器交互，让手势穿透到 pencilCanvas
+            belowStrokeContainerView.isUserInteractionEnabled = false
+            aboveStrokeContainerView.isUserInteractionEnabled = false
 
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -1363,9 +1410,9 @@ class NativeCanvasView: UIView {
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
-            // 关键：禁用覆盖层交互
-            overlayContainerView.isUserInteractionEnabled = false
-            textOverlayView.isUserInteractionEnabled = false  // 新增：绘图时不可交互
+            // 禁用容器交互
+            belowStrokeContainerView.isUserInteractionEnabled = false
+            aboveStrokeContainerView.isUserInteractionEnabled = false
 
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -1379,25 +1426,27 @@ class NativeCanvasView: UIView {
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
-            // 关键：禁用覆盖层交互
-            overlayContainerView.isUserInteractionEnabled = false
-            textOverlayView.isUserInteractionEnabled = false  // 新增：擦除时不可交互
+            // 禁用容器交互
+            belowStrokeContainerView.isUserInteractionEnabled = false
+            aboveStrokeContainerView.isUserInteractionEnabled = false
 
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
 
         case .image:
-            pencilCanvas.isUserInteractionEnabled = true
+            // 关键：禁用 pencilCanvas 的用户交互，让触摸穿透到下方的 objectLayerView
+            pencilCanvas.isUserInteractionEnabled = false
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
-            // 这些工具可能需要与覆盖层交互
-            overlayContainerView.isUserInteractionEnabled = true
+            // 启用容器交互
+            belowStrokeContainerView.isUserInteractionEnabled = true
+            aboveStrokeContainerView.isUserInteractionEnabled = true  // 启用，TouchThroughView 会让空白区域穿透
             objectLayerView.isUserInteractionEnabled = true
-            textOverlayView.isUserInteractionEnabled = true  // 新增：图片工具时可交互
+            textOverlayView.isUserInteractionEnabled = true
 
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
@@ -1407,28 +1456,45 @@ class NativeCanvasView: UIView {
                 imageView.disableImageGestures()
             }
 
-        case .arrow, .rectangle, .text, .annotation:
-            pencilCanvas.isUserInteractionEnabled = true
+        case .arrow, .rectangle, .annotation:
+            // 关键：禁用 pencilCanvas 的用户交互，让触摸穿透
+            pencilCanvas.isUserInteractionEnabled = false
             pencilCanvas.drawingGestureRecognizer.isEnabled = false
             pencilCanvas.drawingPolicy = .default
             pencilCanvas.isScrollEnabled = false
             pencilCanvas.panGestureRecognizer.isEnabled = false
             pencilCanvas.pinchGestureRecognizer?.isEnabled = false
 
-            // 这些工具可能需要与覆盖层交互
-            overlayContainerView.isUserInteractionEnabled = true
-            textOverlayView.isUserInteractionEnabled = true  // 修复：确保文本工具时可交互
+            // 启用容器交互
+            belowStrokeContainerView.isUserInteractionEnabled = true
+            aboveStrokeContainerView.isUserInteractionEnabled = true  // 启用，TouchThroughView 会让空白区域穿透
+            objectLayerView.isUserInteractionEnabled = false
+            textOverlayView.isUserInteractionEnabled = true
 
             // 启用空白区域点击手势识别器（在所有工具模式下都可用）
             canvasTapGesture.isEnabled = true
-            objectLayerView.isUserInteractionEnabled = false  // 创建形状时不可交互
 
-            // 特殊处理文字工具
-            if tool == .text {
-                // 禁用文本选择手势，只允许创建新文本
-                for (_, textView) in textViews {
-                    textView.disableTextGestures()
-                }
+        case .text:
+            // 关键：禁用 pencilCanvas 的用户交互，让触摸穿透
+            pencilCanvas.isUserInteractionEnabled = false
+            pencilCanvas.drawingGestureRecognizer.isEnabled = false
+            pencilCanvas.drawingPolicy = .default
+            pencilCanvas.isScrollEnabled = false
+            pencilCanvas.panGestureRecognizer.isEnabled = false
+            pencilCanvas.pinchGestureRecognizer?.isEnabled = false
+
+            // 文字工具特殊处理：需要启用 aboveStrokeContainerView，因为文字视图在 textOverlayView 中
+            belowStrokeContainerView.isUserInteractionEnabled = false  // 禁用下方容器
+            aboveStrokeContainerView.isUserInteractionEnabled = true   // 启用上方容器，让文字视图能接收触摸
+            objectLayerView.isUserInteractionEnabled = false
+            textOverlayView.isUserInteractionEnabled = true
+
+            // 启用空白区域点击手势识别器
+            canvasTapGesture.isEnabled = true
+
+            // 禁用文本选择手势，只允许创建新文本或编辑已有文本
+            for (_, textView) in textViews {
+                textView.disableTextGestures()
             }
         }
     }
@@ -1471,7 +1537,7 @@ class NativeCanvasView: UIView {
         let oldContentOffset = pencilCanvas.contentOffset
         let oldDelegate = pencilCanvas.delegate
 
-        // 注意：不再需要保存和恢复箭头视图，因为它们现在在 overlayContainerView 中
+        // 注意：不再需要保存和恢复箭头视图，因为它们现在在 objectLayerView 中
         // 与 PKCanvasView 完全独立
 
         // 从父视图中移除旧的canvas
@@ -1505,8 +1571,8 @@ class NativeCanvasView: UIView {
     
     /// 仅设置 PKCanvasView 的基本属性（不涉及 objectLayerView）
     private func setupPencilCanvasOnly() {
-        pencilCanvas.backgroundColor = .white
-        pencilCanvas.isOpaque = true
+        pencilCanvas.backgroundColor = .clear
+        pencilCanvas.isOpaque = false
         pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
 
@@ -1519,8 +1585,8 @@ class NativeCanvasView: UIView {
         pencilCanvas.bounces = true
         pencilCanvas.bouncesZoom = true
 
-        // 插入到 overlayContainerView 下方
-        insertSubview(pencilCanvas, belowSubview: overlayContainerView)
+        // 插入到 belowStrokeContainerView 上方，aboveStrokeContainerView 下方
+        insertSubview(pencilCanvas, aboveSubview: belowStrokeContainerView)
 
         // 更新约束
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
@@ -1537,8 +1603,8 @@ class NativeCanvasView: UIView {
 
     /// 设置PKCanvasView的基本属性
     private func setupPencilCanvas() {
-        pencilCanvas.backgroundColor = .white
-        pencilCanvas.isOpaque = true
+        pencilCanvas.backgroundColor = .clear
+        pencilCanvas.isOpaque = false
         pencilCanvas.tool = PKInkingTool(.pen, color: penColor, width: penLineWidth)
         pencilCanvas.delegate = self
         
@@ -1555,9 +1621,9 @@ class NativeCanvasView: UIView {
         pencilCanvas.bounces = true
         pencilCanvas.bouncesZoom = true
 
-        // 插入到 overlayContainerView 下方
-        insertSubview(pencilCanvas, belowSubview: overlayContainerView)
-        
+        // 插入到 belowStrokeContainerView 上方，aboveStrokeContainerView 下方
+        insertSubview(pencilCanvas, aboveSubview: belowStrokeContainerView)
+
         // 更新约束
         pencilCanvas.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1739,9 +1805,10 @@ class NativeCanvasView: UIView {
         let result = renderer.image { context in
             context.cgContext.translateBy(x: -viewportRect.origin.x, y: -viewportRect.origin.y)
 
+            canvasBackgroundView.layer.render(in: context.cgContext)
             pencilCanvas.layer.render(in: context.cgContext)
-
-            overlayContainerView.layer.render(in: context.cgContext)
+            objectLayerView.layer.render(in: context.cgContext)
+            textOverlayView.layer.render(in: context.cgContext)
         }
 
         return result
@@ -2215,7 +2282,7 @@ class NativeCanvasView: UIView {
         }
         
         textViews[text.id] = textView
-        objectLayerView.addSubview(textView)  // 修复：添加到objectLayerView，与其他对象统一管理层级
+        textOverlayView.addSubview(textView)  // v3.0 方案：添加到 textOverlayView，位于笔画上方
         
         // 根据当前工具状态设置手势
         if currentTool == .select {
@@ -2272,10 +2339,10 @@ extension NativeCanvasView: UIGestureRecognizerDelegate {
             return true
         }
 
-        // 文字工具时，检查触摸是否在 objectLayerView 的文字视图上
+        // 文字工具时，检查触摸是否在 textOverlayView 的文字视图上（v3.0 方案）
         if currentTool == .text {
-            let location = touch.location(in: objectLayerView)
-            let hitView = objectLayerView.hitTest(location, with: nil)
+            let location = touch.location(in: textOverlayView)
+            let hitView = textOverlayView.hitTest(location, with: nil)
 
             // 如果点击在已有的 SelectableTextView 上，让其自己处理
             if hitView is SelectableTextView {

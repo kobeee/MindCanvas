@@ -240,9 +240,14 @@ class SelectableTextView: UIView {
 
         // 设置frame - 确保UILabel填满整个bounds
         textLabel.frame = bounds
-        
-        // 如果文本为空，隐藏视图
-        isHidden = textNode.text.isEmpty
+
+        // 修复：编辑状态下不隐藏视图，即使文本为空
+        // 只有在非编辑状态且文本为空时才隐藏
+        if !isEditing {
+            isHidden = textNode.text.isEmpty
+        } else {
+            isHidden = false
+        }
     }
 
     private func syncToNode() {
@@ -503,6 +508,10 @@ class SelectableTextView: UIView {
         guard !isEditing else { return }
 
         isEditing = true
+
+        // 关键修复：编辑状态下确保视图可见
+        isHidden = false
+
         onEditingStarted?(textNode)
 
         // 关键修复：键盘已显示时，保留原始位置信息
@@ -663,64 +672,60 @@ class SelectableTextView: UIView {
     
     /// Create UITextView for true in-place editing
     private func createTextViewInIndependentContainer() {
-        // 开始创建编辑框
-        
         // Get NativeCanvasView reference
         guard let canvasView = findParentCanvasView() else {
             return
         }
-        
-        // Key insight: UITextView should be placed in the transformed coordinate system
-        // but positioned exactly where the text will appear
-        let canvasContentOffset = canvasView.pencilCanvas.contentOffset
-        let canvasScale = canvasView.pencilCanvas.zoomScale
-        
-        // Calculate position in canvas content coordinates (where the text will finally be)
-        let finalTextPosition = textNode.position
-        
-        // Convert to screen coordinates for UITextView positioning
-        let screenX = (finalTextPosition.x * canvasScale) - canvasContentOffset.x
-        let screenY = (finalTextPosition.y * canvasScale) - canvasContentOffset.y
-        
-        // TextView坐标计算完成
-        
-        // Create UITextView with frame sized for "输入文本" placeholder
+
+        // 关键修复：UITextView 应该添加到 NativeCanvasView（不受 transform 影响）
+        // 而不是 textOverlayView（已应用 transform）
+        // 这样 UITextView 的 frame 使用屏幕坐标，位置计算更简单准确
+
+        let scrollView = canvasView.pencilCanvas
+        let currentScale = scrollView.zoomScale
+        let currentOffset = scrollView.contentOffset
+
+        // 计算文本在屏幕上的位置
+        let textNodePosition = textNode.position
+        let screenX = (textNodePosition.x * currentScale) - currentOffset.x
+        let screenY = (textNodePosition.y * currentScale) - currentOffset.y
+
+        // Create UITextView with frame in screen coordinates
+        let initialWidth: CGFloat = 100
+        let initialHeight: CGFloat = 40
         let initialFrame = CGRect(
-            x: screenX - 50,  // Increased width to accommodate "输入文本"
-            y: screenY - 20,  // Increased height for better visibility
-            width: 100,
-            height: 40
+            x: screenX - initialWidth / 2,
+            y: screenY - initialHeight / 2,
+            width: initialWidth,
+            height: initialHeight
         )
-        
-        // TextView初始frame设置完成
-        
+
         let textView = UITextView(frame: initialFrame)
-        
+
         // Configure UITextView for in-place editing - make it blend with the canvas
         textView.text = textNode.text
         textView.font = textLabel.font
         textView.textColor = UIColor(hex: textNode.color) ?? .black
         textView.textAlignment = .center
-        textView.backgroundColor = UIColor.clear  // Transparent background for true in-place feel
-        textView.layer.cornerRadius = 0  // No corner radius for seamless integration
-        textView.layer.borderWidth = 1  // Minimal border to show editing state
-        textView.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.5).cgColor
+        textView.backgroundColor = UIColor.white.withAlphaComponent(0.95)  // 轻微白色背景，确保可见
+        textView.layer.cornerRadius = 4
+        textView.layer.borderWidth = 1
+        textView.layer.borderColor = UIColor.systemBlue.cgColor
         textView.delegate = self
         textView.autocorrectionType = .no
         textView.spellCheckingType = .no
         textView.returnKeyType = .done
         textView.tintColor = UIColor(hex: textNode.color) ?? .systemBlue
-        
+
         // Key: Disable UITextView scrolling to avoid conflicts with PKCanvasView
         textView.isScrollEnabled = false
-        
-        // Remove shadow for cleaner in-place appearance
-        textView.layer.shadowColor = UIColor.clear.cgColor
-        textView.layer.shadowOpacity = 0
-        
-        // In-place editing visual feedback - subtle indication
-        textView.layer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.1).cgColor
-        
+
+        // 添加轻微阴影，增强可见性
+        textView.layer.shadowColor = UIColor.black.cgColor
+        textView.layer.shadowOpacity = 0.1
+        textView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        textView.layer.shadowRadius = 4
+
         // Handle placeholder with fixed font size
         if textView.text.isEmpty {
             textView.text = placeholderText
@@ -734,25 +739,22 @@ class SelectableTextView: UIView {
             isShowingPlaceholder = false
         }
 
-        // Key insight: Add UITextView directly to canvasView's overlayContainerView
-        // This ensures it follows the same transform as other canvas objects for true in-place editing
-        canvasView.overlayContainerView.addSubview(textView)
-        canvasView.overlayContainerView.bringSubviewToFront(textView)
+        // 关键修复：添加到 NativeCanvasView 而不是 textOverlayView
+        // 这样 UITextView 不受 transform 影响，位置计算更准确
+        canvasView.addSubview(textView)
+        canvasView.bringSubviewToFront(textView)
         editingTextView = textView
-        
-        // TextView成功添加到overlayContainerView
-        // 视图frame设置完成
-        
+
         // Set up dynamic text sizing to match final text appearance
         setupDynamicTextSizing(for: textView)
 
         // Activate keyboard immediately for seamless in-place experience
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isEditing else { 
-                return 
+            guard let self = self, self.isEditing else {
+                return
             }
-            guard let textView = self.editingTextView else { 
-                return 
+            guard let textView = self.editingTextView else {
+                return
             }
 
             let success = textView.becomeFirstResponder()
