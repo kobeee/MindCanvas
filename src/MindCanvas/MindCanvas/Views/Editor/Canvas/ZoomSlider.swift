@@ -9,7 +9,7 @@ struct ZoomSlider: View {
     @State private var zoomPercentDraft: String = "100"
     @FocusState private var isEditing: Bool
     
-    private let minScale: CGFloat = 0.5
+    private let minScale: CGFloat = 0.3
     private let maxScale: CGFloat = 3.0
     
     private var zoomPercent: Int {

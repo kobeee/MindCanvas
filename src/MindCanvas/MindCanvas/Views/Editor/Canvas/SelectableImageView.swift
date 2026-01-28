@@ -86,12 +86,29 @@ class SelectableImageView: UIView {
     // MARK: - Initialization
 
     init(layerNode: LayerNode) {
+        print("🏗️ [SelectableImageView.init] 开始初始化")
+        print("   图层ID: \(layerNode.id)")
+        print("   图层frame: \(layerNode.frame)")
+        print("   图层URL: \(layerNode.url)")
+        
         self.layerNode = layerNode
         super.init(frame: layerNode.frame)
+        
+        print("   super.init 完成，self.frame: \(self.frame)")
+        
         setupViews()
+        print("   setupViews 完成")
+        
         setupGestures()
+        print("   setupGestures 完成")
+        
         loadImage()
+        print("   loadImage 完成")
+        
         updateFromNode()
+        print("   updateFromNode 完成")
+        
+        print("✅ [SelectableImageView.init] 初始化完成")
     }
 
     required init?(coder: NSCoder) {
@@ -101,6 +118,8 @@ class SelectableImageView: UIView {
     // MARK: - Setup
 
     private func setupViews() {
+        print("   📐 [setupViews] 开始设置视图")
+        
         // 设置视图属性
         backgroundColor = .clear
         isOpaque = false
@@ -108,6 +127,7 @@ class SelectableImageView: UIView {
 
         // 添加图片视图
         addSubview(imageView)
+        print("   imageView 已添加为子视图")
 
         // 添加置顶按钮
         addSubview(bringToFrontButton)
@@ -131,6 +151,12 @@ class SelectableImageView: UIView {
 
         // 设置默认样式
         updateSelectionStyle()
+        
+        print("   ✅ [setupViews] 视图设置完成")
+        print("      backgroundColor: \(backgroundColor)")
+        print("      alpha: \(alpha)")
+        print("      isHidden: \(isHidden)")
+        print("      frame: \(frame)")
     }
 
     private func setupGestures() {
@@ -175,7 +201,14 @@ class SelectableImageView: UIView {
     private var hasCompletedInitialLoad = false
 
     private func loadImage() {
-        guard let urlString = layerNode.url else { return }
+        print("🖼️ [loadImage] 开始加载图片")
+        
+        guard let urlString = layerNode.url else { 
+            print("   ❌ layerNode.url 为空")
+            return 
+        }
+        
+        print("   图片URL: \(urlString)")
 
         // 使用 ImageStorageService 统一处理路径
         // 支持：相对路径、绝对路径、file:// URL、远程 URL
@@ -183,26 +216,34 @@ class SelectableImageView: UIView {
         // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)
+        
+        print("   是否本地路径: \(isLocalPath)")
 
         if isLocalPath {
+            print("   开始加载本地图片")
             // 本地图片：使用 ImageStorageService 加载（支持相对路径和路径恢复）
             if let image = ImageStorageService.shared.loadImage(from: urlString) {
+                print("   ✅ 本地图片加载成功，尺寸: \(image.size)")
                 imageView.image = image
                 handleImageLoaded(image)
             } else {
-                print("[SelectableImageView] 无法加载本地图片: \(urlString)")
+                print("   ❌ 无法加载本地图片: \(urlString)")
             }
         } else if let url = URL(string: urlString) {
+            print("   开始加载远程图片")
             // 远程 URL：异步加载
             Task { @MainActor in
                 if let image = await ImageStorageService.shared.getImage(from: url) {
+                    print("   ✅ 远程图片加载成功，尺寸: \(image.size)")
                     self.imageView.image = image
                     self.handleImageLoaded(image)
                 } else {
-                    print("[SelectableImageView] 无法加载远程图片: \(urlString)")
+                    print("   ❌ 无法加载远程图片: \(urlString)")
                 }
             }
         }
+        
+        print("✅ [loadImage] 加载方法执行完成")
     }
     
     /// 处理图片加载完成

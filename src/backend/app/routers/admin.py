@@ -90,6 +90,17 @@ async def inject_email_quota(
             )
             logger.info(f"Email quota injected: {request.email}, quota={request.quota}")
 
+        # 同步更新 User 表的 free_quota 字段
+        await db.execute(
+            text("""
+                UPDATE users
+                SET free_quota = :quota
+                WHERE email = :email
+            """),
+            {"email": request.email, "quota": new_quota if existing else request.quota}
+        )
+        logger.info(f"Synced quota to User table: {request.email}, free_quota={new_quota if existing else request.quota}")
+
         await db.commit()
 
         return {

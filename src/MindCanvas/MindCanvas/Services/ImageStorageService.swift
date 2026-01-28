@@ -18,6 +18,17 @@ final class ImageStorageService {
     
     private init() {}
     
+    // MARK: - URLSession
+    
+    /// 自定义 URLSession，用于下载图片
+    private lazy var downloadSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 180
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+    
     // MARK: - Properties
 
     /// 图片存储子目录名称
@@ -127,7 +138,7 @@ final class ImageStorageService {
     func downloadAndSaveImage(from remoteURL: URL) async -> URL? {
         do {
             // 下载数据
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            let (data, response) = try await downloadSession.data(from: remoteURL)
 
             // 验证响应
             guard let httpResponse = response as? HTTPURLResponse,
@@ -166,7 +177,7 @@ final class ImageStorageService {
     func downloadAndSaveImageWithRelativePath(from remoteURL: URL) async -> String? {
         do {
             // 下载数据
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            let (data, response) = try await downloadSession.data(from: remoteURL)
 
             // 验证响应
             guard let httpResponse = response as? HTTPURLResponse,
