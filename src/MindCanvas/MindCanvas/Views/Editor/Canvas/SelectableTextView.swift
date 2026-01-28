@@ -690,9 +690,19 @@ class SelectableTextView: UIView {
         let screenX = (textNodePosition.x * currentScale) - currentOffset.x
         let screenY = (textNodePosition.y * currentScale) - currentOffset.y
 
-        // Create UITextView with frame in screen coordinates
-        let initialWidth: CGFloat = 100
-        let initialHeight: CGFloat = 40
+        // Calculate initial UITextView size based on font size to ensure placeholder text fits
+        let fontSize = textNode.fontSize * textNode.scale
+        let placeholderText = "输入文本"
+        let font = textLabel.font
+
+        // Calculate the size needed for the placeholder text
+        let textSize = (placeholderText as NSString).size(withAttributes: [.font: font])
+        let padding: CGFloat = 16  // Add padding for comfortable editing
+
+        // Ensure minimum size and accommodate placeholder text
+        let initialWidth = max(100, textSize.width + padding)
+        let initialHeight = max(40, textSize.height + padding)
+
         let initialFrame = CGRect(
             x: screenX - initialWidth / 2,
             y: screenY - initialHeight / 2,
@@ -726,12 +736,12 @@ class SelectableTextView: UIView {
         textView.layer.shadowOffset = CGSize(width: 0, height: 2)
         textView.layer.shadowRadius = 4
 
-        // Handle placeholder with fixed font size
+        // Handle placeholder with font size matching actual text
         if textView.text.isEmpty {
             textView.text = placeholderText
             textView.textColor = .systemGray
-            // Use a fixed font size for placeholder (16pt) regardless of user's text size
-            textView.font = UIFont.systemFont(ofSize: 16)
+            // Use the same font size as actual text for consistent appearance
+            textView.font = textLabel.font
             isShowingPlaceholder = true
         } else {
             // Restore user's font size for actual text
