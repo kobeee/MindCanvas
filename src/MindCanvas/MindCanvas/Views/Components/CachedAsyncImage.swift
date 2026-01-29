@@ -11,13 +11,15 @@ import SwiftUI
 @MainActor
 struct CachedAsyncImage: View {
     let urlString: String
+    let localPath: String?
     let contentMode: ContentMode
     @State private var image: UIImage?
     @State private var isLoading = true
     @State private var hasFailed = false
 
-    init(urlString: String, contentMode: ContentMode = .fit) {
+    init(urlString: String, localPath: String? = nil, contentMode: ContentMode = .fit) {
         self.urlString = urlString
+        self.localPath = localPath
         self.contentMode = contentMode
     }
 
@@ -66,6 +68,17 @@ struct CachedAsyncImage: View {
     }
 
     private func loadImage() {
+        // 【优先】使用本地路径（如果存在）
+        if let localPath = localPath {
+            if let loadedImage = ImageStorageService.shared.loadImage(from: localPath) {
+                image = loadedImage
+                isLoading = false
+                return
+            } else {
+                print("[CachedAsyncImage] 本地路径加载失败: \(localPath)")
+            }
+        }
+
         // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)

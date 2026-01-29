@@ -1136,22 +1136,6 @@ private struct NativeAssetLibraryView: View {
                     .foregroundStyle(Theme.Colors.primaryText)
                 
                 Spacer()
-                
-                // 功能菜单 - 替代空白占位符
-                Menu {
-                    Button("刷新", systemImage: "arrow.clockwise") {
-                        // 预留：刷新资源列表
-                    }
-                    Divider()
-                    Button("清空资源库", systemImage: "trash", role: .destructive) {
-                        // 预留：清空资源库
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md)
@@ -1338,7 +1322,7 @@ private struct NativeAssetCardView: View {
     var body: some View {
         VStack(spacing: 8) {
             // 图片预览
-            CachedAsyncImage(urlString: asset.url, contentMode: .fill)
+            CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fill)
                 .frame(height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -1418,7 +1402,7 @@ private struct NativePublishSheetView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                CachedAsyncImage(urlString: asset.url, contentMode: .fit)
+                CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fit)
                     .frame(height: 200)
                     .cornerRadius(12)
 

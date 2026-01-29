@@ -119,7 +119,7 @@ final class NativeEditorViewModel {
     
     private func loadAssets() {
         guard let context = modelContext else { return }
-        
+
         // 只加载当前项目的资源
         let projectID = project.id
         let descriptor = FetchDescriptor<Asset>(
@@ -128,9 +128,23 @@ final class NativeEditorViewModel {
             },
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        
+
         do {
             assets = try context.fetch(descriptor)
+
+            #if DEBUG
+            print("[loadAssets] 加载了 \(assets.count) 个资源:")
+            for asset in assets {
+                print("[loadAssets]   - Asset ID: \(asset.id)")
+                print("[loadAssets]     url: \(asset.url)")
+                print("[loadAssets]     localPath: \(asset.localPath ?? "nil")")
+                print("[loadAssets]     isLoading: \(asset.isLoading)")
+            }
+
+            // 诊断：列出本地存储的文件
+            ImageStorageService.shared.listAllFiles()
+            ImageStorageService.shared.listMemoryCacheInfo()
+            #endif
         } catch {
             print("加载资源失败: \(error)")
         }
@@ -310,62 +324,20 @@ final class NativeEditorViewModel {
     
     
         /// 启动定时刷新配额（每5分钟刷新一次）
-    
-    
-    
-            func startQuotaRefreshTimer() {
-    
-    
-    
-                // 先停止已有的定时器
-    
-    
-    
-                stopQuotaRefreshTimer()
-    
-    
-    
-                
-    
-    
-    
-                // 创建新的定时器，每5分钟（300秒）刷新一次
-    
-    
-    
-                quotaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-    
-    
-    
-                                    Task { @MainActor in
-    
-    
-    
-                                        await self?.loadQuota()
-    
-    
-    
-                                    }
-    
-    
-    
-                                }
-    
-    
-    
+    func startQuotaRefreshTimer() {
+        // 先停止已有的定时器
+        stopQuotaRefreshTimer()
+
+        // 创建新的定时器，每5分钟（300秒）刷新一次
+        quotaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.loadQuota()
             }
-    
-    
-    
-            
-    
-    
-    
-            /// 停止定时刷新配额
-    
-    
-    
-            func stopQuotaRefreshTimer() {
+        }
+    }
+
+    /// 停止定时刷新配额
+    func stopQuotaRefreshTimer() {
     
     
     
@@ -611,11 +583,11 @@ final class NativeEditorViewModel {
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
             // 自动下载图片到本地存储（使用相对路径），添加重试逻辑
-            var localImageURL: String? = nil
+            var localImagePath: String? = nil
             for attempt in 0..<2 {
                 if let imageURL = URL(string: response.imageUrl),
                    let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
-                    localImageURL = relativePath
+                    localImagePath = relativePath
                     break
                 }
                 if attempt == 0 {
@@ -623,13 +595,14 @@ final class NativeEditorViewModel {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
-            if localImageURL == nil {
+            if localImagePath == nil {
                 print("[ImageToImage] 警告：图片下载失败，将使用远程URL")
             }
 
-            // 使用本地URL（如果下载成功），否则使用远程URL
-            loadingAsset.url = localImageURL ?? response.imageUrl
-            loadingAsset.thumbnailUrl = localImageURL ?? response.thumbnailUrl
+            // 保存远程URL（用于重试）和本地路径（用于显示）
+            loadingAsset.url = response.imageUrl
+            loadingAsset.thumbnailUrl = response.thumbnailUrl
+            loadingAsset.localPath = localImagePath
             loadingAsset.isLoading = false
 
             do {
@@ -644,7 +617,7 @@ final class NativeEditorViewModel {
             let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
 
             let generatedLayer = LayerNode.aiGenerated(
-                url: localImageURL ?? response.imageUrl,
+                url: localImagePath ?? response.imageUrl,
                 frame: contentRect,
                 zIndex: maxZ + 1
             )
@@ -750,11 +723,11 @@ final class NativeEditorViewModel {
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
             // 自动下载图片到本地存储（使用相对路径），添加重试逻辑
-            var localImageURL: String? = nil
+            var localImagePath: String? = nil
             for attempt in 0..<2 {
                 if let imageURL = URL(string: response.imageUrl),
                    let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
-                    localImageURL = relativePath
+                    localImagePath = relativePath
                     break
                 }
                 if attempt == 0 {
@@ -762,13 +735,14 @@ final class NativeEditorViewModel {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
-            if localImageURL == nil {
+            if localImagePath == nil {
                 print("[TextToImage] 警告：图片下载失败，将使用远程URL")
             }
 
-            // 使用本地URL（如果下载成功），否则使用远程URL
-            loadingAsset.url = localImageURL ?? response.imageUrl
-            loadingAsset.thumbnailUrl = localImageURL ?? response.thumbnailUrl
+            // 保存远程URL（用于重试）和本地路径（用于显示）
+            loadingAsset.url = response.imageUrl
+            loadingAsset.thumbnailUrl = response.thumbnailUrl
+            loadingAsset.localPath = localImagePath
             loadingAsset.isLoading = false
 
             do {

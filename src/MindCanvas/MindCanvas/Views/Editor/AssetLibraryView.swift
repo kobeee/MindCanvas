@@ -114,7 +114,7 @@ struct AssetLibraryView: View {
         NavigationStack {
             VStack(spacing: Theme.Spacing.xl) {
                 if let asset = assetToPublish {
-                    CachedAsyncImage(urlString: asset.url, contentMode: .fit)
+                    CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fit)
                         .frame(height: 200)
                         .cornerRadius(Theme.Shapes.cardCornerRadius)
                 }
@@ -199,7 +199,7 @@ struct AssetCard: View {
                         ProgressView()
                     }
             } else {
-                CachedAsyncImage(urlString: asset.url, contentMode: .fill)
+                CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fill)
                     .aspectRatio(4/3, contentMode: .fit)
                     .clipped()
             }

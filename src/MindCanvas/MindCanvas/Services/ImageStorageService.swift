@@ -11,15 +11,44 @@ import UIKit
 
 @MainActor
 final class ImageStorageService {
-    
+
     // MARK: - Singleton
-    
+
     static let shared = ImageStorageService()
-    
-    private init() {}
-    
+
+    private init() {
+        setupMemoryCache()
+    }
+
+    // MARK: - Memory Cache
+
+    /// 内存缓存，用于快速加载已加载过的图片
+    private lazy var memoryCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 100  // 最多缓存100张图片
+        cache.totalCostLimit = 50 * 1024 * 1024  // 最多50MB
+        return cache
+    }()
+
+    /// 设置内存缓存策略
+    private func setupMemoryCache() {
+        // 监听内存警告，自动清理缓存
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+    }
+
+    /// 处理内存警告
+    @objc private func handleMemoryWarning() {
+        print("[ImageStorageService] 收到内存警告，清理图片缓存")
+        memoryCache.removeAllObjects()
+    }
+
     // MARK: - URLSession
-    
+
     /// 自定义 URLSession，用于下载图片
     private lazy var downloadSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -28,7 +57,7 @@ final class ImageStorageService {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
-    
+
     // MARK: - Properties
 
     /// 图片存储子目录名称
@@ -175,15 +204,21 @@ final class ImageStorageService {
     /// - Parameter remoteURL: 远程图片URL
     /// - Returns: 相对路径字符串（如 "images/xxx.png"），失败返回 nil
     func downloadAndSaveImageWithRelativePath(from remoteURL: URL) async -> String? {
+        print("[ImageStorageService] 开始下载图片到本地: \(remoteURL.absoluteString)")
+
         do {
             // 下载数据
             let (data, response) = try await downloadSession.data(from: remoteURL)
+            print("[ImageStorageService] 下载完成，数据大小: \(data.count) bytes")
 
             // 验证响应
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  !data.isEmpty else {
-                print("[ImageStorageService] 下载失败或数据为空")
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("[ImageStorageService] 下载失败：响应不是HTTP响应")
+                return nil
+            }
+
+            guard httpResponse.statusCode == 200, !data.isEmpty else {
+                print("[ImageStorageService] 下载失败或数据为空，状态码: \(httpResponse.statusCode)")
                 return nil
             }
 
@@ -201,8 +236,16 @@ final class ImageStorageService {
                 fileName = "\(UUID().uuidString).jpg"
             }
 
+            print("[ImageStorageService] 生成文件名: \(fileName)")
+
             // 保存到本地并返回相对路径
-            return saveImageWithRelativePath(data, fileName: fileName)
+            if let relativePath = saveImageWithRelativePath(data, fileName: fileName) {
+                print("[ImageStorageService] 图片保存成功: \(relativePath)")
+                return relativePath
+            } else {
+                print("[ImageStorageService] 图片保存失败")
+                return nil
+            }
 
         } catch {
             print("[ImageStorageService] 下载图片失败: \(error)")
@@ -229,18 +272,33 @@ final class ImageStorageService {
             return nil
         }
 
+        // 【优先】尝试从内存缓存加载
+        let cacheKey = fileURL.path as NSString
+        if let cachedImage = memoryCache.object(forKey: cacheKey) {
+            print("[ImageStorageService] 从内存缓存加载图片: \(fileURL.lastPathComponent)")
+            return cachedImage
+        }
+
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: fileURL.path) else {
+            print("[ImageStorageService] 文件不存在: \(fileURL.path)")
             return nil
         }
 
         guard let data = try? Data(contentsOf: fileURL) else {
+            print("[ImageStorageService] 读取文件失败: \(fileURL.path)")
             return nil
         }
 
         guard let image = UIImage(data: data) else {
+            print("[ImageStorageService] 图片数据无效: \(fileURL.path)")
             return nil
         }
+
+        // 加载成功后存入内存缓存，使用文件大小作为cost
+        let imageSize = data.count
+        memoryCache.setObject(image, forKey: cacheKey, cost: imageSize)
+        print("[ImageStorageService] 从磁盘加载图片并存入缓存: \(fileURL.lastPathComponent), 大小: \(imageSize) bytes")
 
         return image
     }
@@ -249,25 +307,59 @@ final class ImageStorageService {
     /// - Parameter fileURLString: 本地文件URL字符串
     /// - Returns: UIImage 对象
     func loadImage(from fileURLString: String) -> UIImage? {
+        print("[ImageStorageService] 尝试加载图片: \(fileURLString)")
+
+        // 【优先】尝试从内存缓存加载
+        let cacheKey = fileURLString as NSString
+        if let cachedImage = memoryCache.object(forKey: cacheKey) {
+            print("[ImageStorageService] 从内存缓存加载图片（使用原始字符串）: \(fileURLString)")
+            return cachedImage
+        }
+
         // 1. 尝试作为相对路径处理
         if !fileURLString.hasPrefix("/") && !fileURLString.hasPrefix("file://") && !fileURLString.hasPrefix("http://") && !fileURLString.hasPrefix("https://") {
             let fullURL = resolveRelativePath(fileURLString)
+            print("[ImageStorageService] 尝试相对路径解析: \(fileURLString) -> \(fullURL.path)")
             if let image = loadImage(from: fullURL) {
+                // 存入内存缓存（使用原始字符串作为key），计算cost
+                let cost: Int
+                if let imageData = try? Data(contentsOf: fullURL) {
+                    cost = imageData.count
+                } else {
+                    cost = 0
+                }
+                memoryCache.setObject(image, forKey: cacheKey, cost: cost)
                 return image
             }
         }
 
         // 2. 尝试作为 file:// URL 处理
         if let url = URL(string: fileURLString), url.isFileURL {
+            print("[ImageStorageService] 尝试file:// URL: \(fileURLString)")
             // 先尝试原路径
             if let image = loadImage(from: url) {
+                let cost: Int
+                if let imageData = try? Data(contentsOf: url) {
+                    cost = imageData.count
+                } else {
+                    cost = 0
+                }
+                memoryCache.setObject(image, forKey: cacheKey, cost: cost)
                 return image
             }
             // 路径失效时，尝试从文件名恢复
             let fileName = url.lastPathComponent
             let recoveredURL = storageDirectory.appendingPathComponent(fileName)
+            print("[ImageStorageService] 尝试从文件名恢复: \(fileName)")
             if FileManager.default.fileExists(atPath: recoveredURL.path) {
                 if let image = loadImage(from: recoveredURL) {
+                    let cost: Int
+                    if let imageData = try? Data(contentsOf: recoveredURL) {
+                        cost = imageData.count
+                    } else {
+                        cost = 0
+                    }
+                    memoryCache.setObject(image, forKey: cacheKey, cost: cost)
                     return image
                 }
             }
@@ -275,17 +367,36 @@ final class ImageStorageService {
 
         // 3. 尝试作为纯文件路径处理
         let fileURL = URL(fileURLWithPath: fileURLString)
+        print("[ImageStorageService] 尝试纯文件路径: \(fileURL.path)")
         if let image = loadImage(from: fileURL) {
+            let cost: Int
+            if let imageData = try? Data(contentsOf: fileURL) {
+                cost = imageData.count
+            } else {
+                cost = 0
+            }
+            memoryCache.setObject(image, forKey: cacheKey, cost: cost)
             return image
         }
 
         // 4. 最后尝试从文件名恢复
         let fileName = (fileURLString as NSString).lastPathComponent
         let recoveredURL = storageDirectory.appendingPathComponent(fileName)
+        print("[ImageStorageService] 最后尝试从文件名恢复: \(fileName)")
         if FileManager.default.fileExists(atPath: recoveredURL.path) {
-            return loadImage(from: recoveredURL)
+            if let image = loadImage(from: recoveredURL) {
+                let cost: Int
+                if let imageData = try? Data(contentsOf: recoveredURL) {
+                    cost = imageData.count
+                } else {
+                    cost = 0
+                }
+                memoryCache.setObject(image, forKey: cacheKey, cost: cost)
+                return image
+            }
         }
 
+        print("[ImageStorageService] 加载图片失败: \(fileURLString)")
         return nil
     }
     
@@ -390,33 +501,75 @@ final class ImageStorageService {
     /// 列出存储目录中的所有文件（用于调试）
     func listAllFiles() {
         let fileManager = FileManager.default
+        print("[ImageStorageService] 存储目录: \(storageDirectory.path)")
 
         if let files = try? fileManager.contentsOfDirectory(atPath: storageDirectory.path) {
+            print("[ImageStorageService] 找到 \(files.count) 个文件:")
             for file in files {
                 let filePath = storageDirectory.appendingPathComponent(file).path
                 if let attributes = try? fileManager.attributesOfItem(atPath: filePath) {
                     let fileSize = attributes[.size] as? Int64 ?? 0
+                    print("[ImageStorageService]   - \(file) (\(fileSize) bytes)")
                 }
             }
+        } else {
+            print("[ImageStorageService] 无法读取存储目录")
         }
+    }
+
+    /// 列出内存缓存中的所有图片（用于调试）
+    func listMemoryCacheInfo() {
+        print("[ImageStorageService] 内存缓存信息:")
+        print("[ImageStorageService]   - 数量限制: \(memoryCache.countLimit)")
+        print("[ImageStorageService]   - 大小限制: \(memoryCache.totalCostLimit) bytes")
+        // 注意：NSCache不提供当前数量和大小的公开API
+        print("[ImageStorageService]   - 当前数量: (不可用)")
+        print("[ImageStorageService]   - 当前大小: (不可用)")
     }
     
     /// 从远程URL获取图片（优先使用本地缓存）
     /// - Parameter remoteURL: 远程图片URL
     /// - Returns: UIImage 对象
     func getImage(from remoteURL: URL) async -> UIImage? {
-        // 尝试从缓存加载
-        if let cachedURL = getCachedURL(for: remoteURL),
-           let cachedImage = loadImage(from: cachedURL) {
+        print("[ImageStorageService] 从远程URL获取图片: \(remoteURL.absoluteString)")
+
+        // 【优先】尝试从内存缓存加载
+        let cacheKey = remoteURL.absoluteString as NSString
+        if let cachedImage = memoryCache.object(forKey: cacheKey) {
+            print("[ImageStorageService] 从内存缓存加载图片（远程URL）: \(remoteURL.lastPathComponent)")
             return cachedImage
         }
-        
+
+        // 尝试从磁盘缓存加载
+        if let cachedURL = getCachedURL(for: remoteURL),
+           let cachedImage = loadImage(from: cachedURL) {
+            // 存入内存缓存，计算cost
+            let cost: Int
+            if let imageData = try? Data(contentsOf: cachedURL) {
+                cost = imageData.count
+            } else {
+                cost = 0
+            }
+            memoryCache.setObject(cachedImage, forKey: cacheKey, cost: cost)
+            return cachedImage
+        }
+
         // 下载并缓存
+        print("[ImageStorageService] 开始下载图片: \(remoteURL.absoluteString)")
         if let downloadedURL = await downloadAndSaveImage(from: remoteURL),
            let downloadedImage = loadImage(from: downloadedURL) {
+            // 存入内存缓存，计算cost
+            let cost: Int
+            if let imageData = try? Data(contentsOf: downloadedURL) {
+                cost = imageData.count
+            } else {
+                cost = 0
+            }
+            memoryCache.setObject(downloadedImage, forKey: cacheKey, cost: cost)
             return downloadedImage
         }
-        
+
+        print("[ImageStorageService] 下载图片失败: \(remoteURL.absoluteString)")
         return nil
     }
     

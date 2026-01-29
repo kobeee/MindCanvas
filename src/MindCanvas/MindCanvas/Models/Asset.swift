@@ -18,10 +18,14 @@ final class Asset {
     var createdAt: Date
     var isLoading: Bool
     
+    /// 本地图片路径（相对路径，如 "images/xxx.jpg"）
+    /// 下载成功后会保存本地路径，避免每次重新加载
+    var localPath: String?
+    
     /// 关联的项目ID（每个创作独立管理资源）
     var projectID: UUID?
     
-    init(id: UUID = UUID(), url: String, thumbnailUrl: String? = nil, type: AssetType, prompt: String? = nil, isLoading: Bool = false, projectID: UUID? = nil) {
+    init(id: UUID = UUID(), url: String, thumbnailUrl: String? = nil, type: AssetType, prompt: String? = nil, isLoading: Bool = false, localPath: String? = nil, projectID: UUID? = nil) {
         self.id = id
         self.url = url
         self.thumbnailUrl = thumbnailUrl ?? url
@@ -31,6 +35,7 @@ final class Asset {
         self.aspectRatio = nil
         self.createdAt = Date()
         self.isLoading = isLoading
+        self.localPath = localPath
         self.projectID = projectID
     }
 }
