@@ -4,7 +4,7 @@ MindCanvas 是一个基于 AI 的创意绘图应用，专为 iPad 设计，集�
 
 ## 项目类型
 
-这是一个 **iOS 应用项目**，采用前后端分离架构，目前专注于 iOS 客户端的开发，使用 SwiftUI 构建现代化的用户界面。
+这是一个 **iOS 应用项目**，采用前后端分离架构，iOS 客户端使用 SwiftUI 构建现代化的用户界面，后端使用 FastAPI 提供 AI 生图服务。
 
 ## 技术栈
 
@@ -13,18 +13,20 @@ MindCanvas 是一个基于 AI 的创意绘图应用，专为 iPad 设计，集�
 - **UI 框架**: SwiftUI + UIKit (混合架构)
 - **最低版本**: iPadOS 17.0+
 - **数据存储**: SwiftData
-- **网络**: URLSession (当前使用 Mock 服务)
+- **网络**: URLSession + 真实后端 API
 - **画布**: PencilKit (PKCanvasView) + UIKit 自定义对象层
-  - 笔刷绘制: PKCanvasView 原生支持
-  - 图形对象: UIKit 自定义视图 (箭头、形状、图片等)
+  - 笔刷绘制: PKCanvasView 原生支持（透明背景，笔画在图片上方）
+  - 图形对象: UIKit 自定义视图 (箭头、形状、图片、文字等)
   - 控制点交互: 专业级缩放/旋转控制点系统
+  - 置顶功能: 所有可选择对象支持一键置顶
 
-### 后端（待开发）
+### 后端
 - **语言**: Python 3.11
 - **框架**: FastAPI
 - **数据库**: PostgreSQL
 - **缓存**: Redis
-- **部署**: Docker
+- **部署**: Docker + Nginx + Cloudflare
+- **AI 服务**: Google Imagen API / Laozhang API
 
 ## 项目结构
 
@@ -57,13 +59,14 @@ MindCanvas/
 
 ## 核心功能模块
 
-1. **身份认证**: 支持 Apple/Google/GitHub/邮箱多种登录方式
+1. **身份认证**: 支持 Apple/Google/GitHub/邮箱多种登录方式 + 游客模式
 2. **项目管理**: 创建、编辑、管理多个绘图项目
 3. **核心编辑器**: 三栏式编辑界面（资源库 + 画布 + 控制面板）
-4. **AI 生成**: 基于提示词生成图像（当前使用 Mock）
-5. **社区模块**: MindStream 灵感流，浏览和分享作品
-6. **订阅系统**: Pro 会员展示和订阅计划
-7. **设置中心**: 账号管理、配置和退出登录
+4. **AI 生成**: 文生图/图生图，支持 Google Imagen API 和 Laozhang API
+5. **配额系统**: 首次登录赠送免费额度，支持邮箱配额注入
+6. **社区模块**: MindStream 灵感流，浏览和分享作品
+7. **订阅系统**: Pro 会员展示和订阅计划
+8. **设置中心**: 账号管理、API Key 配置、联系我们（有福利）
 
 ## 构建和运行
 
@@ -84,41 +87,61 @@ open MindCanvas.xcodeproj
 
 ### Mock 数据说明
 
-当前版本使用完全本地化的 Mock 数据：
-- 所有登录都会成功（邮箱验证码: `123456`）
-- 图片生成使用 picsum.photos 随机图片
+部分功能仍使用 Mock 数据：
 - 社区内容为随机生成
-- 无需后端服务即可完整体验 UI 和交互
+- 图片生成使用真实后端 API（需配置 API Key 或使用免费额度）
 
 ## 开发状态
 
 ### 已完成 ✅
 - iOS 客户端基础架构
 - 所有核心模块的 UI 和交互
-- Mock 服务层（模拟后端接口）
 - SwiftData 本地数据持久化
+- **真实后端 API 集成**
+  - 用户认证（Apple/Google/GitHub/邮箱登录）
+  - AI 图片生成（文生图/图生图）
+  - 配额管理系统
+- **游客模式与配额系统**
+  - 游客模式免登录使用
+  - 首次登录赠送 3 次免费额度
+  - 邮箱配额注入功能
+  - API Key 配置与删除
 - **原生画布系统 (PencilKit + UIKit)**
-  - PKCanvasView 架构重构（直接使用内置缩放，解决笔画漂移问题）
+  - PKCanvasView 架构重构（v3.0 三层视图结构）
+  - 画笔在图片上绘制可见性（透明背景方案）
   - 撤销/恢复系统（支持笔画和对象操作）
   - 多工具支持（笔刷、选择、平移、图片、箭头、形状、文本、标注）
+  - 图片添加位置优化（视口中心）
 - **图形工具系统**
   - 箭头/直线工具（支持区分箭头和纯直线）
   - 形状工具（矩形、圆形、三角形、菱形、五角星、六边形、圆角矩形）
   - 形状选择器弹出菜单
+  - 文字工具（动态占位符大小、键盘联动）
 - **专业级控制点交互系统**
   - 形状对象：4个角点控制点 + 旋转手柄
   - 箭头对象：起点/终点控制点
   - 支持旋转状态下的精确缩放
   - 移除双指手势依赖，符合 Figma/Canva 交互标准
+- **层级管理系统**
+  - 所有对象统一 zIndex 管理
+  - 置顶功能（一键置顶到最上层）
+  - 清空画布功能（完整清理所有图层管理器）
+- **生图服务优化**
+  - 错误信息友好化（ErrorMessageMapper）
+  - 超时配置统一（iOS 200秒 > 后端 180秒）
+  - 图片下载重试机制
+  - CachedAsyncImage loading/失败状态优化
+- **设置页优化**
+  - iOS 原生风格图标（彩色圆角矩形背景）
+  - 账号设置（修改用户名）
+  - 联系我们页面（有福利徽章）
+  - 资源栏图片下载到相册
 
 ### 进行中 🚧
-- 真实后端 API 集成
 - IAP 订阅功能
 
 ### 待开发 📋
-- 后端服务器
-- 真实 AI 模型集成
-- 图片下载功能
+- 真实 AI 模型集成优化
 - Remix 完整流程
 - 性能优化
 - 控制点增强功能（等比例缩放、吸附、键盘快捷键）
@@ -140,23 +163,30 @@ final class EditorViewModel {
 
 ### 画布架构
 
-**核心架构**：直接使用 PKCanvasView 的内置缩放功能
+**核心架构**：v3.0 三层视图结构，解决画笔在图片上绘制可见性问题
 ```swift
 NativeCanvasView (UIView)
-└── pencilCanvas (PKCanvasView)    // 直接作为根滚动容器
-    └── overlayContainerView (UIView)  // 滚动同步容器
-        └── objectLayerView (UIView)   // 对象图层（箭头、形状、图片等）
+├── belowStrokeContainerView (UIView, clipsToBounds=true)
+│   ├── canvasBackgroundView (5000x5000, 白色背景)
+│   └── objectLayerView (5000x5000, 图片/箭头/形状)
+├── pencilCanvas (PKCanvasView, 透明背景)
+└── aboveStrokeContainerView (TouchThroughView, clipsToBounds=true)
+    └── textOverlayView (TouchThroughView, 5000x5000, 文字覆盖层)
 ```
 
 **关键技术点**：
 - PKCanvasView 本身继承自 UIScrollView，直接使用其内置缩放
-- overlayContainerView 通过同步机制跟随 PKCanvasView 滚动和缩放
+- PKCanvasView 设置透明背景（`backgroundColor = .clear`, `isOpaque = false`）
+- 笔画在 objectLayerView 上方，文字在笔画上方
+- belowStrokeContainerView 和 aboveStrokeContainerView 通过同步机制跟随 PKCanvasView 滚动和缩放
 - 避免嵌套 UIScrollView（已知的 Apple Bug FB15166022）
 
 **坐标系统**：
 - 画布内容尺寸：5000x5000 pt
+- 缩放范围：30% - 300%
 - 视口坐标 → 内容坐标转换：`(x + offset.x) / scale`
-- 使用 `contentRect(forViewportRect:)` 进行坐标转换
+- 使用 `getViewportCenterInContent()` 获取视口中心点
+- 使用 `getVisibleContentRect()` 获取可见内容区域
 
 ### 控制点交互系统
 
@@ -200,17 +230,19 @@ private var projects: [Project]
 
 ### 应用架构
 1. **iPad Only**: 本应用专为 iPad 设计，使用 NavigationSplitView
-2. **无后端依赖**: 当前版本完全独立运行，不需要后端服务
-3. **Mock 延迟**: 所有 Mock 接口都添加了人工延迟以模拟真实网络环境
+2. **前后端分离**: iOS 客户端 + FastAPI 后端，通过 HTTPS API 通信
+3. **游客模式**: 支持免登录使用，使用自己的 API Key 生图
 4. **审核合规**: 已预置举报、拉黑功能以符合 App Store 审核要求
 
 ### 画布系统关键技术点
 1. **PKCanvasView 嵌套问题**: 严禁将 PKCanvasView 嵌套在 UIScrollView 中（Apple Bug FB15166022），会导致坐标转换错误和笔画漂移
 2. **撤销系统**: 使用 PKCanvasView 重建实例来彻底清除内部缓存，避免撤销后笔画复活问题
-3. **视图层级**: objectLayerView 必须作为 overlayContainerView 的子视图，通过同步机制跟随画布滚动
-4. **手势冲突**: 不同工具模式下需要正确配置 `drawingPolicy` 和手势识别器状态
+3. **视图层级**: v3.0 架构使用三层结构（belowStroke + pencilCanvas + aboveStroke），确保笔画在图片上方、文字在笔画上方
+4. **手势冲突**: 不同工具模式下需要正确配置 `drawingPolicy` 和手势识别器状态，选择工具模式下禁用 pencilCanvas 交互
 5. **控制点交互**: 已移除双指手势依赖，使用单指拖动 + 控制点的专业交互方式
 6. **坐标转换**: SwiftUI 手势坐标需要转换为画布内容坐标，考虑 `contentOffset` 和 `zoomScale`
+7. **置顶功能**: 使用全局 zIndex 管理，置顶时同步更新 layers 数组和 imageViews 字典中的 layerNode
+8. **清空画布**: 必须清理所有图层管理器（layers、arrowLayerManager、shapeLayerManager、textLayerManager、annotationLayerManager、rectangleLayerManager）
 
 ## 开发规范与约定
 
@@ -580,16 +612,21 @@ ssh root@65.75.220.11 "cd /root/mind-canvas && docker-compose logs -f backend"
 ### 应用核心
 - **主应用入口**: `src/MindCanvas/MindCanvas/MindCanvasApp.swift`
 - **认证管理器**: `src/MindCanvas/MindCanvas/Managers/AuthManager.swift`
+- **根视图**: `src/MindCanvas/MindCanvas/Views/RootView.swift`
+- **加载视图**: `src/MindCanvas/MindCanvas/Views/LoadingView.swift`
 
 ### 编辑器系统
 - **编辑器视图模型**: `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
 - **编辑器主视图**: `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
 - **画布容器**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/NativeCanvasView.swift`
 - **画布工具栏**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/CanvasToolbar.swift`
+- **缩放滑块**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/ZoomSlider.swift`
 
 ### 画布对象视图
+- **可选择图片视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableImageView.swift`
 - **可选择箭头视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableArrowView.swift`
 - **可选择形状视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableShapeView.swift`
+- **可选择文字视图**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/SelectableTextView.swift`
 - **形状选择器**: `src/MindCanvas/MindCanvas/Views/Editor/Canvas/ShapePickerPopover.swift`
 
 ### 数据模型
@@ -597,7 +634,30 @@ ssh root@65.75.220.11 "cd /root/mind-canvas && docker-compose logs -f backend"
 - **图层节点**: `src/MindCanvas/MindCanvas/Models/Canvas/LayerNode.swift`
 - **箭头节点**: `src/MindCanvas/MindCanvas/Models/Canvas/ArrowLayerNode.swift`
 - **形状节点**: `src/MindCanvas/MindCanvas/Models/Canvas/ShapeLayerNode.swift`
+- **文字节点**: `src/MindCanvas/MindCanvas/Models/Canvas/TextLayerNode.swift`
 - **画布操作**: `src/MindCanvas/MindCanvas/Models/Canvas/CanvasAction.swift`
+
+### 服务层
+- **API 客户端**: `src/MindCanvas/MindCanvas/Services/APIClient.swift`
+- **认证服务**: `src/MindCanvas/MindCanvas/Services/AuthService.swift`
+- **图片存储服务**: `src/MindCanvas/MindCanvas/Services/ImageStorageService.swift`
+- **配额服务**: `src/MindCanvas/MindCanvas/Services/QuotaService.swift`
+- **RSA 加密服务**: `src/MindCanvas/MindCanvas/Services/RSAEncryptionService.swift`
+
+### 基础设施
+- **错误信息映射器**: `src/MindCanvas/MindCanvas/Infrastructure/ErrorMessageMapper.swift`
+- **设置页图标**: `src/MindCanvas/MindCanvas/Infrastructure/SettingsIcon.swift`
+- **主题配置**: `src/MindCanvas/MindCanvas/Infrastructure/Theme.swift`
+- **Keychain 管理器**: `src/MindCanvas/MindCanvas/Infrastructure/KeychainManager.swift`
+
+### 组件
+- **缓存异步图片**: `src/MindCanvas/MindCanvas/Views/Components/CachedAsyncImage.swift`
+
+### 设置页
+- **设置主页**: `src/MindCanvas/MindCanvas/Views/Settings/SettingsView.swift`
+- **账号设置**: `src/MindCanvas/MindCanvas/Views/Settings/AccountSettingsView.swift`
+- **API 配置**: `src/MindCanvas/MindCanvas/Views/Settings/APIConfigView.swift`
+- **联系我们**: `src/MindCanvas/MindCanvas/Views/Settings/ContactUsView.swift`
 
 ### 文档
 - **产品需求文档**: `docs/prd/v1.0.md`
