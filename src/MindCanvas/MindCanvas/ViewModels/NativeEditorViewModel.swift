@@ -610,12 +610,20 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
-            // 自动下载图片到本地存储（使用相对路径）
+            // 自动下载图片到本地存储（使用相对路径），添加重试逻辑
             var localImageURL: String? = nil
-            if let imageURL = URL(string: response.imageUrl),
-               let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
-                localImageURL = relativePath
-            } else {
+            for attempt in 0..<2 {
+                if let imageURL = URL(string: response.imageUrl),
+                   let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
+                    localImageURL = relativePath
+                    break
+                }
+                if attempt == 0 {
+                    print("[ImageToImage] 图片下载失败，2秒后重试...")
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+            if localImageURL == nil {
                 print("[ImageToImage] 警告：图片下载失败，将使用远程URL")
             }
 
@@ -646,20 +654,32 @@ final class NativeEditorViewModel {
 
             prompt = ""
             stateManager.hideMagicFrame()
-            
+
             // 重新加载配额信息（确保与后端一致）
             await loadQuota()
 
+        } catch let error as APIError {
+            context.delete(loadingAsset)
+            do {
+                try context.save()
+            } catch {
+                print("保存 asset 失败: \(error)")
+            }
+
+            loadAssets()
+
+            flowHintMessage = ErrorMessageMapper.userFriendlyMessage(for: error)
         } catch {
             context.delete(loadingAsset)
             do {
                 try context.save()
             } catch {
+                print("保存 asset 失败: \(error)")
             }
 
             loadAssets()
 
-            flowHintMessage = "生成失败：\(error.localizedDescription)"
+            flowHintMessage = "生成失败，请稍后重试"
         }
 
         isGenerating = false
@@ -729,12 +749,20 @@ final class NativeEditorViewModel {
 
             let response = try await generationService.generate(request: request, useFreeQuota: hasFreeQuota)
 
-            // 自动下载图片到本地存储（使用相对路径）
+            // 自动下载图片到本地存储（使用相对路径），添加重试逻辑
             var localImageURL: String? = nil
-            if let imageURL = URL(string: response.imageUrl),
-               let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
-                localImageURL = relativePath
-            } else {
+            for attempt in 0..<2 {
+                if let imageURL = URL(string: response.imageUrl),
+                   let relativePath = await ImageStorageService.shared.downloadAndSaveImageWithRelativePath(from: imageURL) {
+                    localImageURL = relativePath
+                    break
+                }
+                if attempt == 0 {
+                    print("[TextToImage] 图片下载失败，2秒后重试...")
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+            if localImageURL == nil {
                 print("[TextToImage] 警告：图片下载失败，将使用远程URL")
             }
 
@@ -746,6 +774,7 @@ final class NativeEditorViewModel {
             do {
                 try context.save()
             } catch {
+                print("保存 asset 失败: \(error)")
             }
 
             loadAssets()
@@ -753,21 +782,33 @@ final class NativeEditorViewModel {
             // 重新加载配额信息（确保与后端一致）
             await loadQuota()
 
+        } catch let error as APIError {
+            context.delete(loadingAsset)
+            do {
+                try context.save()
+            } catch {
+                print("保存 asset 失败: \(error)")
+            }
+
+            loadAssets()
+
+            flowHintMessage = ErrorMessageMapper.userFriendlyMessage(for: error)
         } catch {
             context.delete(loadingAsset)
             do {
                 try context.save()
             } catch {
+                print("保存 asset 失败: \(error)")
             }
 
             loadAssets()
 
-            flowHintMessage = "生成失败：\(error.localizedDescription)"
+            flowHintMessage = "生成失败，请稍后重试"
         }
 
         isGenerating = false
     }
-    
+
     // MARK: - Asset 操作
     
     func deleteAsset(_ asset: Asset) {

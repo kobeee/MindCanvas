@@ -28,15 +28,30 @@ struct CachedAsyncImage: View {
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else if hasFailed {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.1))
-                    .overlay {
-                        Image(systemName: "photo")
-                            .font(.largeTitle)
-                            .foregroundStyle(Color.gray)
+                ZStack {
+                    Color(white: 0.95)
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.title2)
+                            .foregroundStyle(Color.orange)
+                        Text("加载失败")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color(white: 0.5))
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ProgressView()
+                ZStack {
+                    Color(white: 0.97)
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("加载中")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color(white: 0.5))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onAppear {

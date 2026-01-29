@@ -86,16 +86,16 @@ class GoogleAPIClient:
             f.write(image_data)
     """
 
-    def __init__(self, timeout: float = 60.0):
+    def __init__(self, timeout: float = 180.0):
         """
         初始化 Google API 客户端
 
         Args:
-            timeout: 请求超时时间（秒），默认 60 秒
+            timeout: 请求超时时间（秒），默认 180 秒
 
         注意：
             - 使用 httpx.AsyncClient 进行异步 HTTP 请求
-            - 超时时间设置为 60 秒，适用于生图任务
+            - 超时时间设置为 180 秒，适用于生图任务
         """
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
         self.model_name = "gemini-3-pro-image-preview"
@@ -106,7 +106,8 @@ class GoogleAPIClient:
         self,
         api_key: str,
         prompt: str,
-        base_image: Optional[str] = None
+        base_image: Optional[str] = None,
+        image_size: str = "1K"
     ) -> bytes:
         """
         调用 Google Nano Banana Pro API 生成图片
@@ -115,6 +116,7 @@ class GoogleAPIClient:
             api_key: Google API Key（不记录在日志中）
             prompt: 提示词（描述要生成的图片）
             base_image: 参考图的 Base64 编码字符串（可选，用于图片到图片生成）
+            image_size: 图片尺寸（仅用于接口兼容，Google API 不支持此参数）
 
         Returns:
             图片二进制数据（PNG 格式）
@@ -130,8 +132,9 @@ class GoogleAPIClient:
             - 如果提供 base_image，则执行图片到图片生成
             - 如果不提供 base_image，则执行文本到图片生成
             - API Key 不会记录在日志中
-            - 超时时间为 60 秒
+            - 超时时间为 180 秒
             - 返回的图片为 PNG 格式
+            - image_size 参数仅用于接口兼容，Google API 不支持此参数
         """
         if not api_key:
             logger.error("API Key is empty")

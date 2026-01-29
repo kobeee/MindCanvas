@@ -54,8 +54,13 @@ final class RealGenerationService {
         return base64Image
     }
     
-    /// 轮询任务状态
-    private func pollTaskStatus(taskId: String, maxAttempts: Int = 60) async throws -> GenerationResponse {
+    /// 轮询任务状态，直到任务完成或超时
+    /// - Parameters:
+    ///   - taskId: 任务 ID
+    ///   - maxAttempts: 最大轮询次数，默认 200 次（约 200 秒）
+    /// - Returns: 生成响应
+    /// - Throws: APIError.timeout 或其他错误
+    private func pollTaskStatus(taskId: String, maxAttempts: Int = 200) async throws -> GenerationResponse {
         var attempts = 0
         
         while attempts < maxAttempts {
