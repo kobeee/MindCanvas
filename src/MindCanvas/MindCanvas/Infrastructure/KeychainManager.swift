@@ -192,6 +192,14 @@ extension KeychainManager {
         ]
 
         let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        let success = status == errSecSuccess || status == errSecItemNotFound
+
+        if success {
+            print("[KeychainManager] delete - 成功: \(key) (status: \(status))")
+        } else {
+            print("[KeychainManager] delete - 失败: \(key) (status: \(status))")
+        }
+
+        return success
     }
 }

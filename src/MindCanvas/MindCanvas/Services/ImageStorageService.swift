@@ -192,13 +192,10 @@ final class ImageStorageService {
                 return nil
             }
 
-            // 生成文件名（使用原始文件名或UUID）
-            let fileName: String
-            if let suggestedFilename = response.suggestedFilename, !suggestedFilename.isEmpty {
-                fileName = suggestedFilename
-            } else {
-                fileName = "\(UUID().uuidString).jpg"
-            }
+            // 【修复】使用 SHA256 哈希作为文件名，与 getCachedURL 方法保持一致
+            // 避免缓存键不匹配导致重复下载
+            let hash = remoteURL.absoluteString.stableCacheKey
+            let fileName = "cached_\(hash).jpg"
 
             // 保存到本地
             return saveImage(data, fileName: fileName)
@@ -497,15 +494,20 @@ final class ImageStorageService {
     /// - Parameter remoteURL: 远程图片URL
     /// - Returns: UIImage 对象
     func getImage(from remoteURL: URL) async -> UIImage? {
+        print("[ImageStorageService] getImage: \(remoteURL.absoluteString)")
+
         // 【优先】尝试从内存缓存加载
         let cacheKey = remoteURL.absoluteString as NSString
         if let cachedImage = memoryCache.object(forKey: cacheKey) {
+            print("[ImageStorageService] 内存缓存命中: \(remoteURL.absoluteString)")
             return cachedImage
         }
+        print("[ImageStorageService] 内存缓存未命中: \(remoteURL.absoluteString)")
 
         // 尝试从磁盘缓存加载
         if let cachedURL = getCachedURL(for: remoteURL),
            let cachedImage = loadImage(from: cachedURL) {
+            print("[ImageStorageService] 磁盘缓存命中: \(cachedURL.path)")
             // 存入内存缓存，计算cost
             let cost: Int
             if let imageData = try? Data(contentsOf: cachedURL) {
@@ -516,10 +518,12 @@ final class ImageStorageService {
             memoryCache.setObject(cachedImage, forKey: cacheKey, cost: cost)
             return cachedImage
         }
+        print("[ImageStorageService] 磁盘缓存未命中，开始下载")
 
         // 下载并缓存
         if let downloadedURL = await downloadAndSaveImage(from: remoteURL),
            let downloadedImage = loadImage(from: downloadedURL) {
+            print("[ImageStorageService] 下载成功: \(downloadedURL.path)")
             // 存入内存缓存，计算cost
             let cost: Int
             if let imageData = try? Data(contentsOf: downloadedURL) {
@@ -531,6 +535,7 @@ final class ImageStorageService {
             return downloadedImage
         }
 
+        print("[ImageStorageService] 图片加载失败: \(remoteURL.absoluteString)")
         return nil
     }
     
@@ -580,72 +585,48 @@ final class ImageStorageService {
     }
 
     /// 获取远程URL对应的缓存URL
+    /// - Parameter remoteURL: 远程URL
+    /// - Returns: 本地缓存URL（如果存在）
+    private func getCachedURL(for remoteURL: URL) -> URL? {
+        // 【新版】使用 SHA256 生成稳定的缓存键，避免 String.hash 在应用重启后改变
+        let hash = remoteURL.absoluteString.stableCacheKey
+        let fileName = "cached_\(hash).jpg"
+        let cachedURL = storageDirectory.appendingPathComponent(fileName)
 
-        /// - Parameter remoteURL: 远程URL
+        print("[ImageStorageService] 查找磁盘缓存: \(fileName)")
 
-        /// - Returns: 本地缓存URL（如果存在）
-
-        private func getCachedURL(for remoteURL: URL) -> URL? {
-
-            // 【新版】使用 SHA256 生成稳定的缓存键，避免 String.hash 在应用重启后改变
-
-            let hash = remoteURL.absoluteString.stableCacheKey
-
-            let fileName = "cached_\(hash).jpg"
-
-            let cachedURL = storageDirectory.appendingPathComponent(fileName)
-
-    
-
-            // 检查新版文件是否存在
-
-            if fileExists(at: cachedURL) {
-
-                return cachedURL
-
-            }
-
-    
-
-            // 【旧版兼容】遍历所有文件，查找匹配的图片文件
-
-            // 缓存机制实施前，文件名是UUID格式，无法通过URL哈希直接查找
-
-            if let files = try? FileManager.default.contentsOfDirectory(atPath: storageDirectory.path) {
-
-                for file in files {
-
-                    // 跳过已查找的新版文件
-
-                    if file.hasPrefix("cached_") { continue }
-
-    
-
-                    let fileURL = storageDirectory.appendingPathComponent(file)
-
-    
-
-                    // 读取文件并验证是否为有效图片
-
-                    if let data = try? Data(contentsOf: fileURL),
-
-                       let _ = UIImage(data: data) {
-
-                        // 可选：将旧文件重命名为新格式，避免下次再次遍历
-
-                        // try? FileManager.default.moveItem(at: fileURL, to: cachedURL)
-
-                        return fileURL
-
-                    }
-
-                }
-
-            }
-
-    
-
-            return nil
-
+        // 检查新版文件是否存在
+        if fileExists(at: cachedURL) {
+            print("[ImageStorageService] 磁盘缓存命中（新版）: \(cachedURL.path)")
+            return cachedURL
         }
+
+        print("[ImageStorageService] 磁盘缓存未命中（新版），开始旧版兼容查找")
+
+        // 【旧版兼容】遍历所有文件，查找匹配的图片文件
+        // 缓存机制实施前，文件名是UUID格式，无法通过URL哈希直接查找
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: storageDirectory.path) {
+            print("[ImageStorageService] 需要遍历 \(files.count) 个文件")
+
+            for (index, file) in files.enumerated() {
+                // 跳过已查找的新版文件
+                if file.hasPrefix("cached_") { continue }
+
+                let fileURL = storageDirectory.appendingPathComponent(file)
+
+                // 读取文件并验证是否为有效图片
+                if let data = try? Data(contentsOf: fileURL),
+                   let image = UIImage(data: data) {
+                    print("[ImageStorageService] 旧版兼容查找成功（遍历了 \(index + 1) 个文件）: \(file)")
+                    // 可选：将旧文件重命名为新格式，避免下次再次遍历
+                    // try? FileManager.default.moveItem(at: fileURL, to: cachedURL)
+                    return fileURL
+                }
+            }
+
+            print("[ImageStorageService] 旧版兼容查找失败（未找到有效图片）")
+        }
+
+        return nil
+    }
 }

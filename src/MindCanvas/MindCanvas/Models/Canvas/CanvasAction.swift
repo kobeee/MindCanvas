@@ -21,15 +21,15 @@ protocol CanvasAction {
 struct AddLayerAction: CanvasAction {
     let layer: LayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "添加图层: \(layer.id)" }
-    
+
     func execute() {
         canvasView?.addLayer(layer)
     }
-    
+
     func undo() {
-        canvasView?.removeLayer(id: layer.id)
+        canvasView?.removeLayer(id: layer.id, recordUndo: false)
     }
 }
 
@@ -37,15 +37,15 @@ struct AddLayerAction: CanvasAction {
 struct RemoveLayerAction: CanvasAction {
     let layer: LayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "移除图层: \(layer.id)" }
-    
+
     func execute() {
         canvasView?.removeLayer(id: layer.id)
     }
-    
+
     func undo() {
-        canvasView?.addLayer(layer)
+        canvasView?.addLayer(layer, recordUndo: false)
     }
 }
 
@@ -251,15 +251,15 @@ struct DuplicateLayerAction: CanvasAction {
     let originalLayerID: UUID
     let duplicatedLayer: LayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "复制图层: \(originalLayerID)" }
-    
+
     func execute() {
-        canvasView?.addLayer(duplicatedLayer)
+        canvasView?.addLayer(duplicatedLayer, recordUndo: false)
     }
-    
+
     func undo() {
-        canvasView?.removeLayer(id: duplicatedLayer.id)
+        canvasView?.removeLayer(id: duplicatedLayer.id, recordUndo: false)
     }
 }
 
@@ -285,15 +285,15 @@ struct AddArrowAction: CanvasAction {
 struct RemoveArrowAction: CanvasAction {
     let arrow: ArrowLayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "移除箭头: \(arrow.id)" }
-    
+
     func execute() {
         canvasView?.removeArrow(id: arrow.id)
     }
-    
+
     func undo() {
-        canvasView?.addArrow(arrow)
+        canvasView?.addArrow(arrow, recordUndo: false)
     }
 }
 
@@ -422,15 +422,15 @@ class AddShapeAction: CanvasAction {
 struct RemoveShapeAction: CanvasAction {
     let shape: ShapeLayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "移除形状: \(shape.id)" }
-    
+
     func execute() {
         canvasView?.removeShape(id: shape.id)
     }
-    
+
     func undo() {
-        canvasView?.addShape(shape)
+        canvasView?.addShape(shape, recordUndo: false)
     }
 }
 
@@ -531,15 +531,15 @@ struct AddRectangleAction: CanvasAction {
 struct RemoveRectangleAction: CanvasAction {
     let rectangle: RectangleLayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "移除矩形: \(rectangle.id)" }
-    
+
     func execute() {
         canvasView?.removeRectangle(id: rectangle.id)
     }
-    
+
     func undo() {
-        canvasView?.addRectangle(rectangle)
+        canvasView?.addRectangle(rectangle, recordUndo: false)
     }
 }
 
@@ -849,15 +849,15 @@ struct AddAnnotationAction: CanvasAction {
 struct RemoveAnnotationAction: CanvasAction {
     let annotation: AnnotationLayerNode
     weak var canvasView: NativeCanvasView?
-    
+
     var description: String { "移除标注: \(annotation.id)" }
-    
+
     func execute() {
         canvasView?.removeAnnotation(id: annotation.id)
     }
-    
+
     func undo() {
-        canvasView?.addAnnotation(annotation)
+        canvasView?.addAnnotation(annotation, recordUndo: false)
     }
 }
 

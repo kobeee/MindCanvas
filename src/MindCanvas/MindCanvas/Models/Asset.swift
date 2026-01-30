@@ -7,7 +7,7 @@ enum AssetType: String, Codable {
 }
 
 @Model
-final class Asset {
+final class Asset: Identifiable {
     @Attribute(.unique) var id: UUID
     var url: String
     var thumbnailUrl: String

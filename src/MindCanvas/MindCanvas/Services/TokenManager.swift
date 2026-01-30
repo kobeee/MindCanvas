@@ -22,9 +22,11 @@ final class TokenManager {
     }
 
     func saveToken(_ token: Token) {
-        keychainManager.save(Keys.accessToken, value: token.accessToken)
-        keychainManager.save(Keys.refreshToken, value: token.refreshToken)
-        keychainManager.save(Keys.tokenExpiresAt, value: ISO8601DateFormatter().string(from: token.expiresAt))
+        let accessSaved = keychainManager.save(Keys.accessToken, value: token.accessToken)
+        let refreshSaved = keychainManager.save(Keys.refreshToken, value: token.refreshToken)
+        let expiresSaved = keychainManager.save(Keys.tokenExpiresAt, value: ISO8601DateFormatter().string(from: token.expiresAt))
+
+        print("[TokenManager] saveToken - 保存结果: access=\(accessSaved), refresh=\(refreshSaved), expires=\(expiresSaved)")
     }
 
     func getAccessToken() throws -> String {
@@ -69,9 +71,42 @@ final class TokenManager {
     }
 
     func clearTokens() {
-        keychainManager.delete(Keys.accessToken)
-        keychainManager.delete(Keys.refreshToken)
-        keychainManager.delete(Keys.tokenExpiresAt)
+        print("[TokenManager] clearTokens - 开始清理token")
+
+        let accessDeleted = keychainManager.delete(Keys.accessToken)
+        let refreshDeleted = keychainManager.delete(Keys.refreshToken)
+        let expiresDeleted = keychainManager.delete(Keys.tokenExpiresAt)
+
+        print("[TokenManager] clearTokens - 删除结果: access=\(accessDeleted), refresh=\(refreshDeleted), expires=\(expiresDeleted)")
+
+        // 验证删除是否成功
+        let accessExists = keychainManager.get(Keys.accessToken) != nil
+        let refreshExists = keychainManager.get(Keys.refreshToken) != nil
+        let expiresExists = keychainManager.get(Keys.tokenExpiresAt) != nil
+
+        if accessExists || refreshExists || expiresExists {
+            print("[TokenManager] WARNING: Token清理不完整！")
+            print("[TokenManager]  access_token仍存在: \(accessExists)")
+            print("[TokenManager]  refresh_token仍存在: \(refreshExists)")
+            print("[TokenManager]  token_expires_at仍存在: \(expiresExists)")
+
+            // 重试一次
+            print("[TokenManager] 重试清理...")
+            _ = keychainManager.delete(Keys.accessToken)
+            _ = keychainManager.delete(Keys.refreshToken)
+            _ = keychainManager.delete(Keys.tokenExpiresAt)
+
+            // 再次验证
+            let accessExists2 = keychainManager.get(Keys.accessToken) != nil
+            let refreshExists2 = keychainManager.get(Keys.refreshToken) != nil
+            if accessExists2 || refreshExists2 {
+                print("[TokenManager] ERROR: Token清理失败，即使重试后仍有残留！")
+            } else {
+                print("[TokenManager] Token清理在重试后成功")
+            }
+        } else {
+            print("[TokenManager] Token清理成功")
+        }
     }
 
     func refreshAccessToken() async throws -> Bool {

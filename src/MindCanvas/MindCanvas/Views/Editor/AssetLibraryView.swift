@@ -108,6 +108,12 @@ struct AssetLibraryView: View {
             .padding(Theme.Spacing.lg)
         }
         .background(Theme.Colors.appBackground)
+        .onAppear {
+            print("[AssetLibraryView] onAppear: assets.count=\(viewModel.assets.count)")
+            for (index, asset) in viewModel.assets.enumerated() {
+                print("[AssetLibraryView] Asset[\(index)]: id=\(asset.id), url=\(asset.url), localPath=\(asset.localPath ?? "nil")")
+            }
+        }
     }
     
     private var publishSheet: some View {
@@ -176,7 +182,7 @@ struct AssetCard: View {
                     .stroke(isSelected ? Theme.Colors.brandBlue : Color.clear, lineWidth: 3)
             )
             .animation(.spring(response: 0.3), value: isSelected)
-            
+
             if isSelected {
                 floatingToolbar
                     .transition(.scale.combined(with: .opacity))
@@ -186,6 +192,9 @@ struct AssetCard: View {
             withAnimation(.spring(response: 0.3)) {
                 showingMenu = newValue
             }
+        }
+        .onAppear {
+            print("[AssetCard] onAppear: asset.id=\(asset.id), asset.url=\(asset.url), asset.type=\(asset.type), asset.isLoading=\(asset.isLoading), asset.localPath=\(asset.localPath ?? "nil")")
         }
     }
     
@@ -198,12 +207,18 @@ struct AssetCard: View {
                     .overlay {
                         ProgressView()
                     }
+                    .onAppear {
+                        print("[AssetCard] imageSection - isLoading状态: asset.id=\(asset.id), url=\(asset.url)")
+                    }
             } else {
                 CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fit)
                     .aspectRatio(4/3, contentMode: .fit)
                     .clipped()
+                    .onAppear {
+                        print("[AssetCard] imageSection - 正常显示: asset.id=\(asset.id), url=\(asset.url), localPath=\(asset.localPath ?? "nil")")
+                    }
             }
-            
+
             if asset.type == .generated {
                 VStack {
                     HStack {

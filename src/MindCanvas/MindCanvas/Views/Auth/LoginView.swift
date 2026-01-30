@@ -69,12 +69,14 @@ struct LoginView: View {
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
-            if isAuthenticated && !authManager.isGuest {
+            if isAuthenticated {
+                // 登录成功或进入游客模式，自动关闭LoginView
                 dismiss()
             }
         }
         .onChange(of: authManager.isGuest) { _, isGuest in
-            if !isGuest && authManager.isAuthenticated {
+            if isGuest {
+                // 游客模式下自动关闭LoginView
                 dismiss()
             }
         }
