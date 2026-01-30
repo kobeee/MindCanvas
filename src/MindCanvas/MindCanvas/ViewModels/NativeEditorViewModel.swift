@@ -178,18 +178,30 @@ final class NativeEditorViewModel {
     
     /// 添加图片到画布
     func addAssetToCanvas(_ asset: Asset) {
+        print("[addAssetToCanvas] 开始添加图片到画布")
+        print("[addAssetToCanvas] - Asset ID: \(asset.id)")
+        print("[addAssetToCanvas] - localPath: \(asset.localPath ?? "nil")")
+        print("[addAssetToCanvas] - url: \(asset.url)")
+
         guard let canvasView = canvasView else {
+            print("[addAssetToCanvas] 错误：canvasView 为 nil")
             return
         }
 
         // 【关键修复】立即捕获当前视口中心点，避免异步加载期间画布移动导致位置计算错误
         let centerInContent = canvasView.getViewportCenterInContent()
 
+        // 【关键修复】优先使用本地路径，确保使用本地缓存，避免重复下载
+        let imageURL = asset.localPath ?? asset.url
+        print("[addAssetToCanvas] - 使用路径: \(imageURL)")
+
         // 异步加载图片获取原始尺寸
-        loadImageSize(from: asset.url) { [weak self] originalSize in
+        loadImageSize(from: imageURL) { [weak self] originalSize in
             guard let self = self else {
+                print("[addAssetToCanvas] 错误：self 为 nil")
                 return
             }
+            print("[addAssetToCanvas] 图片尺寸加载完成: \(originalSize)")
 
             // 限制最大尺寸，避免图片过大
             let maxSize: CGFloat = 600
@@ -214,7 +226,7 @@ final class NativeEditorViewModel {
             // 创建图层节点
             let layer = LayerNode(
                 type: .userImage,
-                url: asset.url,
+                url: imageURL,
                 frame: CGRect(origin: position, size: scaledSize),
                 originalSize: originalSize,
                 rotation: 0,
@@ -225,24 +237,30 @@ final class NativeEditorViewModel {
             )
 
             // 添加到画布（这会触发 onCanvasUpdated -> saveCanvasDocument）
+            print("[addAssetToCanvas] 创建图层: \(layer.id), zIndex: \(globalZIndex)")
             canvasView.addLayer(layer)
             self.canvasDocument.addLayer(layer)
+            print("[addAssetToCanvas] 图片添加完成")
         }
     }
     
     /// 加载图片获取尺寸（支持相对路径、本地和远程URL）
     private func loadImageSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
         let defaultSize = CGSize(width: 300, height: 300)
+        print("[loadImageSize] 开始加载图片尺寸: \(urlString)")
 
         // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)
+        print("[loadImageSize] isLocalPath: \(isLocalPath)")
 
         if isLocalPath {
             // 本地图片：使用 ImageStorageService 加载
             if let image = ImageStorageService.shared.loadImage(from: urlString) {
+                print("[loadImageSize] 本地图片加载成功，尺寸: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
+                print("[loadImageSize] 本地图片加载失败，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
             return
@@ -250,14 +268,23 @@ final class NativeEditorViewModel {
 
         // 远程图片
         guard let url = URL(string: urlString) else {
+            print("[loadImageSize] 无效的 URL，使用默认尺寸")
             DispatchQueue.main.async { completion(defaultSize) }
             return
         }
 
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        print("[loadImageSize] 开始下载远程图片...")
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let error = error {
+                print("[loadImageSize] 下载失败: \(error)")
+                DispatchQueue.main.async { completion(defaultSize) }
+                return
+            }
             if let data = data, let image = UIImage(data: data) {
+                print("[loadImageSize] 远程图片加载成功，尺寸: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
+                print("[loadImageSize] 远程图片数据无效，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
         }.resume()
@@ -612,18 +639,6 @@ final class NativeEditorViewModel {
             }
             loadAssets()
 
-            let maxZ = canvasDocument.maxZIndex
-            // 回填必须使用“画布内容坐标”frame，而不是视口 magicFrame
-            let contentRect = canvasView.contentRect(forViewportRect: stateManager.magicFrame)
-
-            let generatedLayer = LayerNode.aiGenerated(
-                url: localImagePath ?? response.imageUrl,
-                frame: contentRect,
-                zIndex: maxZ + 1
-            )
-
-            canvasView.addLayer(generatedLayer)
-            canvasDocument.addLayer(generatedLayer)
 
             prompt = ""
             stateManager.hideMagicFrame()

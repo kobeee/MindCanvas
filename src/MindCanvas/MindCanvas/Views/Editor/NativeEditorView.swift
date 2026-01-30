@@ -1324,6 +1324,7 @@ private struct NativeAssetCardView: View {
             // 图片预览
             CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fill)
                 .frame(height: 150)
+                .clipped()  // 关键修复：裁剪触控区域
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -1346,9 +1347,11 @@ private struct NativeAssetCardView: View {
                             .font(.system(size: 20))
                             .foregroundStyle(Theme.Colors.brandBlue)
                     }
-                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .frame(width: 60, height: 60)  // 增大触控范围
+                    .contentShape(Rectangle())  // 确保整个区域都可点击
+                    .zIndex(1)  // 确保按钮在图片之上
                     .buttonStyle(.plain)
-                    
+
                     // 下载按钮（对所有类型资源都显示）
                     Button {
                         onDownload()
@@ -1357,9 +1360,11 @@ private struct NativeAssetCardView: View {
                             .font(.system(size: 20))
                             .foregroundStyle(Theme.Colors.primaryText)
                     }
-                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .frame(width: 60, height: 60)  // 增大触控范围
+                    .contentShape(Rectangle())  // 确保整个区域都可点击
+                    .zIndex(1)  // 确保按钮在图片之上
                     .buttonStyle(.plain)
-                    
+
                     // 发布按钮暂时隐藏（功能待上线）
                     // if asset.type == .generated {
                     //     Button {
@@ -1368,7 +1373,7 @@ private struct NativeAssetCardView: View {
                     //         Image(systemName: "globe")
                     //     }
                     // }
-                    
+
                     Button(role: .destructive) {
                         onDelete()
                     } label: {
@@ -1376,7 +1381,9 @@ private struct NativeAssetCardView: View {
                             .font(.system(size: 18))
                             .foregroundStyle(Theme.Colors.destructive)
                     }
-                    .frame(width: 44, height: 44)  // iOS 最小触控目标尺寸
+                    .frame(width: 60, height: 60)  // 增大触控范围
+                    .contentShape(Rectangle())  // 确保整个区域都可点击
+                    .zIndex(1)  // 确保按钮在图片之上
                     .buttonStyle(.plain)
                 }
                 .padding(.vertical, 8)

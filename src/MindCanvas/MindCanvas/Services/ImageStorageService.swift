@@ -8,6 +8,16 @@
 
 import Foundation
 import UIKit
+import CryptoKit
+
+extension String {
+    /// 生成稳定的 SHA256 哈希值（用于缓存键）
+    var stableCacheKey: String {
+        let inputData = Data(self.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        return hashed.compactMap { String(format: "%02x", $0) }.joined().prefix(16).description
+    }
+}
 
 @MainActor
 final class ImageStorageService {
@@ -228,13 +238,10 @@ final class ImageStorageService {
                 return nil
             }
 
-            // 生成文件名（使用原始文件名或UUID）
-            let fileName: String
-            if let suggestedFilename = response.suggestedFilename, !suggestedFilename.isEmpty {
-                fileName = suggestedFilename
-            } else {
-                fileName = "\(UUID().uuidString).jpg"
-            }
+            // 【关键修复】使用 URL 哈希作为文件名，与 getCachedURL 方法保持一致
+            // 使用 SHA256 生成稳定的缓存键，避免 String.hash 在应用重启后改变
+            let hash = remoteURL.absoluteString.stableCacheKey
+            let fileName = "cached_\(hash).jpg"
 
             print("[ImageStorageService] 生成文件名: \(fileName)")
 
@@ -314,6 +321,23 @@ final class ImageStorageService {
         if let cachedImage = memoryCache.object(forKey: cacheKey) {
             print("[ImageStorageService] 从内存缓存加载图片（使用原始字符串）: \(fileURLString)")
             return cachedImage
+        }
+
+        // 【关键修复】检查是否为远程URL（http:// 或 https://），如果是则转换为本地缓存路径
+        if let url = URL(string: fileURLString), (url.scheme == "http" || url.scheme == "https") {
+            print("[ImageStorageService] 检测到远程URL，尝试加载本地缓存: \(fileURLString)")
+            if let cachedURL = getCachedURL(for: url),
+               let cachedImage = loadImage(from: cachedURL) {
+                // 将缓存结果存入内存缓存（使用原始URL作为key）
+                if let imageData = try? Data(contentsOf: cachedURL) {
+                    memoryCache.setObject(cachedImage, forKey: cacheKey, cost: imageData.count)
+                }
+                print("[ImageStorageService] 从本地缓存加载成功: \(fileURLString)")
+                return cachedImage
+            }
+            // 本地缓存不存在，返回nil，让调用者决定是否下载
+            print("[ImageStorageService] 本地缓存不存在: \(fileURLString)")
+            return nil
         }
 
         // 1. 尝试作为相对路径处理
@@ -622,16 +646,16 @@ final class ImageStorageService {
     /// - Parameter remoteURL: 远程URL
     /// - Returns: 本地缓存URL（如果存在）
     private func getCachedURL(for remoteURL: URL) -> URL? {
-        // 使用URL的hash作为文件名
-        let hash = remoteURL.absoluteString.hash
-        let fileName = "cached_\(abs(hash)).jpg"
+        // 使用 SHA256 生成稳定的缓存键，避免 String.hash 在应用重启后改变
+        let hash = remoteURL.absoluteString.stableCacheKey
+        let fileName = "cached_\(hash).jpg"
         let cachedURL = storageDirectory.appendingPathComponent(fileName)
-        
+
         // 检查文件是否存在
         if fileExists(at: cachedURL) {
             return cachedURL
         }
-        
+
         return nil
     }
 }

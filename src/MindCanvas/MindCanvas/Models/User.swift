@@ -8,7 +8,7 @@ struct User: Codable, Identifiable {
     let authProvider: String
     let createdAt: Date
     let updatedAt: Date
-    
+
     var isPro: Bool = false
     var freeQuota: Int = 0
     var apiProvider: String = "google"
@@ -23,10 +23,28 @@ struct User: Codable, Identifiable {
         case authProvider = "auth_provider"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case isPro = "is_pro"
         case freeQuota = "free_quota"
         case apiProvider = "api_provider"
         case totalQuotaUsed = "total_quota_used"
         case subscriptionTier = "subscription_tier"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        username = try container.decode(String.self, forKey: .username)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+        avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
+        authProvider = try container.decodeIfPresent(String.self, forKey: .authProvider) ?? ""
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+
+        isPro = try container.decodeIfPresent(Bool.self, forKey: .isPro) ?? false
+        freeQuota = try container.decodeIfPresent(Int.self, forKey: .freeQuota) ?? 0
+        apiProvider = try container.decodeIfPresent(String.self, forKey: .apiProvider) ?? "google"
+        totalQuotaUsed = try container.decodeIfPresent(Int.self, forKey: .totalQuotaUsed) ?? 0
+        subscriptionTier = try container.decodeIfPresent(String.self, forKey: .subscriptionTier) ?? "free"
     }
 
     init(id: String, username: String, email: String? = nil, avatarUrl: String? = nil, isPro: Bool = false, authProvider: String = "", createdAt: Date = Date(), updatedAt: Date = Date(), freeQuota: Int = 0, apiProvider: String = "google", totalQuotaUsed: Int = 0, subscriptionTier: String = "free") {
