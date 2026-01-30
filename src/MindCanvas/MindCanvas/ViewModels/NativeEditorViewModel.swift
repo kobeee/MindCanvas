@@ -131,20 +131,6 @@ final class NativeEditorViewModel {
 
         do {
             assets = try context.fetch(descriptor)
-
-            #if DEBUG
-            print("[loadAssets] 加载了 \(assets.count) 个资源:")
-            for asset in assets {
-                print("[loadAssets]   - Asset ID: \(asset.id)")
-                print("[loadAssets]     url: \(asset.url)")
-                print("[loadAssets]     localPath: \(asset.localPath ?? "nil")")
-                print("[loadAssets]     isLoading: \(asset.isLoading)")
-            }
-
-            // 诊断：列出本地存储的文件
-            ImageStorageService.shared.listAllFiles()
-            ImageStorageService.shared.listMemoryCacheInfo()
-            #endif
         } catch {
             print("加载资源失败: \(error)")
         }
@@ -178,13 +164,7 @@ final class NativeEditorViewModel {
     
     /// 添加图片到画布
     func addAssetToCanvas(_ asset: Asset) {
-        print("[addAssetToCanvas] 开始添加图片到画布")
-        print("[addAssetToCanvas] - Asset ID: \(asset.id)")
-        print("[addAssetToCanvas] - localPath: \(asset.localPath ?? "nil")")
-        print("[addAssetToCanvas] - url: \(asset.url)")
-
         guard let canvasView = canvasView else {
-            print("[addAssetToCanvas] 错误：canvasView 为 nil")
             return
         }
 
@@ -193,15 +173,12 @@ final class NativeEditorViewModel {
 
         // 【关键修复】优先使用本地路径，确保使用本地缓存，避免重复下载
         let imageURL = asset.localPath ?? asset.url
-        print("[addAssetToCanvas] - 使用路径: \(imageURL)")
 
         // 异步加载图片获取原始尺寸
         loadImageSize(from: imageURL) { [weak self] originalSize in
             guard let self = self else {
-                print("[addAssetToCanvas] 错误：self 为 nil")
                 return
             }
-            print("[addAssetToCanvas] 图片尺寸加载完成: \(originalSize)")
 
             // 限制最大尺寸，避免图片过大
             let maxSize: CGFloat = 600
@@ -237,30 +214,24 @@ final class NativeEditorViewModel {
             )
 
             // 添加到画布（这会触发 onCanvasUpdated -> saveCanvasDocument）
-            print("[addAssetToCanvas] 创建图层: \(layer.id), zIndex: \(globalZIndex)")
             canvasView.addLayer(layer)
             self.canvasDocument.addLayer(layer)
-            print("[addAssetToCanvas] 图片添加完成")
         }
     }
     
     /// 加载图片获取尺寸（支持相对路径、本地和远程URL）
     private func loadImageSize(from urlString: String, completion: @escaping (CGSize) -> Void) {
         let defaultSize = CGSize(width: 300, height: 300)
-        print("[loadImageSize] 开始加载图片尺寸: \(urlString)")
 
         // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)
-        print("[loadImageSize] isLocalPath: \(isLocalPath)")
 
         if isLocalPath {
             // 本地图片：使用 ImageStorageService 加载
             if let image = ImageStorageService.shared.loadImage(from: urlString) {
-                print("[loadImageSize] 本地图片加载成功，尺寸: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
-                print("[loadImageSize] 本地图片加载失败，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
             return
@@ -268,23 +239,18 @@ final class NativeEditorViewModel {
 
         // 远程图片
         guard let url = URL(string: urlString) else {
-            print("[loadImageSize] 无效的 URL，使用默认尺寸")
             DispatchQueue.main.async { completion(defaultSize) }
             return
         }
 
-        print("[loadImageSize] 开始下载远程图片...")
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let error = error {
-                print("[loadImageSize] 下载失败: \(error)")
                 DispatchQueue.main.async { completion(defaultSize) }
                 return
             }
             if let data = data, let image = UIImage(data: data) {
-                print("[loadImageSize] 远程图片加载成功，尺寸: \(image.size)")
                 DispatchQueue.main.async { completion(image.size) }
             } else {
-                print("[loadImageSize] 远程图片数据无效，使用默认尺寸")
                 DispatchQueue.main.async { completion(defaultSize) }
             }
         }.resume()

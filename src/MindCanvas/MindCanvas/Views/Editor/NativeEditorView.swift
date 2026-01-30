@@ -127,9 +127,6 @@ struct NativeEditorView: View {
             // 设置 modelContext
             viewModel.setModelContext(modelContext)
 
-            // 调试：列出所有图片文件
-            ImageStorageService.shared.listAllFiles()
-
             // 修复：绑定状态同步，确保NativeCanvasView的选中状态同步到CanvasStateManager
             // 注意：canvasView 可能在 onAppear 时还没准备好，加载文档移到 onViewCreated 中
             if let canvasView = viewModel.canvasView {
@@ -1285,7 +1282,7 @@ private struct AssetLoadingView: View {
                 }
             }
         }
-        .frame(height: 150)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .onAppear {
             // Shimmer 流动 (缓慢、优雅)
@@ -1322,9 +1319,9 @@ private struct NativeAssetCardView: View {
     var body: some View {
         VStack(spacing: 8) {
             // 图片预览
-            CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fill)
-                .frame(height: 150)
-                .clipped()  // 关键修复：裁剪触控区域
+            CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fit)
+                .aspectRatio(4/3, contentMode: .fit)
+                .clipped()  // 裁剪触控区域
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

@@ -1,5 +1,137 @@
 # 开发记录
 
+## 2026-01-30 - 图片缓存与登录状态修复 + 调试日志清理（部分完成）✅
+
+### 概述
+
+继续修复图片缓存、登录状态相关问题，并清理了大量调试日志。
+
+### 已完成修复
+
+#### 1. 图片缓存旧版文件查找 - 完成 ✅
+
+**问题**：缓存机制实施前生成的图片使用UUID随机文件名，新版使用SHA256哈希文件名，导致新版查找不到旧版缓存文件
+
+**修复方案**：在`getCachedURL`方法中添加旧版文件查找逻辑，遍历存储目录查找旧版文件
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Services/ImageStorageService.swift`
+
+#### 2. 资源库宽图显示问题 - 完成 ✅
+
+**问题**：很宽的图片在资源库显示时，直接占满了资源库的宽度，超出限制的大小
+
+**修复方案**：
+- 将`NativeAssetCardView`的`CachedAsyncImage`的`contentMode`从`.fill`改为`.fit`
+- 添加`.aspectRatio(4/3, contentMode: .fit)`确保图片按照4:3比例显示
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+#### 3. 退出登录状态清理 - 完成 ✅
+
+**问题**：退出登录后，重启应用还是处于登录状态
+
+**修复方案**：
+- `AuthService.logout()`使用`try?`包裹`apiClient.logout()`，确保即使后端API调用失败，`tokenManager.clearTokens()`也能执行
+- `AuthManager.logout()`退出登录后设置`isGuestMode = true`，确保进入游客模式
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Services/AuthService.swift`
+- `src/MindCanvas/MindCanvas/Managers/AuthManager.swift`
+
+#### 4. AssetLoadingView高度问题 - 完成 ✅
+
+**问题**：生成图片时的呼吸动画和加载动画没有占满整个图片框，上下留了两条空隙
+
+**修复方案**：将AssetLoadingView的`.frame(height: 150)`改为`.frame(maxWidth: .infinity, maxHeight: .infinity)`
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+
+#### 5. CachedAsyncImage线程安全 - 完成 ✅
+
+**问题**：远程URL异步加载时，UI状态更新可能不在主线程执行
+
+**修复方案**：使用`await MainActor.run`确保所有UI状态更新都在主线程执行
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Views/Components/CachedAsyncImage.swift`
+
+#### 6. 调试日志清理 - 完成 ✅
+
+**清理内容**：
+- `ImageStorageService.swift` - 清理所有方法中的调试日志
+- `CachedAsyncImage.swift` - 清理loadImage方法中的调试日志
+- `NativeEditorViewModel.swift` - 清理loadAssets、addAssetToCanvas、loadImageSize方法中的调试日志
+- `NativeEditorView.swift` - 移除onAppear中的listAllFiles调用
+- `AuthManager.swift` - 清理checkAuthentication、loadCurrentUser、logout方法中的调试日志
+
+**修改文件**：
+- `src/MindCanvas/MindCanvas/Services/ImageStorageService.swift`
+- `src/MindCanvas/MindCanvas/Views/Components/CachedAsyncImage.swift`
+- `src/MindCanvas/MindCanvas/ViewModels/NativeEditorViewModel.swift`
+- `src/MindCanvas/MindCanvas/Views/Editor/NativeEditorView.swift`
+- `src/MindCanvas/MindCanvas/Managers/AuthManager.swift`
+
+### 未解决的问题
+
+#### 问题1：退出登录状态持久化失败 ❌
+
+**症状**：退出登录后，重启应用仍然处于登录状态
+
+**尝试的修复**：
+- 修改`AuthService.logout()`，使用`try?`确保token清理
+- 修改`AuthManager.logout()`，设置`isGuestMode = true`
+
+**结果**：
+- ❌ 问题仍然存在
+- ❌ 重启应用后仍然处于登录状态
+
+**可能原因**：
+- Keychain中的token没有正确清理
+- App启动时的认证检查逻辑有问题
+- `checkAuthentication()`方法中Token刷新逻辑可能有误
+
+**后续修复**：需要深入检查Keychain清理逻辑和认证检查流程
+
+#### 问题2：特定图片URL加载失败 ❌
+
+**症状**：某个特定图片的URL（https://mindcanvas.escapemobius.cc/images/generated/6589929c-56e9-46e0-9ac3-7439882284c6.png）加载成功（图片尺寸1640x2360），但在资源库中不显示
+
+**日志信息**：
+```
+[CachedAsyncImage] 远程URL加载成功，图片尺寸: (1640.0, 2360.0)
+```
+
+**可能原因**：
+- 图片加载成功但UI状态未正确更新
+- `CachedAsyncImage`的body中`image`状态未正确设置
+- 可能存在SwiftUI视图更新问题
+
+**后续修复**：需要检查UI状态更新逻辑，可能需要添加调试日志验证image状态是否正确设置
+
+#### 问题3：撤销功能不完整 ❌
+
+**症状**：在资源库不停添加图片到画布时，撤销应该按照最后添加画布的顺序逐个从画布移除，但好像只能移除一次
+
+**预期行为**：
+- 添加图片A → 添加图片B → 添加图片C
+- 撤销 → 移除图片C
+- 撤销 → 移除图片B
+- 撤销 → 移除图片A
+
+**实际行为**：只能撤销一次
+
+**可能原因**：
+- 撤销历史记录没有正确维护
+- `recordAction`方法可能没有正确记录每次添加操作
+- 撤销栈可能被清空或覆盖
+
+**后续修复**：需要检查撤销系统的实现，确认每次添加图片到画布时都正确记录到撤销栈中
+
+---
+
 ## 2026-01-30 - 图片缓存与登录状态持久化修复（部分完成）✅
 
 ### 概述

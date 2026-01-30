@@ -54,7 +54,8 @@ final class AuthService {
     }
 
     func logout() async throws {
-        try await apiClient.logout()
+        // 无论后端API调用是否成功，都要清理本地token
+        try? await apiClient.logout()
         tokenManager.clearTokens()
     }
 

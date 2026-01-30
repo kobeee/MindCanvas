@@ -28,64 +28,43 @@ final class AuthManager {
     }
 
     func checkAuthentication() async {
-        print("[AuthManager] 开始检查认证状态...")
-
-        // 检查 Keychain 中是否有 Token
-        let hasAccessToken = keychainManager.get("access_token") != nil
-        let hasRefreshToken = keychainManager.get("refresh_token") != nil
-        let hasExpiresAt = keychainManager.get("token_expires_at") != nil
-
-        print("[AuthManager] Keychain 状态:")
-        print("  - access_token: \(hasAccessToken)")
-        print("  - refresh_token: \(hasRefreshToken)")
-        print("  - token_expires_at: \(hasExpiresAt)")
-
         if authService.isLoggedIn() {
-            print("[AuthManager] Token 有效，用户已登录")
             isAuthenticated = true
             isGuestMode = false
             await loadCurrentUser()
-        } else if hasRefreshToken {
-            print("[AuthManager] Token 已过期，尝试刷新...")
+        } else if keychainManager.get("refresh_token") != nil {
             do {
                 // 使用 ensureValidToken 自动刷新 token
                 _ = try await authService.ensureValidToken()
                 if authService.isLoggedIn() {
-                    print("[AuthManager] Token 刷新成功")
                     isAuthenticated = true
                     isGuestMode = false
                     await loadCurrentUser()
                 } else {
-                    print("[AuthManager] Token 刷新失败，需要重新登录")
                     isAuthenticated = false
                     isGuestMode = true
                     currentUser = nil
                 }
             } catch {
-                print("[AuthManager] Token 刷新异常: \(error)")
                 isAuthenticated = false
                 isGuestMode = true
                 currentUser = nil
             }
         } else {
-            print("[AuthManager] 没有有效的登录凭证，进入游客模式")
             isAuthenticated = false
             isGuestMode = true
             currentUser = nil
         }
 
         isInitialized = true
-        print("[AuthManager] 认证检查完成: isAuthenticated=\(isAuthenticated)")
     }
 
     private func loadCurrentUser() async {
         do {
             currentUser = try await authService.getCurrentUser()
-            print("[AuthManager] 用户信息加载成功: \(currentUser?.email ?? "unknown")")
         } catch {
             // 获取用户信息失败，但不重置登录状态（可能是临时网络问题）
             currentUser = nil
-            print("[AuthManager] 获取用户信息失败: \(error)")
         }
     }
 
@@ -156,9 +135,10 @@ final class AuthManager {
             errorMessage = formatErrorMessage(error)
         }
 
+        // 清理所有登录状态
         currentUser = nil
-        isGuestMode = false
         isAuthenticated = false
+        isGuestMode = true  // 退出登录后进入游客模式
         isLoading = false
     }
     

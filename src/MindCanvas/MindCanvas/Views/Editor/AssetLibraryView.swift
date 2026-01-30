@@ -199,7 +199,7 @@ struct AssetCard: View {
                         ProgressView()
                     }
             } else {
-                CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fill)
+                CachedAsyncImage(urlString: asset.url, localPath: asset.localPath, contentMode: .fit)
                     .aspectRatio(4/3, contentMode: .fit)
                     .clipped()
             }

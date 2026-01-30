@@ -28,7 +28,6 @@ struct CachedAsyncImage: View {
             if let image = image {
                 Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: contentMode)
             } else if hasFailed {
                 ZStack {
                     Color(white: 0.95)
@@ -74,8 +73,6 @@ struct CachedAsyncImage: View {
                 image = loadedImage
                 isLoading = false
                 return
-            } else {
-                print("[CachedAsyncImage] 本地路径加载失败: \(localPath)")
             }
         }
 
@@ -96,11 +93,16 @@ struct CachedAsyncImage: View {
             // 远程 URL：异步加载
             Task {
                 if let loadedImage = await ImageStorageService.shared.getImage(from: url) {
-                    self.image = loadedImage
+                    await MainActor.run {
+                        self.image = loadedImage
+                        self.isLoading = false
+                    }
                 } else {
-                    self.hasFailed = true
+                    await MainActor.run {
+                        self.hasFailed = true
+                        self.isLoading = false
+                    }
                 }
-                self.isLoading = false
             }
         }
     }
