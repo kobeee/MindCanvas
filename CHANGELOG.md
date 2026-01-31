@@ -1,5 +1,117 @@
 # 开发记录
 
+## 2026-01-31 - 文字工具键盘联动优化修复（完成）✅
+
+### 概述
+
+按照 `docs/design/fix/text-tool-keyboard-optimization-v2.md` 方案实施修复，成功解决了文字工具键盘联动的移动距离不精确、遮挡判断不准确、重复移动、恢复位置异常等问题。
+
+### 核心修复
+
+#### 问题描述
+1. **移动距离不精确**：键盘弹出时画布移动距离可能过大或过小
+2. **遮挡判断不准确**：只有点击被键盘覆盖的区域才需要移动，但判断逻辑可能失效
+3. **重复移动问题**：键盘已弹出后再次点击画布，不应再次移动，但可能仍在移动
+4. **恢复位置异常**：键盘收起时画布可能无法正确恢复到原始位置
+
+#### 预期行为
+1. 文字工具选中时，点击画布弹出键盘
+2. **智能判断**：只有当点击位置会被键盘遮挡时，才自动移动画布
+3. **精确移动**：移动距离刚好让文字编辑框在键盘上方可见（考虑工具栏高度）
+4. **避免重复**：键盘已弹出后再次点击，不再移动画布
+5. **正确恢复**：键盘收起时，画布恢复到原始位置
+
+### 解决方案
+
+采用 **统一遮挡区域计算 + 精确状态管理** 的策略：
+
+1. **统一遮挡区域定义**：在所有计算中使用相同的遮挡区域定义
+2. **修复坐标转换**：确保 UITextView 位置计算正确
+3. **优化状态管理**：简化状态流转，避免边缘情况
+
+### 修改文件
+
+**SelectableTextView.swift** - 键盘联动核心逻辑优化
+
+### 技术细节
+
+#### 1. 添加 KeyboardLayoutConstants 常量定义
+
+```swift
+/// 键盘布局常量定义
+private enum KeyboardLayoutConstants {
+    static let toolbarHeight: CGFloat = 60      // 键盘上方工具栏高度
+    static let comfortableMargin: CGFloat = 20  // 舒适边距
+
+    /// 计算有效遮挡区域顶部位置
+    static func effectiveOcclusionTop(keyboardFrame: CGRect, in window: UIWindow) -> CGFloat {
+        let keyboardTopInWindow = window.bounds.height - keyboardFrame.height
+        return keyboardTopInWindow - toolbarHeight - comfortableMargin
+    }
+
+    /// 检查是否是外接键盘（软键盘不弹出）
+    static func isExternalKeyboard(keyboardFrame: CGRect, in window: UIWindow) -> Bool {
+        return keyboardFrame.origin.y >= window.bounds.height
+    }
+}
+```
+
+#### 2. 修复 calculateIfTextIsHidden 方法
+
+- 使用统一的 `KeyboardLayoutConstants.effectiveOcclusionTop` 计算遮挡区域
+- 确保与其他方法使用相同的遮挡区域定义
+
+#### 3. 优化 keyboardWillShow 方法
+
+- 添加外接键盘检测
+- 优化状态检查逻辑（检查 `hasAdjustedForKeyboard` 避免重复调整）
+- 确保 UITextView 位置是最新的
+- 简化逻辑流程
+
+#### 4. 简化 keyboardWillHide 方法
+
+- 提取 `resetAllKeyboardState` 方法
+- 确保正确恢复原始位置
+- 简化状态重置逻辑
+
+#### 5. 修复 updateTextViewPositionAfterScroll 方法
+
+- 保持 UITextView 的尺寸不变，只更新位置
+- 使用动画平滑更新位置
+
+### 代码审查结果
+
+✅ **语法完整性检查**：全部通过
+✅ **编译错误预防**：全部通过
+✅ **代码质量评估**：全部通过
+✅ **逻辑正确性验证**：全部通过
+✅ **综合评分**：5/5
+
+### 验证检查清单
+
+- [x] 添加 KeyboardLayoutConstants 常量定义
+- [x] 修复 calculateIfTextIsHidden 方法
+- [x] 优化 keyboardWillShow 方法
+- [x] 简化 keyboardWillHide 方法
+- [x] 修复 updateTextViewPositionAfterScroll 方法
+- [x] 添加外接键盘检测逻辑
+- [x] 代码审查通过
+- [x] 无语法错误
+- [x] 无编译错误
+
+### 经验教训
+
+1. **统一常量定义**：使用常量定义统一管理遮挡区域计算，避免硬编码和计算不一致
+2. **状态管理简化**：明确状态流转，减少边缘情况
+3. **外接键盘检测**：添加外接键盘检测，避免不必要的调整
+4. **动画平滑处理**：使用动画平滑更新位置，提升用户体验
+
+### 相关文档
+
+- [文字工具键盘联动优化修复方案 v2.0](./docs/design/fix/text-tool-keyboard-optimization-v2.md)
+
+---
+
 ## 2026-01-31 - 设置页 LoginView Sheet 自动关闭问题修复（完成）✅
 
 ### 概述
