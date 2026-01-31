@@ -28,54 +28,40 @@ final class AuthManager {
     }
 
     func checkAuthentication() async {
-        print("[AuthManager] checkAuthentication - 开始认证检查")
-
         let isLoggedIn = authService.isLoggedIn()
-        print("[AuthManager] authService.isLoggedIn(): \(isLoggedIn)")
 
         if isLoggedIn {
             isAuthenticated = true
             isGuestMode = false
             await loadCurrentUser()
-            print("[AuthManager] 认证有效，用户已加载")
         } else {
             let hasRefreshToken = keychainManager.get("refresh_token") != nil
-            print("[AuthManager] Token已过期，有refresh_token: \(hasRefreshToken)")
 
             if hasRefreshToken {
                 do {
-                    // 使用 ensureValidToken 自动刷新 token
                     _ = try await authService.ensureValidToken()
                     if authService.isLoggedIn() {
                         isAuthenticated = true
                         isGuestMode = false
                         await loadCurrentUser()
-                        print("[AuthManager] Token刷新成功，用户已加载")
                     } else {
-                        // 刷新失败，回到登录页面
                         isAuthenticated = false
                         isGuestMode = false
                         currentUser = nil
-                        print("[AuthManager] Token刷新失败，回到登录页面")
                     }
                 } catch {
-                    // 刷新异常，回到登录页面
                     isAuthenticated = false
                     isGuestMode = false
                     currentUser = nil
-                    print("[AuthManager] Token刷新错误: \(error)，回到登录页面")
                 }
             } else {
-                // 无token，显示登录页面
                 isAuthenticated = false
                 isGuestMode = false
                 currentUser = nil
-                print("[AuthManager] 无refresh_token，显示登录页面")
             }
         }
 
         isInitialized = true
-        print("[AuthManager] checkAuthentication - 完成: isAuthenticated=\(isAuthenticated), isGuestMode=\(isGuestMode)")
     }
 
     private func loadCurrentUser() async {
@@ -145,59 +131,32 @@ final class AuthManager {
     }
 
     func logout() async {
-        print("[AuthManager] logout - 开始退出登录")
         isLoading = true
         errorMessage = nil
 
         do {
             try await authService.logout()
-            print("[AuthManager] logout - 后端logout成功")
         } catch {
             errorMessage = formatErrorMessage(error)
-            print("[AuthManager] logout - 后端logout失败: \(error)")
         }
 
-        // 清理所有登录状态
         currentUser = nil
-        isAuthenticated = false  // 退出登录后回到登录页面
-        isGuestMode = false     // 重置游客模式
+        isAuthenticated = false
+        isGuestMode = false
         isLoading = false
-
-        // 最终验证：确认没有残留token
-        let accessToken = keychainManager.get("access_token")
-        let refreshToken = keychainManager.get("refresh_token")
-        print("[AuthManager] logout - 最终检查: accessToken=\(accessToken != nil), refreshToken=\(refreshToken != nil)")
-        print("[AuthManager] logout - 状态设置: isAuthenticated=\(isAuthenticated), isGuestMode=\(isGuestMode)")
-
-        if accessToken != nil || refreshToken != nil {
-            print("[AuthManager] CRITICAL WARNING: 退出登录后仍有残留token！重启应用后会保持登录状态！")
-        }
     }
-    
+
     func switchToGuestMode() async {
-        print("[AuthManager] switchToGuestMode - 开始切换到游客模式")
         isLoading = true
         errorMessage = nil
 
-        // 使用TokenManager清理所有token（而不是keychainManager.deleteToken()）
         tokenManager.clearTokens()
         currentUser = nil
 
-        // 游客模式也是一种"已认证"状态，显示MainView
         isAuthenticated = true
         isGuestMode = true
 
         isLoading = false
-
-        // 最终验证：确认没有残留token
-        let accessToken = keychainManager.get("access_token")
-        let refreshToken = keychainManager.get("refresh_token")
-        print("[AuthManager] switchToGuestMode - 最终检查: accessToken=\(accessToken != nil), refreshToken=\(refreshToken != nil)")
-        print("[AuthManager] switchToGuestMode - 状态设置: isAuthenticated=\(isAuthenticated), isGuestMode=\(isGuestMode)")
-
-        if accessToken != nil || refreshToken != nil {
-            print("[AuthManager] CRITICAL WARNING: 游客模式切换后仍有残留token！")
-        }
     }
 
     func getCurrentUser() -> User? {

@@ -121,11 +121,9 @@ extension KeychainManager {
 extension KeychainManager {
     func save(_ key: String, value: String) -> Bool {
         guard let data = value.data(using: .utf8) else {
-            print("[KeychainManager] 保存失败：无法将字符串转换为 Data")
             return false
         }
 
-        // 先删除旧数据
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -133,24 +131,16 @@ extension KeychainManager {
         ]
         SecItemDelete(deleteQuery as CFDictionary)
 
-        // 添加新数据
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock  // 关键配置
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
-
-        if status != errSecSuccess {
-            print("[KeychainManager] 保存失败: \(key), 错误码: \(status)")
-            return false
-        }
-
-        print("[KeychainManager] 保存成功: \(key)")
-        return true
+        return status == errSecSuccess
     }
 
     func get(_ key: String) -> String? {
@@ -163,21 +153,11 @@ extension KeychainManager {
         ]
 
         var dataTypeRef: AnyObject?
-        var status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
-
-        // 重试机制：某些情况下首次查询可能失败
-        if status == errSecInteractionNotAllowed {
-            print("[KeychainManager] 首次查询被拒绝，等待后重试...")
-            Thread.sleep(forTimeInterval: 0.1)
-            status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
-        }
+        let status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
 
         guard status == errSecSuccess,
               let data = dataTypeRef as? Data,
               let value = String(data: data, encoding: .utf8) else {
-            if status != errSecItemNotFound {
-                print("[KeychainManager] 读取失败: \(key), 错误码: \(status)")
-            }
             return nil
         }
 
@@ -192,14 +172,6 @@ extension KeychainManager {
         ]
 
         let status = SecItemDelete(query as CFDictionary)
-        let success = status == errSecSuccess || status == errSecItemNotFound
-
-        if success {
-            print("[KeychainManager] delete - 成功: \(key) (status: \(status))")
-        } else {
-            print("[KeychainManager] delete - 失败: \(key) (status: \(status))")
-        }
-
-        return success
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

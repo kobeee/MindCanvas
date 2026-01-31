@@ -56,11 +56,9 @@ struct CachedAsyncImage: View {
             }
         }
         .onAppear {
-            print("[CachedAsyncImage] onAppear: \(urlString), current state: image=\(image != nil), hasFailed=\(hasFailed), isLoading=\(isLoading)")
             loadImage()
         }
         .onChange(of: urlString) { _, _ in
-            print("[CachedAsyncImage] urlString changed to: \(urlString)")
             image = nil
             isLoading = true
             hasFailed = false
@@ -69,50 +67,34 @@ struct CachedAsyncImage: View {
     }
 
     private func loadImage() {
-        print("[CachedAsyncImage] loadImage开始: \(urlString), localPath: \(localPath ?? "nil")")
-
-        // 【优先】使用本地路径（如果存在）
         if let localPath = localPath {
-            print("[CachedAsyncImage] 尝试使用本地路径: \(localPath)")
             if let loadedImage = ImageStorageService.shared.loadImage(from: localPath) {
-                print("[CachedAsyncImage] 本地路径加载成功，图片尺寸: \(loadedImage.size)")
                 image = loadedImage
                 isLoading = false
                 return
-            } else {
-                print("[CachedAsyncImage] 本地路径加载失败")
             }
         }
 
-        // 判断是否为本地路径（相对路径或 file:// URL）
         let isLocalPath = ImageStorageService.isRelativePath(urlString) ||
                           (URL(string: urlString)?.isFileURL == true)
 
         if isLocalPath {
-            print("[CachedAsyncImage] 识别为本地路径，使用ImageStorageService加载")
-            // 本地图片：使用 ImageStorageService 加载
             if let loadedImage = ImageStorageService.shared.loadImage(from: urlString) {
-                print("[CachedAsyncImage] 本地图片加载成功，图片尺寸: \(loadedImage.size)")
                 image = loadedImage
                 isLoading = false
             } else {
-                print("[CachedAsyncImage] 本地图片加载失败")
                 hasFailed = true
                 isLoading = false
             }
         } else if let url = URL(string: urlString) {
-            print("[CachedAsyncImage] 识别为远程URL，开始异步加载")
-            // 远程 URL：异步加载
             Task {
                 if let loadedImage = await ImageStorageService.shared.getImage(from: url) {
                     await MainActor.run {
-                        print("[CachedAsyncImage] 远程URL加载成功，图片尺寸: \(loadedImage.size)")
                         self.image = loadedImage
                         self.isLoading = false
                     }
                 } else {
                     await MainActor.run {
-                        print("[CachedAsyncImage] 远程URL加载失败")
                         self.hasFailed = true
                         self.isLoading = false
                     }

@@ -3,11 +3,20 @@ import AuthenticationServices
 
 struct LoginView: View {
     @Environment(AuthManager.self) private var authManager
-    @Environment(\.dismiss) private var dismiss
+    @Binding var isPresented: Bool
     @State private var email = ""
     @State private var verificationCode = ""
     @State private var isCodeSent = false
     @State private var countdown = 0
+
+    // 便利初始化器，用于 RootView 中直接显示的场景
+    init() {
+        _isPresented = .constant(true)
+    }
+
+    init(isPresented: Binding<Bool>) {
+        _isPresented = isPresented
+    }
 
     // Toast 状态
     @State private var toastMessage = ""
@@ -66,18 +75,6 @@ struct LoginView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showToast)
                 }
-            }
-        }
-        .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
-            if isAuthenticated {
-                // 登录成功或进入游客模式，自动关闭LoginView
-                dismiss()
-            }
-        }
-        .onChange(of: authManager.isGuest) { _, isGuest in
-            if isGuest {
-                // 游客模式下自动关闭LoginView
-                dismiss()
             }
         }
     }

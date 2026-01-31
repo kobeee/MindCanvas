@@ -41,8 +41,13 @@ struct SettingsView: View {
             } message: {
                 Text("确定要退出登录吗？退出后将切换到游客模式。")
             }
+            .onChange(of: authManager.isGuest) { oldValue, newValue in
+                if showingLoginView && oldValue && !newValue {
+                    showingLoginView = false
+                }
+            }
             .sheet(isPresented: $showingLoginView) {
-                LoginView()
+                LoginView(isPresented: $showingLoginView)
             }
         }
     }

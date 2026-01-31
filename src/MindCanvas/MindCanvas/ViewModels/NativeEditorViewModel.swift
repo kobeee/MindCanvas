@@ -131,52 +131,6 @@ final class NativeEditorViewModel {
 
         do {
             assets = try context.fetch(descriptor)
-            print("[loadAssets] ========== 开始加载资源 ==========")
-            print("[loadAssets] 加载了 \(assets.count) 个资源")
-            
-            // 检查是否有重复的ID
-            let ids = assets.map { $0.id }
-            let uniqueIds = Set(ids)
-            if ids.count != uniqueIds.count {
-                print("[loadAssets] WARNING: 发现重复的Asset ID！")
-                print("[loadAssets] 总数: \(ids.count), 唯一数: \(uniqueIds.count)")
-                
-                // 找出重复的ID
-                let idCounts = Dictionary(grouping: ids, by: { $0 }).mapValues { $0.count }
-                let duplicateIds = idCounts.filter { $0.value > 1 }
-                for (id, count) in duplicateIds {
-                    print("[loadAssets] 重复ID: \(id), 出现次数: \(count)")
-                }
-            }
-            
-            // 检查是否有重复的URL
-            let urls = assets.map { $0.url }
-            let uniqueUrls = Set(urls)
-            if urls.count != uniqueUrls.count {
-                print("[loadAssets] WARNING: 发现重复的URL！")
-                print("[loadAssets] 总数: \(urls.count), 唯一数: \(uniqueUrls.count)")
-                
-                // 找出重复的URL
-                let urlCounts = Dictionary(grouping: urls, by: { $0 }).mapValues { $0.count }
-                let duplicateUrls = urlCounts.filter { $0.value > 1 }
-                for (url, count) in duplicateUrls {
-                    print("[loadAssets] 重复URL: \(url), 出现次数: \(count)")
-                    // 找出哪些Asset使用了这个URL
-                    for (index, asset) in assets.enumerated() {
-                        if asset.url == url {
-                            print("[loadAssets]   Asset[\(index)]: id=\(asset.id)")
-                        }
-                    }
-                }
-            }
-            
-            for (index, asset) in assets.enumerated() {
-                print("[loadAssets] Asset[\(index)]: id=\(asset.id), url=\(asset.url), type=\(asset.type), isLoading=\(asset.isLoading), localPath=\(asset.localPath ?? "nil")")
-            }
-            print("[loadAssets] ========== 加载资源完成 ==========")
-            
-            // 列出所有图片文件，找出"落单"的图片
-            listImageFiles()
         } catch {
             print("加载资源失败: \(error)")
         }
@@ -184,71 +138,6 @@ final class NativeEditorViewModel {
     
     /// 列出Documents/images目录下的所有图片文件，找出没有Asset关联的"落单"图片
     private func listImageFiles() {
-        let fileManager = FileManager.default
-        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            print("[listImageFiles] 无法获取Documents目录")
-            return
-        }
-        
-        let imagesDirectory = documentsURL.appendingPathComponent("images")
-        print("[listImageFiles] ========== 开始列出图片文件 ==========")
-        print("[listImageFiles] 目录: \(imagesDirectory.path)")
-        
-        guard let files = try? fileManager.contentsOfDirectory(atPath: imagesDirectory.path) else {
-            print("[listImageFiles] 无法读取images目录")
-            return
-        }
-        
-        print("[listImageFiles] 图片文件总数: \(files.count)")
-        
-        // 收集所有Asset关联的文件名
-        var assetFiles = Set<String>()
-        for asset in assets {
-            if let localPath = asset.localPath {
-                // localPath格式: "images/xxx.jpg"
-                if let fileName = localPath.components(separatedBy: "/").last {
-                    assetFiles.insert(fileName)
-                }
-            }
-            
-            // 也检查URL是否指向本地文件
-            if asset.url.hasPrefix("images/") {
-                if let fileName = asset.url.components(separatedBy: "/").last {
-                    assetFiles.insert(fileName)
-                }
-            }
-        }
-        
-        print("[listImageFiles] Asset关联的文件数: \(assetFiles.count)")
-        
-        var orphanFiles: [String] = []
-        
-        for (index, file) in files.enumerated() {
-            let fileURL = imagesDirectory.appendingPathComponent(file)
-            let fileSize = (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
-            
-            let isOrphan = !assetFiles.contains(file)
-            
-            if isOrphan {
-                orphanFiles.append(file)
-                print("[listImageFiles] 落单文件[\(index)]: \(file), 大小: \(fileSize) bytes ⚠️")
-            } else {
-                print("[listImageFiles] 正常文件[\(index)]: \(file), 大小: \(fileSize) bytes")
-            }
-            
-            // 尝试读取图片尺寸
-            if let data = try? Data(contentsOf: fileURL),
-               let image = UIImage(data: data) {
-                print("[listImageFiles]   图片尺寸: \(image.size.width) x \(image.size.height)")
-            }
-        }
-        
-        print("[listImageFiles] ========== 落单文件总结 ==========")
-        print("[listImageFiles] 落单文件数: \(orphanFiles.count)")
-        for file in orphanFiles {
-            print("[listImageFiles] - \(file)")
-        }
-        print("[listImageFiles] ========== 图片文件列表完成 ==========")
     }
     
     /// 导入图片
